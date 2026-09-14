@@ -403,9 +403,9 @@ The large deltas are far outside anything noise could explain, but the methodolo
 
 **[USER-TOURNE](https://github.com/USER-TOURNE)** — Author and maintainer: performance work, new features, benchmarking and documentation.
 
-**[Salyts](https://github.com/Salyts)** — Original author of Desktop Audio Visualizer. This project exists because the foundation was good enough to be worth optimizing. Author of his own mod and repo; a contributor toward this one.
+**[Salyts](https://github.com/Salyts)** — Original author of Desktop Audio Visualizer. This project exists because the foundation was good enough to be worth optimizing. Author of his own mod and repo; and a base for this one.
 
-**[GR0UD](https://github.com/GR0UD)** — Audio visualizer code the original was adapted from. Author of his own work; a contributor toward this one.
+**[GR0UD](https://github.com/GR0UD)** — Audio visualizer code the original was adapted from. Author of his own work; and the base for Salyts.
 
 ### A coincidence worth acknowledging
 
