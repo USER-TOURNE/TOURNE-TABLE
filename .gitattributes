@@ -1,2 +1,35 @@
-# Auto detect text files and perform LF normalization
+# Normalize line endings. Without this, a repo authored on Windows hands
+# LF-native clones a diff on every line of every text file.
+#   in the repo : always LF
+#   on checkout : native for the platform
 * text=auto
+
+# ---- Text, with the right diff driver -------------------------------------
+# diff=cpp teaches git to label hunks with the enclosing function, so a
+# CHANGELOG-sized .wh.cpp produces readable diffs instead of "@@ -4210,7"
+*.cpp    text diff=cpp
+*.h      text diff=cpp
+*.hpp    text diff=cpp
+*.md     text diff=markdown
+*.txt    text
+*.yml    text
+*.yaml   text
+*.json   text
+LICENSE  text
+
+# ---- Binary: never normalize, never attempt a textual diff ----------------
+# Line-ending translation on any of these silently corrupts the file.
+*.gif    binary
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.webp   binary
+*.bmp    binary
+*.ico    binary
+*.mp4    binary
+*.mov    binary
+*.webm   binary
+*.zip    binary
+*.7z     binary
+*.dll    binary
+*.exe    binary

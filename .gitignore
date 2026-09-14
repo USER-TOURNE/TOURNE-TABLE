@@ -1,0 +1,57 @@
+# ---------------------------------------------------------------------------
+# Local working copies — kept on disk, kept out of the repo
+# ---------------------------------------------------------------------------
+# Both folders hold SUPERSEDED material, not pending work: v1.0.0-era source
+# (2026-09-12) against v1.4.4 in the repo root, and 26 KB README drafts against
+# the current 44 KB one. Nothing in either is newer than what is tracked.
+# Delete these two lines if you decide you want them versioned after all.
+/CHANGED READ ME & UPDATE PUSH/
+/READ ME/
+
+# ---------------------------------------------------------------------------
+# Windows shell litter
+# ---------------------------------------------------------------------------
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# ---------------------------------------------------------------------------
+# Editors and IDEs
+# ---------------------------------------------------------------------------
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.sln.docstates
+*~
+*.swp
+
+# ---------------------------------------------------------------------------
+# Build output
+# ---------------------------------------------------------------------------
+# Windhawk compiles the mod itself; nothing here should ever be committed.
+/build/
+/out/
+/bin/
+/obj/
+*.obj
+*.o
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.dll
+*.exe
+
+# ---------------------------------------------------------------------------
+# Scratch
+# ---------------------------------------------------------------------------
+*.log
+*.tmp
+*.bak
+*.orig
+*.rej
