@@ -13,7 +13,7 @@ Play music. Bars dance on your wallpaper. That's the whole idea.
 
 It listens to **whatever your PC is already playing** - Spotify, YouTube, a game, a call - and draws it behind your desktop icons. No virtual audio cable, no drivers, nothing to configure. It just picks up your system audio.
 
-This project rebuilt how it draws itself (frame pacing, blur caching, and render-surface sizing) for **roughly half the CPU and 18 °C cooler**, plus a pile of new shapes, colors and controls.
+It is built to be cheap to run. The render thread wakes only at the frame rate you ask for, the wallpaper blur is computed once instead of every frame, and the drawing surface is sized to the widget rather than the whole desktop, so at a 144 FPS target it costs about **a third of one CPU core** and **one degree** of CPU package temperature while it plays, and nothing at all while it doesn't.
 
 ## ABOUT THIS PROJECT
 
@@ -38,15 +38,20 @@ Practically, that means:
 
 ## ◈ PERFORMANCE AT A GLANCE
 
-| Metric | Baseline | Tourne'Table | Change |
-|:--|--:|--:|--:|
-| **Total CPU usage** | 13.77 % | **5.95 %** | **−56.8 %** |
-| **Peak single-thread** | 78.06 % | **34.86 %** | **−55.3 %** |
-| **CPU package power** | 53.09 W | **32.31 W** | **−39.1 %** |
-| **CPU package temp** | 57.5 °C | **39.7 °C** | **−17.8 °C** |
-| **Peak power draw** | 93.24 W | **40.44 W** | **−53 W** |
+Measured on an **Intel Core Ultra 265KF** (8 P-cores plus 12 E-cores), running a 120-bar oscilloscope at a 144 FPS target with background blur on, and with media controls, the peak-frequency readout, peak hold and beat flash all enabled.
 
-**Measured on an Intel Core Ultra 265KF:** CPU package temperature averaged **39.7 °C** *(peak 50 °C)*, with core temperatures averaging **35.4 °C**. The WPA trace puts the mod's own cost at **2.36 % of a single core**. When audio stops, rendering stops - not "slows down," *stops*.
+Every figure is the **change against an idle baseline**, captured back to back in the same session with the same music playing in both, so what you are reading is the cost of the mod rather than whatever else the machine happened to be doing.
+
+| Metric | Disabled | Running | Cost |
+|:--|--:|--:|--:|
+| **Total CPU usage** | 2.20 % | 3.80 % | **+1.6 pp** *(about 0.3 of one core)* |
+| **Peak single-thread** | 14.85 % | 24.90 % | **+10.1 pp** |
+| **CPU package power** | 19.19 W | 26.36 W | **+7.2 W** |
+| **CPU package temp** | 35.0 °C | 36.0 °C | **+1.0 °C** |
+
+Medians across 543 samples running and 384 disabled, at 1.25 s intervals. Medians rather than averages because both captures contained brief unrelated background spikes, and a median is not moved by them. Splitting the run by GPU state brackets the cost at +1.3 to +1.7 pp and +6.6 to +7.6 W, so the figures above sit mid-range rather than at the flattering end.
+
+When audio stops, rendering stops - not "slows down," *stops*.
 
 ![Tourne'Table Audio Visualizer](https://raw.githubusercontent.com/USER-TOURNE/TOURNE-TABLE/main/GIF/10.gif)
 
@@ -389,41 +394,41 @@ The same list goes to the Windhawk mod log either way, so turning this off makes
 
 *Zoomed view at a different scale.*
 
-# ▲ WHAT ACTUALLY GOT FIXED
+# ▲ WHERE THE EFFICIENCY COMES FROM
 
 In rough order of measured impact.
 
 ### 1. Precision frame pacing - the biggest single win
 
-The baseline paced itself with `DwmFlush()`, which blocks until the monitor's next refresh. That meant the render thread woke **on every vertical blank, forever** - 60, 144, 240+ times a second - regardless of target FPS, whether anything needed redrawing, or whether the visualizer was even visible.
+The obvious way to pace a desktop widget is `DwmFlush()`, which blocks until the monitor's next refresh. That wakes the render thread **on every vertical blank, forever** - 60, 144, 240+ times a second - regardless of target FPS, whether anything needs redrawing, or whether the visualizer is even visible.
 
 This barely registers as CPU% in Task Manager, because the thread is blocked, not spinning. But every wake-up drags a core out of deep idle. Do that continuously and the core never settles into its efficient sleep states - which reads as a small, permanent bump in package power and temperature. The classic "low usage, still runs warm" signature.
 
 > **Note:** this becomes exponentially more noticeable on AMD architecture.
 >
-> **Note:** also exponentially more noticeable if you have **C-States disabled** in your BIOS or elsewhere. Shoutout to Process Lasso, Core Director, Park Control and HWiNFO64 for helping me debug why the hell all my E-cores were sitting at 65-70 °C when they were supposed to be idle during my initial baseline testing.
+> **Note:** also exponentially more noticeable if you have **C-States disabled** in your BIOS or elsewhere. Shoutout to Process Lasso, Core Director, Park Control and HWiNFO64 for helping me work out why all my E-cores were sitting at 65-70 °C when they were supposed to be idle.
 
-**Fixed with** a high-resolution waitable timer firing only at the configured rate. Plain `Sleep()` wasn't good enough - it's quantized to ~15.6 ms, which would turn a 60 FPS target into stuttery 30-40 FPS.
+**Instead:** a high-resolution waitable timer firing only at the configured rate. Plain `Sleep()` isn't good enough - it's quantized to ~15.6 ms, which would turn a 60 FPS target into stuttery 30-40 FPS.
 
 ### 2. Pre-rendered background blur
 
-A Gaussian blur is a full-image convolution - the most expensive thing Direct2D does in this scene. The baseline recomputed it **from scratch every frame**, despite its input (your wallpaper) never changing.
+A Gaussian blur is a full-image convolution - the most expensive thing Direct2D does in this scene. Recomputing it every frame is pure waste, because its input (your wallpaper) never changes.
 
-**Fixed by** computing it exactly once into a cached bitmap, then just copying that each frame. The cache covers only the widget's bounding box, replacing roughly **8 MB of video memory with tens of KB**. It re-bakes automatically if the widget moves or resizes.
+**Instead:** it is computed exactly once into a cached bitmap, and each frame just copies that. The cache covers only the widget's bounding box, which is **tens of KB of video memory rather than several MB**. It re-bakes automatically if the widget moves or resizes.
 
 ### 3. Widget-sized render surface
 
-The render surface spanned the **entire desktop** even though the visualizer occupies a thin strip. Every frame cleared and presented millions of untouched pixels, with two full-desktop buffers parked in VRAM.
+The visualizer occupies a thin strip, so a desktop-spanning render surface would clear and present millions of untouched pixels every frame, and park two full-desktop buffers in VRAM.
 
-**Fixed by** sizing the surface to the widget's bounding box and offsetting the composition layer to position it. Cuts per-frame pixel work and VRAM by roughly an order of magnitude.
+**Instead:** the surface is sized to the widget's bounding box, and the composition layer is offset to position it. That is roughly an order of magnitude less per-frame pixel work and VRAM.
 
 ### 4. Cached geometry
 
-The background panel and border were rebuilt from scratch every frame - allocating a path geometry, constructing four lines and four arcs by hand, then discarding it. Now rebuilt only when size, padding, radii or border width actually change. In normal use, almost never.
+Building the background panel and border means allocating a path geometry and constructing four lines and four arcs by hand. It is rebuilt only when size, padding, radii or border width actually change - in normal use, almost never - rather than every frame.
 
 ### 5. Cached monitor lookup
 
-Every frame called `EnumDisplayMonitors()` - a real round-trip through the display driver stack - to work out which monitor to draw on. Now resolved once and cached, refreshed on display change.
+Working out which monitor to draw on means `EnumDisplayMonitors()`, a real round-trip through the display driver stack. It is resolved once and cached, refreshed on display change, rather than called per frame.
 
 ### 6. Reduced frame latency
 
@@ -445,101 +450,91 @@ Not part of the measured list above since it's a correctness fix, not a perf win
 
 # ▦ THE FULL BENCHMARK DATA
 
-Two independent measurement methods, both on an **Intel Core Ultra 265KF**.
+All figures measured on an **Intel Core Ultra 265KF** (8 P-cores plus 12 E-cores) running Windows 11 on a 144 Hz display.
 
-## Method 1 - HWiNFO64 sensors
+## Method
 
-Identical 3-minute runs: 1 min silent → 1 min 30 s audio → 30 s silent.
+Two HWiNFO64 captures taken back to back in a single session, 45 seconds apart, at 1.25 s sampling:
 
-### Stability - the less obvious win
-
-Averages only tell half the story. The **spikiness** dropped even harder:
-
-| Metric | Before | After |
+| | Samples | Span |
 |:--|--:|--:|
-| CPU - median | 11.40 % | **5.50 %** |
-| CPU - 95th percentile | 23.97 % | **8.10 %** |
-| CPU - maximum | 34.40 % | **12.20 %** |
-| CPU - standard deviation | 5.36 | **1.45** |
-| Power - 95th percentile | 71.32 W | **36.78 W** |
-| Power - maximum | 93.24 W | **40.44 W** |
-| Power - standard deviation | 9.85 | **2.57** |
+| Mod running | 543 | 678 s |
+| Mod disabled | 384 retained of 442 | 480 s |
 
-Standard deviation fell ~73 % on CPU and ~74 % on power. The baseline wasn't just heavier on average - it worked in **bursts**, and bursts are what drive thermal spikes and fan ramping.
+**Music played continuously through both.** This is the part that makes the comparison mean anything. An idle baseline with the audio stopped would fold the music player's own cost into the mod's, and earlier attempts at this did exactly that: they left a 2 GB gap in resident memory between the two captures, which is a clear sign the two environments were not the same machine doing the same thing minus one mod.
 
-That matches the root cause the profiler found: a render thread waking on every vsync, and a full-image blur re-evaluated every frame. Both bursty, repetitive workloads - exactly the profile that produces this variance.
+Settings under test: oscilloscope, horizontal, 120 bars at 2 px wide with a 1 px gap, middle anchor, background blur 33, 1 px border, media controls on, peak-frequency readout on, peak hold on, beat flash on, Now Playing off, 144 FPS target.
 
-### GPU - unchanged, as expected
+Validation before any comparison was drawn:
 
-| Metric | Before | After |
+- Both files carry a byte-identical 480-column header, so no sensor was added, removed or reordered between them.
+- Resident memory came out at 9,339 MB disabled against 9,077 MB running, a 262 MB difference in the *opposite* direction to the mod. The environments match.
+- The disabled capture's final 60 s shows a rising tail from an unrelated process and is excluded. Everything before it is flat to within 0.3 pp.
+
+## Results
+
+| Metric | Disabled | Running | Cost |
+|:--|--:|--:|--:|
+| Total CPU usage | 2.20 % | 3.80 % | **+1.6 pp** |
+| Total CPU utility | 2.00 % | 4.20 % | +2.2 pp |
+| Peak single-thread | 14.85 % | 24.90 % | +10.1 pp |
+| CPU package power | 19.19 W | 26.36 W | **+7.2 W** |
+| IA cores power | 12.73 W | 19.40 W | +6.7 W |
+| CPU package temperature | 35.0 °C | 36.0 °C | **+1.0 °C** |
+| GPU core load | 0.00 % | 4.00 % | +4.0 pp |
+| GPU D3D usage | 0.60 % | 13.50 % | +12.9 pp |
+| GPU power | 4.78 W | 9.14 W | +4.4 W |
+
+On a 20-core part, +1.6 points of total CPU is roughly **0.3 of one core**.
+
+### Why these are medians and not averages
+
+Both captures contain brief excursions that have nothing to do with the mod. The running capture spikes to 11.1 % total CPU around the 300 s mark while GPU load simultaneously *falls*, which is the signature of background work, not of a visualizer drawing harder.
+
+Dropping those windows because their CPU is high would be selecting on the outcome and would bias the result downward. A median is not moved by them and requires no such judgement call. As a check, a 10 % trimmed mean agrees with every median above to within 0.07 pp.
+
+### Bracketing the estimate
+
+The running capture contains two distinct GPU states, load around 5.1 % and around 2.2 %, only one of which the disabled capture ever shows. Something else was using the GPU for part of the run. Splitting on that boundary and comparing each state separately against the disabled capture gives:
+
+| | Low GPU state | High GPU state |
 |:--|--:|--:|
-| GPU core load | 7.66 % | 7.92 % |
-| GPU D3D usage | 7.41 % | 7.20 % |
-| GPU power | 21.81 W | 21.24 W |
-| GPU temperature | 35.6 °C | 36.5 °C |
+| Total CPU | +1.3 pp | +1.7 pp |
+| CPU package power | +6.6 W | +7.6 W |
+| CPU package temperature | +0.0 °C | +1.0 °C |
 
-**These differences are inside measurement noise - don't read them as real changes in either direction.** A flat GPU reading is exactly the right outcome here: this workload was never GPU-bound. It sits at 7-8 % in both builds. The blur fix moved work off the CPU-side Direct2D path; it was never going to show as a GPU reduction at this scale.
+The headline figures sit mid-range rather than at the flattering end of that bracket.
 
-I'm still working on the GPU side - I'd like both CPU and GPU sitting at a 3 % ceiling. It's already better than these numbers show; `.etl` traces are just enormous and parsing them means fighting a Windows tool currently stranded in a dead preview branch. Forgive me.
+## Frame pacing
 
-### Memory
+`v1.1.0` fixed a bug that clamped any Target FPS above about 64 down to exactly 64. Measured against a 144 FPS target:
 
-Sensor logs only report system-wide memory, which includes every other application running - so those totals say nothing useful about this mod and aren't reproduced here.
+| | Frame rate | SD | Of target |
+|:--|--:|--:|--:|
+| Before | 63.97 FPS | 0.156 | 44.4 % |
+| After | **141.71 FPS** | 0.104 | **98.4 %** |
 
-What *is* known, from the changes themselves: the cached blur dropped from a full-desktop bitmap to a widget-sized one - roughly **8 MB of video memory replaced by tens of KB** at 1080p - and the render surface went from two full-desktop buffers to two widget-sized ones, cutting that allocation by an order of magnitude.
+`1 / 15.625 ms = 64.0`, where 15.625 ms is the default Windows system timer tick. That the measured rate lands on it to three significant figures is what identified the cause. The remaining 1.6 % after the fix is timer wake latency, about 0.11 ms of overshoot per frame.
 
-## Method 2 - Windows Performance Analyzer
+## Time spent in `Present`
 
-Same protocol, normalized per second of runtime:
+Instrumented directly with `QueryPerformanceCounter` around the call, reported every 5 seconds, with the sync interval switched live inside one session rather than compared across separate runs. 219 windows, roughly 155,000 frames:
 
-| | Baseline | Tourne'Table |
+| | Sync interval 1 | Sync interval 0 |
 |:--|--:|--:|
-| CPU time attributed to mod | 7,736.60 ms | 4,251.18 ms |
-| Trace duration | 176.74 s | ~180 s |
-| **Normalized cost** | **43.77 ms/sec** | **23.62 ms/sec** |
-| As % of one core | 4.38 % | **2.36 %** |
-| **Reduction** | - | **−46.0 %** |
+| Time in `Present`, average | 0.358 ms | **0.236 ms** |
+| Render thread blocked | 5.07 % of wall time | **3.34 %** |
+| Windows blocked more than 8 % | 18 % | **4 %** |
 
-### Why −46 % understates it, and how I handicapped myself to show the gains ♥
-
-The two exports came from different WPA tables measuring different things:
-
-- **The baseline export** is the *Sampled* table grouped by Module. It counts only samples where the CPU was executing **inside that DLL itself** - *exclusive* time. It does **not** include time that code spent inside `d2d1.dll` doing the actual drawing.
-- **Tourne'Table's** is the *Precise* table with call stacks - *inclusive* time, counting everything downstream, D2D and kernel included.
-
-Since the overwhelming majority of this workload's cost lives inside `d2d1.dll` rather than the mod's own logic, the baseline's true inclusive cost would be substantially higher than 7,736 ms. **My all-in number is being compared against a self-time-only number, and still comes out 46 % lower.**
-
-### And my build was doing *a lot* more work
-
-I ran an **older build of mine** for these tests - one with unfixed and notably half-implemented features, and considerably fewer optimization passes behind it than the current release.
-
-It was still carrying all of the following, none of which exist in the baseline it was tested against:
-
-- **FFT size 2048** - double the baseline's fixed 1024, so twice the samples per analysis pass
-- **Mel frequency scaling** - extra per-bar warp computation every frame
-- **Peak hold caps** - additional per-bar state and draw calls
-- **Beat flash** - per-frame transient detection and color modulation
-- **Now Playing text** - live DirectWrite text rendering
-- **Reactive gradient** vs. the baseline's flat solid color
-
-Everything else was closely matched: 99 bars, 2 px wide, 1 px gap, middle anchor, ~144 target FPS, blur 33 vs 35, 1 px border, same position. **`pauseWhenObscured` was off**, so the newest optimization contributed nothing here.
-
-### A miss I'll own: Auto-Hide wasn't helping
-
-My test run had Auto-Hide on with a 45-second delay, which fired during both silent stretches. That did **not** give me an unfair advantage - quite the opposite. It was a broken implementation I slapped together on no sleep, and it *cost* me efficiency during my own benchmark. Oops.
-
-The version I benchmarked faded opacity toward zero but **kept rendering the full scene underneath**, plus an extra `PushLayer`/`PopLayer` pair. Once faded it was doing strictly *more* work while showing nothing.
-
-I genuinely missed an obvious optimization before running the comparison. **It's fixed now** - when the scene is fully transparent, rendering is skipped entirely instead of drawn and then hidden. It was built that way originally to shave frame time on scene wake, and I clawed that 0.08 ms back elsewhere.
+Swap chain buffer count was tested over the same windows and made no measurable difference at all (p of 0.85 and above), so it stays at 2.
 
 ## Honest caveats
 
-The large deltas are far outside anything noise could explain, but the methodology has real limits:
-
-1. **System-wide, not process-isolated** - HWiNFO measures the whole machine, and the two runs were ~3 minutes apart. The CPU/power/thermal deltas are far too large to be explained this way, but these aren't clean attributions to the mod alone. *(This applies to the HWiNFO numbers only - the WPA traces cover exactly where sensor testing falls short.)*
-2. **Small sample size** - ~37 samples per run. Fine for headline effects, not enough to resolve anything under a few percent.
-3. **Single run each** - no repeats, so run-to-run variance is unknown.
-4. **I handicapped myself on conditions.** The baseline was tested on a fully idle system. Mine was tested while screen recording, opening and closing windows, and actively working in applications - which meant Windows 11 did Windows 11 things and spiked clocks via its newer app-launch optimizations.
+1. **Whole-machine, not per-process.** HWiNFO measures the entire system. A figure quoted as the mod's cost therefore includes work the mod *causes* elsewhere, in the desktop compositor and the graphics driver, and not only time spent inside its own threads. That makes it a larger number than a per-process profiler would report. It is still the right number to quote, because it is what the machine actually pays, but it is not a clean attribution to this process.
+2. **One session, two captures.** Back to back and with the environment verified as matched, but not repeated across days or machines. Run-to-run variance beyond this session is unknown.
+3. **Unrelated background activity** appears in both captures, handled as described above rather than removed by hand.
+4. **No fan data.** This board exposes no CPU or chassis fan sensor, so nothing here says whether the thermal cost is audible. It is one degree, so probably not, but that is inference and not measurement.
+5. **Single hardware configuration.** One CPU, one GPU, one display. Nothing here predicts behaviour on other hardware, and the frame-pacing bug in particular would have presented differently on a machine with a different timer resolution.
 
 ---
 

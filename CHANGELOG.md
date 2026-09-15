@@ -49,9 +49,13 @@ The two one-off `Present` calls are unchanged. `CaptureWallpaperBitmap` pairs it
 
 ### ✦ Note on the performance figures
 
-The numbers previously quoted for this mod were all measured while it was running at an effective 64 FPS, because of the bug above. They were accurate for what the mod was doing, but they described a frame rate nobody asked for.
+The numbers previously quoted for this mod were all measured while it was running at an effective 64 FPS, because of the bug above. They were accurate for what the mod was doing, but they described a frame rate nobody asked for. Delivering 2.22x the frames costs more, so they have been re-measured rather than carried over.
 
-Delivering 2.22x the frames costs more CPU, and honestly so. Those figures are being re-measured against an idle baseline on the same machine rather than carried over, and they will be restated once that is done rather than quietly left as they were.
+The method changed as well as the numbers. Previously the page quoted absolute readings, plus a per-process figure of 2.36% of one core taken from a Windows Performance Analyzer trace. Absolute readings mostly describe whatever else the machine was doing, so the page now quotes the **difference** between two captures taken back to back in one session, with the same music playing in both and the mod the only thing that changed.
+
+That is a larger number than the old per-process one, and not because the mod got worse. The two measure different things. A per-process trace counts time inside the mod's own threads. The whole-machine difference also counts the work the mod causes elsewhere, in the compositor and the graphics driver, which is real cost the machine pays even though no profiler attributes it here. Quoting the smaller figure would have been flattering rather than accurate.
+
+Current cost at a 144 FPS target, as medians across 543 samples running and 384 disabled: **+1.6 percentage points of total CPU** (roughly a third of one core), **+7.2 W** package power, and **+1.0 °C** package temperature.
 
 ---
 
