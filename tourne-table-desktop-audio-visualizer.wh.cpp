@@ -30,7 +30,7 @@ Play music. Bars dance on your wallpaper. That's the whole idea.
 
 It listens to **whatever your PC is already playing** (Spotify, YouTube, a game, a call) and draws it behind your desktop icons. No virtual audio cable, no drivers, nothing to configure. It just picks up your system audio.
 
-It is built to be cheap to run. The render thread wakes only at the frame rate you ask for, the wallpaper blur is computed once instead of every frame, and the drawing surface is sized to the widget rather than the whole desktop, so the visualizer costs about **2.4 % of one CPU core** while it plays, and nothing at all while it doesn't.
+It is built to be cheap to run. The render thread wakes only at the frame rate you ask for, the wallpaper blur is computed once instead of every frame, and the drawing surface is sized to the widget rather than the whole desktop, so at a 144 FPS target the visualizer costs about **a third of one CPU core** and **one degree** of CPU package temperature while it plays, and nothing at all while it doesn't.
 
 ## ABOUT THIS PROJECT
 
@@ -48,16 +48,18 @@ Tourne'Table doesn't live inside `explorer.exe`. It runs as its own dedicated pr
 
 ## ◈ PERFORMANCE AT A GLANCE
 
-Measured on an **Intel Core Ultra 265KF**, running a 99-bar oscilloscope at a 144 FPS target with the background blur enabled.
+Measured on an **Intel Core Ultra 265KF** (8 P-cores plus 12 E-cores), running a 120-bar oscilloscope at a 144 FPS target with background blur on, and with media controls, the peak-frequency readout, peak hold and beat flash all enabled.
 
-| Metric | Measured |
+Every figure below is the **change against an idle baseline**, captured back to back in the same session with the same music playing in both, so what you are reading is the cost of the mod rather than whatever else the machine happened to be doing.
+
+| Metric | Cost of running it |
 |:--|--:|
-| **The mod's own CPU cost** *(WPA trace)* | **2.36 % of one core** |
-| Total CPU usage | **5.95 %** |
-| Peak single-thread | **34.86 %** |
-| CPU package power | **32.31 W** |
-| CPU package temperature | **39.7 °C** *(peak 50 °C)* |
-| Core temperatures | **35.4 °C** average |
+| Total CPU usage | **+1.6 percentage points** *(about 0.3 of one core)* |
+| Peak single-thread | **+10.1 points** |
+| CPU package power | **+7.2 W** |
+| CPU package temperature | **+1.0 °C** |
+
+Medians across 543 samples with it running and 384 without, at 1.25 s intervals. Medians rather than averages because both captures contained brief unrelated background spikes, and a median is not moved by them.
 
 When audio stops, rendering stops, not "slows down," *stops*.
 
@@ -302,11 +304,11 @@ DXGI queues up to three frames ahead by default. For a passive widget that's pur
 
 # ▦ ON THE NUMBERS
 
-The figures above come from two independent measurement methods on the same machine: HWiNFO64 sensor logging across identical three-minute runs, and Windows Performance Analyzer traces normalized per second of runtime.
+The figures above come from HWiNFO64 sensor logging: two captures taken back to back in one session, one with the mod running and one with it disabled, with the same music playing throughout both so the only thing that changed was the mod itself. 543 samples running, 384 disabled, at 1.25 s intervals.
 
-The full write-up (raw tables, the WPA methodology, run-to-run variance, and an honest account of where the measurements fall short) is in [the project repo](https://github.com/USER-TOURNE/TOURNE-TABLE). It does not belong on a catalog page, so it is not reproduced here.
+The full write-up (raw tables, the method, run-to-run variance, and an honest account of where the measurements fall short) is in [the project repo](https://github.com/USER-TOURNE/TOURNE-TABLE). It does not belong on a catalog page, so it is not reproduced here.
 
-The short version of the caveats: single runs rather than repeats, a small sample count, and HWiNFO measures the whole machine rather than this process alone. The effects are far larger than noise, but they are not clean per-process attributions.
+The caveats worth stating up front: **HWiNFO measures the whole machine, not this process alone.** A number quoted as the mod's cost therefore includes the work the mod causes elsewhere, in the compositor and the graphics driver, not only the time spent in its own threads. That makes it larger than a per-process trace would show, and it is the honest figure to quote, because it is what the machine actually pays. Both captures also contained short unrelated background spikes, which is why the numbers above are medians rather than averages.
 
 ---
 
