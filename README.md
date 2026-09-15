@@ -13,7 +13,7 @@ Play music. Bars dance on your wallpaper. That's the whole idea.
 
 It listens to **whatever your PC is already playing** - Spotify, YouTube, a game, a call - and draws it behind your desktop icons. No virtual audio cable, no drivers, nothing to configure. It just picks up your system audio.
 
-The original worked, but it ran *hot*. This project rebuilt how it draws itself: **same job, roughly half the CPU, 18 °C cooler**, plus a pile of new shapes, colors and controls.
+This project rebuilt how it draws itself — frame pacing, blur caching, and render-surface sizing — for **roughly half the CPU and 18 °C cooler**, plus a pile of new shapes, colors and controls.
 
 ## ABOUT THIS PROJECT
 
@@ -38,7 +38,7 @@ Practically, that means:
 
 ## ◈ PERFORMANCE AT A GLANCE
 
-| Metric | Salyts Original | Tourne'Table | Change |
+| Metric | Baseline | Tourne'Table | Change |
 |:--|--:|--:|--:|
 | **Total CPU usage** | 13.77 % | **5.95 %** | **−56.8 %** |
 | **Peak single-thread** | 78.06 % | **34.86 %** | **−55.3 %** |
@@ -137,7 +137,7 @@ The built-in **Tourne** color mode is drawn from these.
 **Shape** - Which of the 8 styles above to draw.
 
 **Orientation** - *Horizontal* = a row of bars growing up and down. *Vertical* = a column growing left and right.
-> The Oscilloscope shape doesn't follow this - its trace always runs left-to-right and ignores Anchor too. Setting Orientation to Vertical squeezes it into a narrow strip instead of rotating it. Its width is still governed by Bar Count × Bar Width even though it has no bars, so if you're using it, expect to size it through those two settings rather than Bar Max Size.
+> The Oscilloscope follows Orientation as of v0.8.1 - in Vertical it's the horizontal layout rotated 90° clockwise, sweeping top to bottom. It still ignores Anchor. Its extent along the sweep axis is governed by Bar Count × Bar Width even though it has no bars, so if you're using it, expect to size it through those two settings rather than Bar Max Size.
 
 **Bar Count** - How many bars. More = finer detail, wider visualizer. Range **1–2048** (enough to span a 4K or ultrawide screen).
 
@@ -395,19 +395,19 @@ In rough order of measured impact.
 
 ### 1. Precision frame pacing - the biggest single win
 
-The original paced itself with `DwmFlush()`, which blocks until the monitor's next refresh. That meant the render thread woke **on every vertical blank, forever** - 60, 144, 240+ times a second - regardless of target FPS, whether anything needed redrawing, or whether the visualizer was even visible.
+The baseline paced itself with `DwmFlush()`, which blocks until the monitor's next refresh. That meant the render thread woke **on every vertical blank, forever** - 60, 144, 240+ times a second - regardless of target FPS, whether anything needed redrawing, or whether the visualizer was even visible.
 
 This barely registers as CPU% in Task Manager, because the thread is blocked, not spinning. But every wake-up drags a core out of deep idle. Do that continuously and the core never settles into its efficient sleep states - which reads as a small, permanent bump in package power and temperature. The classic "low usage, still runs warm" signature.
 
 > **Note:** this becomes exponentially more noticeable on AMD architecture.
 >
-> **Note:** also exponentially more noticeable if you have **C-States disabled** in your BIOS or elsewhere. Shoutout to Process Lasso, Core Director, Park Control and HWiNFO64 for helping me debug why the hell all my E-cores were sitting at 65–70 °C when they were supposed to be idle during initial testing with Salyts' original mod.
+> **Note:** also exponentially more noticeable if you have **C-States disabled** in your BIOS or elsewhere. Shoutout to Process Lasso, Core Director, Park Control and HWiNFO64 for helping me debug why the hell all my E-cores were sitting at 65–70 °C when they were supposed to be idle during my initial baseline testing.
 
 **Fixed with** a high-resolution waitable timer firing only at the configured rate. Plain `Sleep()` wasn't good enough - it's quantized to ~15.6 ms, which would turn a 60 FPS target into stuttery 30–40 FPS.
 
 ### 2. Pre-rendered background blur
 
-A Gaussian blur is a full-image convolution - the most expensive thing Direct2D does in this scene. The original recomputed it **from scratch every frame**, despite its input (your wallpaper) never changing.
+A Gaussian blur is a full-image convolution - the most expensive thing Direct2D does in this scene. The baseline recomputed it **from scratch every frame**, despite its input (your wallpaper) never changing.
 
 **Fixed by** computing it exactly once into a cached bitmap, then just copying that each frame. The cache covers only the widget's bounding box, replacing roughly **8 MB of video memory with tens of KB**. It re-bakes automatically if the widget moves or resizes.
 
@@ -465,7 +465,7 @@ Averages only tell half the story. The **spikiness** dropped even harder:
 | Power - maximum | 93.24 W | **40.44 W** |
 | Power - standard deviation | 9.85 | **2.57** |
 
-Standard deviation fell ~73 % on CPU and ~74 % on power. The original wasn't just heavier on average - it worked in **bursts**, and bursts are what drive thermal spikes and fan ramping.
+Standard deviation fell ~73 % on CPU and ~74 % on power. The baseline wasn't just heavier on average - it worked in **bursts**, and bursts are what drive thermal spikes and fan ramping.
 
 That matches the root cause the profiler found: a render thread waking on every vsync, and a full-image blur re-evaluated every frame. Both bursty, repetitive workloads - exactly the profile that produces this variance.
 
@@ -492,7 +492,7 @@ What *is* known, from the changes themselves: the cached blur dropped from a ful
 
 Same protocol, normalized per second of runtime:
 
-| | Salyts Original | Tourne'Table |
+| | Baseline | Tourne'Table |
 |:--|--:|--:|
 | CPU time attributed to mod | 7,736.60 ms | 4,251.18 ms |
 | Trace duration | 176.74 s | ~180 s |
@@ -504,23 +504,23 @@ Same protocol, normalized per second of runtime:
 
 The two exports came from different WPA tables measuring different things:
 
-- **Salyts'** is the *Sampled* table grouped by Module. It counts only samples where the CPU was executing **inside his DLL itself** - *exclusive* time. It does **not** include time his code spent inside `d2d1.dll` doing the actual drawing.
+- **The baseline export** is the *Sampled* table grouped by Module. It counts only samples where the CPU was executing **inside that DLL itself** - *exclusive* time. It does **not** include time that code spent inside `d2d1.dll` doing the actual drawing.
 - **Tourne'Table's** is the *Precise* table with call stacks - *inclusive* time, counting everything downstream, D2D and kernel included.
 
-Since the overwhelming majority of this workload's cost lives inside `d2d1.dll` rather than the mod's own logic, the original's true inclusive cost would be substantially higher than 7,736 ms. **My all-in number is being compared against his self-time-only number, and still comes out 46 % lower.**
+Since the overwhelming majority of this workload's cost lives inside `d2d1.dll` rather than the mod's own logic, the baseline's true inclusive cost would be substantially higher than 7,736 ms. **My all-in number is being compared against a self-time-only number, and still comes out 46 % lower.**
 
 ### And my build was doing *a lot* more work
 
 I ran an **older build of mine** for these tests - one with unfixed and notably half-implemented features, and considerably fewer optimization passes behind it than the current release.
 
-It was still carrying all of the following, none of which exist in Salyts' original that it was tested against:
+It was still carrying all of the following, none of which exist in the baseline it was tested against:
 
-- **FFT size 2048** - double the original's fixed 1024, so twice the samples per analysis pass
+- **FFT size 2048** - double the baseline's fixed 1024, so twice the samples per analysis pass
 - **Mel frequency scaling** - extra per-bar warp computation every frame
 - **Peak hold caps** - additional per-bar state and draw calls
 - **Beat flash** - per-frame transient detection and color modulation
 - **Now Playing text** - live DirectWrite text rendering
-- **Reactive gradient** vs. the original's flat solid color
+- **Reactive gradient** vs. the baseline's flat solid color
 
 Everything else was closely matched: 99 bars, 2 px wide, 1 px gap, middle anchor, ~144 target FPS, blur 33 vs 35, 1 px border, same position. **`pauseWhenObscured` was off**, so the newest optimization contributed nothing here.
 
@@ -539,7 +539,7 @@ The large deltas are far outside anything noise could explain, but the methodolo
 1. **System-wide, not process-isolated** - HWiNFO measures the whole machine, and the two runs were ~3 minutes apart. The CPU/power/thermal deltas are far too large to be explained this way, but these aren't clean attributions to the mod alone. *(This applies to the HWiNFO numbers only - the WPA traces cover exactly where sensor testing falls short.)*
 2. **Small sample size** - ~37 samples per run. Fine for headline effects, not enough to resolve anything under a few percent.
 3. **Single run each** - no repeats, so run-to-run variance is unknown.
-4. **I handicapped myself on conditions.** Salyts' build was tested on a fully idle system. Mine was tested while screen recording, opening and closing windows, and actively working in applications - which meant Windows 11 did Windows 11 things and spiked clocks via its newer app-launch optimizations.
+4. **I handicapped myself on conditions.** The baseline was tested on a fully idle system. Mine was tested while screen recording, opening and closing windows, and actively working in applications - which meant Windows 11 did Windows 11 things and spiked clocks via its newer app-launch optimizations.
 
 ---
 
