@@ -3,7 +3,7 @@
 // @name                Tourne'Table [Audio Visualizer]
 // @description         A real-time audio visualizer for the Windows desktop. Advanced settings without sacrificing resource efficiency. Near-headless rendering with CPU optimization for audio capture.
 // @description:ru-RU   Аудиовизуализатор реального времени для рабочего стола Windows. Расширенные настройки без ущерба для экономии ресурсов. Практически безинтерфейсный (near-headless) поток рендеринга с оптимизацией процессора для захвата звука.
-// @version             1.0.0
+// @version             1.1.0
 // @author              USER-TOURNE
 // @github              https://github.com/USER-TOURNE
 // @donateUrl           https://ko-fi.com/tourne
@@ -21,16 +21,16 @@
 
 ![Tourne'Table Audio Visualizer](https://raw.githubusercontent.com/USER-TOURNE/TOURNE-TABLE/main/GIF/11.gif)
 
-*The Oscilloscope shape running live audio — bottom-left placement, blurred panel, single-pixel border.*
+*The Oscilloscope shape running live audio: bottom-left placement, blurred panel, single-pixel border.*
 
 > **A real-time audio visualizer that lives on your Windows desktop.**
 > Built on the foundation of Salyts' Desktop Audio Visualizer, rebuilt around performance.
 
 Play music. Bars dance on your wallpaper. That's the whole idea.
 
-It listens to **whatever your PC is already playing** — Spotify, YouTube, a game, a call — and draws it behind your desktop icons. No virtual audio cable, no drivers, nothing to configure. It just picks up your system audio.
+It listens to **whatever your PC is already playing** (Spotify, YouTube, a game, a call) and draws it behind your desktop icons. No virtual audio cable, no drivers, nothing to configure. It just picks up your system audio.
 
-It is built to be cheap to run. The render thread wakes only at the frame rate you ask for, the wallpaper blur is computed once instead of every frame, and the drawing surface is sized to the widget rather than the whole desktop — so the visualizer costs about **2.4 % of one CPU core** while it plays, and nothing at all while it doesn't.
+It is built to be cheap to run. The render thread wakes only at the frame rate you ask for, the wallpaper blur is computed once instead of every frame, and the drawing surface is sized to the widget rather than the whole desktop, so the visualizer costs about **2.4 % of one CPU core** while it plays, and nothing at all while it doesn't.
 
 ## ABOUT THIS PROJECT
 
@@ -38,11 +38,11 @@ Built with an emphasis on lower resource consumption, more efficient rendering, 
 
 The goal is simple:
 
-> **Make the desktop move with the music — without making the CPU move mountains to do it.**
+> **Make the desktop move with the music, without making the CPU move mountains to do it.**
 
 ## Runs as its own process
 
-Tourne'Table doesn't live inside `explorer.exe`. It runs as its own dedicated process using Windhawk's tool-mod pattern, so you'll see it as its own entry in Task Manager, separate from the shell. Restarting `explorer.exe` doesn't kill it — it just reattaches behind the desktop icons once the shell is back. Requires a Windhawk build with tool-mod support (1.7.3+, including the 2.0 alpha line).
+Tourne'Table doesn't live inside `explorer.exe`. It runs as its own dedicated process using Windhawk's tool-mod pattern, so you'll see it as its own entry in Task Manager, separate from the shell. Restarting `explorer.exe` doesn't kill it. It just reattaches behind the desktop icons once the shell is back. Requires a Windhawk build with tool-mod support (1.7.3+, including the 2.0 alpha line).
 
 ---
 
@@ -59,7 +59,7 @@ Measured on an **Intel Core Ultra 265KF**, running a 99-bar oscilloscope at a 14
 | CPU package temperature | **39.7 °C** *(peak 50 °C)* |
 | Core temperatures | **35.4 °C** average |
 
-When audio stops, rendering stops — not "slows down," *stops*.
+When audio stops, rendering stops, not "slows down," *stops*.
 
 Full methodology, raw traces and caveats live in [the project repo](https://github.com/USER-TOURNE/TOURNE-TABLE) rather than on this page.
 
@@ -77,16 +77,16 @@ Full methodology, raw traces and caveats live in [the project repo](https://gith
 |:--|:--|
 | **Stereo** | Classic equalizer bars. Low notes left, high notes right. |
 | **Mountain** | Peaks in the middle, tapers toward both edges. |
-| **Mirror** | The opposite — grows from the outside edges inward. |
+| **Mirror** | The opposite, grows from the outside edges inward. |
 | **Wave** | Normal bars with a slow ripple rolling through them. |
 | **Breathe** | A gentle swell that rises with the music instead of jumping. |
-| **Dots** | Stacked dots instead of solid bars — old LED-meter look. |
+| **Dots** | Stacked dots instead of solid bars, old LED-meter look. |
 | **Radial** | Bars shoot outward from a center point, like a sunburst. |
 | **Oscilloscope** | A single line tracing the actual sound wave. |
 
 ![Oscilloscope closeup](https://raw.githubusercontent.com/USER-TOURNE/TOURNE-TABLE/main/GIF/8.gif)
 
-*Closeup — the waveform drawn as one continuous line, with the Now Playing label and media buttons alongside.*
+*Closeup: the waveform drawn as one continuous line, with the Now Playing label and media buttons alongside.*
 
 ### 9 Color Modes
 
@@ -98,17 +98,17 @@ Full methodology, raw traces and caveats live in [the project repo](https://gith
 | **Windows Accent** | Matches your Windows accent color, updating instantly. |
 | **Album Art** | Pulls the dominant color from the playing track's cover. |
 | **Dynamic Album** | Gradient between the cover art's two strongest colors. |
-| **Acrylic** | Grows more opaque the louder it gets — invisible in silence. |
+| **Acrylic** | Grows more opaque the louder it gets, invisible in silence. |
 | **Rainbow Cycle** | Continuously cycling hue, adjustable speed. |
 | **Tourne** | Built-in teal → red gradient from my personal palette. |
 
 ### Plus
 
-- **2 orientations** — bars grow vertically or horizontally
-- **3 anchors** — grow from the Bottom, the Top, or **both directions from the Middle**
-- **Peak Hold Caps** — thin markers hang at each bar's recent peak and slowly fall *(classic hardware EQ)*
-- **Beat Flash** — bars brighten on detected bass hits, on top of any color mode
-- **Multiband Oscilloscope** — the waveform tints toward whichever part of the spectrum is loudest
+- **2 orientations**: bars grow vertically or horizontally
+- **3 anchors**: grow from the Bottom, the Top, or **both directions from the Middle**
+- **Peak Hold Caps**: thin markers hang at each bar's recent peak and slowly fall *(classic hardware EQ)*
+- **Beat Flash**: bars brighten on detected bass hits, on top of any color mode
+- **Multiband Oscilloscope**: the waveform tints toward whichever part of the spectrum is loudest
 
 ---
 
@@ -126,7 +126,7 @@ Fades in on track change, fades out after a configurable delay. Custom color, fo
 
 ## ◐ THE PALETTE
 
-This project follows my personal theming palette — reflected in the repo screenshots. It can be changed to any hex / RGB / RGBA value you want.
+This project follows my personal theming palette: reflected in the repo screenshots. It can be changed to any hex / RGB / RGBA value you want.
 
 | Name | Hex | RGB |
 |:--|:--|:--|
@@ -147,128 +147,128 @@ The built-in **Tourne** color mode is drawn from these.
 
 ## Appearance
 
-**Shape** — Which of the 8 styles above to draw.
+**Shape**: Which of the 8 styles above to draw.
 
-**Orientation** — *Horizontal* = a row of bars growing up and down. *Vertical* = a column growing left and right.
+**Orientation**: *Horizontal* = a row of bars growing up and down. *Vertical* = a column growing left and right.
 
-**Bar Count** — How many bars. More = finer detail, wider visualizer. Range **1–2048** (enough to span a 4K or ultrawide screen).
+**Bar Count**: How many bars. More = finer detail, wider visualizer. Range **1-2048** (enough to span a 4K or ultrawide screen).
 
-**Bar Width** — How fat each bar is, in pixels.
+**Bar Width**: How fat each bar is, in pixels.
 
-**Bar Gap** — Space between bars, in pixels. Set to `0` and they touch.
+**Bar Gap**: Space between bars, in pixels. Set to `0` and they touch.
 
-**Bar Max Size** — How tall a bar gets at full volume. This is the overall height of the visualizer.
+**Bar Max Size**: How tall a bar gets at full volume. This is the overall height of the visualizer.
 
-**Bar Idle Size** — How tall bars sit in silence. `0` makes them vanish completely; a few pixels leaves a thin resting line.
+**Bar Idle Size**: How tall bars sit in silence. `0` makes them vanish completely; a few pixels leaves a thin resting line.
 
-**Bar Corner Radius** — How rounded the bar corners are. One number rounds all four equally, or give four numbers separated by spaces for individual control: `top-left top-right bottom-right bottom-left`. Example: `5 5 0 0` rounds only the top.
+**Bar Corner Radius**: How rounded the bar corners are. One number rounds all four equally, or give four numbers separated by spaces for individual control: `top-left top-right bottom-right bottom-left`. Example: `5 5 0 0` rounds only the top.
 
-**Color Mode** — Which of the 9 coloring styles above to use.
+**Color Mode**: Which of the 9 coloring styles above to use.
 
-**Color** — The color used in Solid mode. Format is `#AARRGGBB` or `#RRGGBB` — that's **A**lpha (transparency), then **R**ed, **G**reen, **B**lue in hex. Lower the first two digits to make it see-through.
+**Color**: The color used in Solid mode. Format is `#AARRGGBB` or `#RRGGBB`: that's **A**lpha (transparency), then **R**ed, **G**reen, **B**lue in hex. Lower the first two digits to make it see-through.
 
-**Gradient Color 1 / 2** — Start and end colors for the gradient modes.
+**Gradient Color 1 / 2**: Start and end colors for the gradient modes.
 
-**Sensitivity** — How hard the bars react. Too low and quiet music barely moves them; too high and everything slams to max. Range 0–300. Turn it down for bass-heavy tracks, up for quiet recordings.
+**Sensitivity**: How hard the bars react. Too low and quiet music barely moves them; too high and everything slams to max. Range 0-300. Turn it down for bass-heavy tracks, up for quiet recordings.
 
-**EQ Preset** — Which frequencies get emphasized *visually*. Doesn't touch your actual audio.
+**EQ Preset**: Which frequencies get emphasized *visually*. Doesn't touch your actual audio.
 `Default` no adjustment · `Bass` boosts lows · `Rock` boosts mids and highs · `Pop` heavy on highs · `Jazz` warmer, gentler highs · `Electronic` boosts bass and treble, scoops the middle.
 
-**FFT Size** — How finely sound gets analyzed. An FFT is the math that splits audio into separate frequencies — think of it as sorting sound into buckets by pitch. More buckets = finer detail, slightly more CPU.
+**FFT Size**: How finely sound gets analyzed. An FFT is the math that splits audio into separate frequencies: think of it as sorting sound into buckets by pitch. More buckets = finer detail, slightly more CPU.
 `1024` fastest, plenty for most · `2048` / `4096` noticeably crisper · `8192` maximum detail.
 
-> **Note — this is an admittedly 'beta' implementation for now.** Everything up to `8192` runs near-flawlessly with almost no overhead, *with the caveat that you're using anything other than the Oscilloscope shape.*
+> **Note. This is an admittedly 'beta' implementation for now.** Everything up to `8192` runs near-flawlessly with almost no overhead, *with the caveat that you're using anything other than the Oscilloscope shape.*
 >
 > **One more note:** the higher the FFT Size, the more accurate the Sensitivity slider becomes for your specific audio setup. The correlation generally runs: **as FFT Size goes up, your Sensitivity will need to go up too.** For now that means fine-tuning Sensitivity per EQ Preset *and* per FFT Size, for your particular placement, size and personal adjustments.
 
-**Frequency Scale** — How the frequency range spreads across the bars. This matters more than it sounds.
-- **Log** — the natural-feeling default. Gives bass and treble roughly equal visual space, matching how humans hear pitch.
-- **Linear** — spreads by raw Hz. Since most musical energy lives low, this crams all the action into a sliver on the left and leaves the right mostly dead. Technically accurate, visually dull.
-- **Mel** — uses the *mel scale*, built from research on how people actually perceive pitch. Like Log, tuned to human hearing.
+**Frequency Scale**: How the frequency range spreads across the bars. This matters more than it sounds.
+- **Log**: the natural-feeling default. Gives bass and treble roughly equal visual space, matching how humans hear pitch.
+- **Linear**: spreads by raw Hz. Since most musical energy lives low, this crams all the action into a sliver on the left and leaves the right mostly dead. Technically accurate, visually dull.
+- **Mel**: uses the *mel scale*, built from research on how people actually perceive pitch. Like Log, tuned to human hearing.
 
-**Peak Frequency Readout** — Shows the loudest note as a live number, e.g. `1.2 kHz`.
+**Peak Frequency Readout**: Shows the loudest note as a live number, e.g. `1.2 kHz`.
 
-**Peak Readout Position** — Where that number sits. Horizontal: Left / Center / Right. Vertical: Above / Top / Middle / Bottom / Below.
+**Peak Readout Position**: Where that number sits. Horizontal: Left / Center / Right. Vertical: Above / Top / Middle / Bottom / Below.
 > **Above** and **Below** place it fully *outside* the bars so it never overlaps the visualization.
 
-**Multiband Oscilloscope Coloring** — Only affects the Oscilloscope shape. The line tints toward whatever part of the spectrum is loudest — warm for bass, green for mids, blue for treble. Overrides Color Mode for that shape.
+**Multiband Oscilloscope Coloring**: Only affects the Oscilloscope shape. The line tints toward whatever part of the spectrum is loudest: warm for bass, green for mids, blue for treble. Overrides Color Mode for that shape.
 
-**Anchor** — Which edge bars grow from. `Bottom` rise upward *(classic)* · `Top` hang downward · `Middle` grow **both directions** from a center line.
+**Anchor**: Which edge bars grow from. `Bottom` rise upward *(classic)* · `Top` hang downward · `Middle` grow **both directions** from a center line.
 
-**Peak Hold Caps** — Leaves a thin marker floating at each bar's recent peak, which slowly drifts down.
+**Peak Hold Caps**: Leaves a thin marker floating at each bar's recent peak, which slowly drifts down.
 
-**Beat Flash** + **Intensity** — Flashes bars brighter on bass hits. Intensity controls how hard.
+**Beat Flash** + **Intensity**: Flashes bars brighter on bass hits. Intensity controls how hard.
 
-**Rainbow Cycle Speed** — How fast the rainbow rotates. Rainbow mode only.
+**Rainbow Cycle Speed**: How fast the rainbow rotates. Rainbow mode only.
 
-**Now Playing Text** — Toggles the artist/title display.
+**Now Playing Text**: Toggles the artist/title display.
 
-**Now Playing Color / Font / Font Size** — Styling for that text. The font must be **installed on your system** — type the exact family name. Windows silently falls back to a default on a typo rather than erroring, so double-check spelling if nothing changes.
+**Now Playing Color / Font / Font Size**: Styling for that text. The font must be **installed on your system**: type the exact family name. Windows silently falls back to a default on a typo rather than erroring, so double-check spelling if nothing changes.
 > The Peak Frequency Readout shares these same font settings.
 
-**Now Playing Display Seconds** — How long the text stays up after a track change before fading.
+**Now Playing Display Seconds**: How long the text stays up after a track change before fading.
 
 ## Position
 
-**Horizontal Position** — Left-to-right placement as a percentage. `0` hard left, `50` centered, `100` hard right.
+**Horizontal Position**: Left-to-right placement as a percentage. `0` hard left, `50` centered, `100` hard right.
 
-**Vertical Position** — Top-to-bottom, same idea. `0` top, `100` bottom.
+**Vertical Position**: Top-to-bottom, same idea. `0` top, `100` bottom.
 
-**Monitor** — Which screen to draw on. `1` is your first monitor.
+**Monitor**: Which screen to draw on. `1` is your first monitor.
 
 ## Background
 
-**Enabled** — Draws a panel behind the bars. Turn off for bars floating directly on the wallpaper.
+**Enabled**: Draws a panel behind the bars. Turn off for bars floating directly on the wallpaper.
 
-**Color** — Panel color in `#AARRGGBB`. The alpha controls transparency.
+**Color**: Panel color in `#AARRGGBB`. The alpha controls transparency.
 
-**Padding** — Breathing room between the bars and the panel edge.
+**Padding**: Breathing room between the bars and the panel edge.
 
-**Corner Radius** — How rounded the panel corners are. Same one-or-four-value rules as bar radius.
+**Corner Radius**: How rounded the panel corners are. Same one-or-four-value rules as bar radius.
 
-**Blur** — Frosted-glass blur of your wallpaper behind the panel. `0` disables.
+**Blur**: Frosted-glass blur of your wallpaper behind the panel. `0` disables.
 > This used to be the single most expensive setting in the mod. It's now computed once and cached, so it's essentially free per frame.
 
-**Border Size / Border Color** — A thin outline around the panel. `0` for none.
+**Border Size / Border Color**: A thin outline around the panel. `0` for none.
 
 ## Performance
 
-**Target FPS** — How many times per second it redraws. Higher = smoother, more CPU. Little point exceeding your monitor's refresh rate.
+**Target FPS**: How many times per second it redraws. Higher = smoother, more CPU. Little point exceeding your monitor's refresh rate.
 
-**Pause On Fullscreen** — Stops completely when a fullscreen app runs. Detects both true fullscreen *(games)* and borderless windows. Since the visualizer lives on the desktop it's invisible anyway — this just stops it burning power. Resumes automatically.
+**Pause On Fullscreen**: Stops completely when a fullscreen app runs. Detects both true fullscreen *(games)* and borderless windows. Since the visualizer lives on the desktop it's invisible anyway. This just stops it burning power. Resumes automatically.
 
-**Pause When Silent (seconds)** — After this long without audio, drops to a trickle instead of full speed. `0` disables.
+**Pause When Silent (seconds)**: After this long without audio, drops to a trickle instead of full speed. `0` disables.
 
-**Auto-Hide When Idle** + **Delay** — Fades out entirely after prolonged silence. Once fully faded it **stops rendering completely** — not just invisible, genuinely doing nothing until audio returns.
+**Auto-Hide When Idle** + **Delay**: Fades out entirely after prolonged silence. Once fully faded it **stops rendering completely**, not just invisible, genuinely doing nothing until audio returns.
 
-**Pause When Covered** — Stops rendering *and* audio capture while fully hidden behind another window.
-> **Off by default.** Reliably detecting "am I covered?" on Windows 11 is genuinely tricky — the shell is full of invisible windows that report themselves as visible. The check is deliberately conservative (only a fully-covering, real application window counts), but if the visualizer ever vanishes when it shouldn't, this is the switch to flip.
+**Pause When Covered**: Stops rendering *and* audio capture while fully hidden behind another window.
+> **Off by default.** Reliably detecting "am I covered?" on Windows 11 is genuinely tricky: the shell is full of invisible windows that report themselves as visible. The check is deliberately conservative (only a fully-covering, real application window counts), but if the visualizer ever vanishes when it shouldn't, this is the switch to flip.
 
 ---
 
 ![Oscilloscope closeup](https://raw.githubusercontent.com/USER-TOURNE/TOURNE-TABLE/main/GIF/4.gif)
 
-*The same shape in a warm colour — the Oscilloscope picks up Color Mode like every other shape.*
+*The same shape in a warm colour: the Oscilloscope picks up Color Mode like every other shape.*
 
 # ▲ WHERE THE EFFICIENCY COMES FROM
 
 In rough order of measured impact.
 
-### 1. Precision frame pacing — the biggest single win
+### 1. Precision frame pacing: the biggest single win
 
-The obvious way to pace a desktop widget is `DwmFlush()`, which blocks until the monitor's next refresh. That wakes the render thread **on every vertical blank, forever** — 60, 144, 240+ times a second — regardless of the target FPS, whether anything needs redrawing, or whether the visualizer is even visible.
+The obvious way to pace a desktop widget is `DwmFlush()`, which blocks until the monitor's next refresh. That wakes the render thread **on every vertical blank, forever** (60, 144, 240+ times a second) regardless of the target FPS, whether anything needs redrawing, or whether the visualizer is even visible.
 
-This barely registers as CPU% in Task Manager, because the thread is blocked, not spinning. But every wake-up drags a core out of deep idle. Do that continuously and the core never settles into its efficient sleep states — which reads as a small, permanent bump in package power and temperature. The classic "low usage, still runs warm" signature.
+This barely registers as CPU% in Task Manager, because the thread is blocked, not spinning. But every wake-up drags a core out of deep idle. Do that continuously and the core never settles into its efficient sleep states, which reads as a small, permanent bump in package power and temperature. The classic "low usage, still runs warm" signature.
 
 > **Note:** this becomes exponentially more noticeable on AMD architecture.
 >
-> **Note:** also exponentially more noticeable if you have **C-States disabled** in your BIOS or elsewhere. Shoutout to Process Lasso, Core Director, Park Control and HWiNFO64 for helping me work out why all my E-cores were sitting at 65–70 °C when they were supposed to be idle.
+> **Note:** also exponentially more noticeable if you have **C-States disabled** in your BIOS or elsewhere. Shoutout to Process Lasso, Core Director, Park Control and HWiNFO64 for helping me work out why all my E-cores were sitting at 65-70 °C when they were supposed to be idle.
 
-**Instead:** a high-resolution waitable timer firing only at the configured rate. Plain `Sleep()` isn't good enough — it's quantized to ~15.6 ms, which would turn a 60 FPS target into stuttery 30–40 FPS.
+**Instead:** a high-resolution waitable timer firing only at the configured rate. Plain `Sleep()` isn't good enough. It's quantized to ~15.6 ms, which would turn a 60 FPS target into stuttery 30-40 FPS.
 
 ### 2. Pre-rendered background blur
 
-A Gaussian blur is a full-image convolution — the most expensive thing Direct2D does in this scene. Recomputing it every frame is pure waste, because its input (your wallpaper) never changes.
+A Gaussian blur is a full-image convolution: the most expensive thing Direct2D does in this scene. Recomputing it every frame is pure waste, because its input (your wallpaper) never changes.
 
 **Instead:** it is computed exactly once into a cached bitmap, and each frame just copies that. The cache covers only the widget's bounding box, which is **tens of KB of video memory rather than several MB**. It re-bakes automatically if the widget moves or resizes.
 
@@ -280,7 +280,7 @@ The visualizer occupies a thin strip, so a desktop-spanning render surface would
 
 ### 4. Cached geometry
 
-Building the background panel and border means allocating a path geometry and constructing four lines and four arcs by hand. It is rebuilt only when size, padding, radii or border width actually change — in normal use, almost never — rather than every frame.
+Building the background panel and border means allocating a path geometry and constructing four lines and four arcs by hand. It is rebuilt only when size, padding, radii or border width actually change (in normal use, almost never) rather than every frame.
 
 ### 5. Cached monitor lookup
 
@@ -292,7 +292,7 @@ DXGI queues up to three frames ahead by default. For a passive widget that's pur
 
 ### 7. Genuine idle shutdown
 
-**Auto-Hide** now stops rendering completely once faded — presents one blank frame, then exits the render path entirely. **Pause When Covered** stops rendering and capture while hidden, checked once per second rather than per frame.
+**Auto-Hide** now stops rendering completely once faded: presents one blank frame, then exits the render path entirely. **Pause When Covered** stops rendering and capture while hidden, checked once per second rather than per frame.
 
 ---
 
@@ -304,7 +304,7 @@ DXGI queues up to three frames ahead by default. For a passive widget that's pur
 
 The figures above come from two independent measurement methods on the same machine: HWiNFO64 sensor logging across identical three-minute runs, and Windows Performance Analyzer traces normalized per second of runtime.
 
-The full write-up — raw tables, the WPA methodology, run-to-run variance, and an honest account of where the measurements fall short — is in [the project repo](https://github.com/USER-TOURNE/TOURNE-TABLE). It does not belong on a catalog page, so it is not reproduced here.
+The full write-up (raw tables, the WPA methodology, run-to-run variance, and an honest account of where the measurements fall short) is in [the project repo](https://github.com/USER-TOURNE/TOURNE-TABLE). It does not belong on a catalog page, so it is not reproduced here.
 
 The short version of the caveats: single runs rather than repeats, a small sample count, and HWiNFO measures the whole machine rather than this process alone. The effects are far larger than noise, but they are not clean per-process attributions.
 
@@ -316,17 +316,17 @@ The short version of the caveats: single runs rather than repeats, a small sampl
 
 ## ♥ CREDITS
 
-**[USER-TOURNE](https://github.com/USER-TOURNE)** — Author and maintainer: performance work, new features, benchmarking and documentation.
+**[USER-TOURNE](https://github.com/USER-TOURNE)**: Author and maintainer: performance work, new features, benchmarking and documentation.
 
-**[Salyts](https://github.com/Salyts)** — Original author of Desktop Audio Visualizer. This project exists because the foundation was good enough to be worth optimizing. Author of his own mod and repo; and a base for this one.
+**[Salyts](https://github.com/Salyts)**: Original author of Desktop Audio Visualizer. This project exists because the foundation was good enough to be worth optimizing. Author of his own mod and repo; and a base for this one.
 
-**[GR0UD](https://github.com/GR0UD)** — Audio visualizer code the original was adapted from. Author of his own work; and the base for Salyts.
+**[GR0UD](https://github.com/GR0UD)**: Audio visualizer code the original was adapted from. Author of his own work; and the base for Salyts.
 
 ### A coincidence worth acknowledging
 
-While I was midway through my initial testing, **NeiZ** (author/maintainer, with **SuperSmile123** contributing) released [Desktop Audio Visualizer Plus](https://github.com/ramensoftware/windhawk-mods/commit/e01d0d0dbd6204804235831fd7f68821e4614028) (`neiz-supersmile-audio-visualizer`). I had planned to publish my own commit that same night — holy coincidence.
+While I was midway through my initial testing, **NeiZ** (author/maintainer, with **SuperSmile123** contributing) released [Desktop Audio Visualizer Plus](https://github.com/ramensoftware/windhawk-mods/commit/e01d0d0dbd6204804235831fd7f68821e4614028) (`neiz-supersmile-audio-visualizer`). I had planned to publish my own commit that same night: holy coincidence.
 
-His release spurred another round of testing on my end, and I've since gone through roughly twelve more iterations. I didn't want to ship something that essentially achieved what I was already going for, especially if they'd figuratively led me out to pasture to put a bullet in me — aha.
+His release spurred another round of testing on my end, and I've since gone through roughly twelve more iterations. I didn't want to ship something that essentially achieved what I was already going for, especially if they'd figuratively led me out to pasture to put a bullet in me: aha.
 
 To be explicit about attribution: **I did not borrow from or reference NeiZ or SuperSmile123's work at any point**, other than benchmarking theirs for efficiency to decide whether continuing development was worth it. Thanks to them and their contributors regardless.
 
@@ -367,7 +367,7 @@ SOFTWARE.
 > Take it. Fork it. Gut it. Rewrite the parts I got wrong. Ship it. Sell it.
 > Learn something from it and never speak to me again.
 >
-> The only thing MIT actually asks is that the copyright line rides along —
+> The only thing MIT actually asks is that the copyright line rides along: 
 > keep the notice, and we're square.
 >
 > *(I went with MIT over the real WTFPL for one boring reason: this thing
@@ -377,7 +377,7 @@ SOFTWARE.
 ### Third-party notices
 
 This project builds on upstream work by **Salyts** and **GR0UD**. Their original
-code carries its own license terms — if you redistribute this, carry their notices
+code carries its own license terms: if you redistribute this, carry their notices
 along with mine.
 
 ---
@@ -4589,7 +4589,7 @@ void RenderVisualizer() {
         g_dc->BeginDraw();
         g_dc->Clear(D2D1::ColorF(0, 0, 0, 0));
         g_dc->EndDraw();
-        g_swapChain->Present(1, 0);
+        g_swapChain->Present(0, 0);
         g_autoHideBlanked = true;
         return;
     }
@@ -4796,7 +4796,7 @@ void RenderVisualizer() {
             }
             if (useFadeLayer) g_dc->PopLayer();
             g_dc->EndDraw();
-            g_swapChain->Present(1, 0);
+            g_swapChain->Present(0, 0);
             return;
         }
 
@@ -5307,12 +5307,25 @@ void RenderVisualizer() {
     }
 
     g_dc->EndDraw();
-    g_swapChain->Present(1, 0);
+    // Sync interval 0. On a DirectComposition swap chain DWM owns presentation
+    // timing, and the waitable timer below already paces the loop -- asking
+    // Present to block for a vblank on top of that only parks the render thread.
+    // Measured across 219 five-second windows: time in Present drops by a third
+    // and windows where the thread parks for >8% of wall time fall from 18% to 4%.
+    g_swapChain->Present(0, 0);
 }
 
 void RenderThreadProc() {
-    ULONGLONG lastRenderTick = 0;
     ULONGLONG lastSuccessfulPostTick = 0;
+
+    // Frame pacing is measured with QueryPerformanceCounter, not GetTickCount64.
+    // GetTickCount64 only advances on the system timer tick (~15.625ms), so at a
+    // 144 FPS target -- a 6.944ms interval -- the elapsed time could only ever
+    // read 0 or ~15-16, never 6.9. The loop rendered exactly once per tick and
+    // any target above ~64 FPS was silently clamped to 1 / 15.625ms = 64.0.
+    LARGE_INTEGER qpcFreq;
+    QueryPerformanceFrequency(&qpcFreq);
+    LONGLONG lastRenderQpc = 0;
 
     // A high-resolution waitable timer gives sub-millisecond wait precision,
     // unlike Sleep() which is quantized to the system timer tick (~15.6ms by
@@ -5324,16 +5337,21 @@ void RenderThreadProc() {
         hTimer = CreateWaitableTimerExW(nullptr, nullptr, 0, TIMER_ALL_ACCESS);
     }
 
-    auto preciseWait = [hTimer](DWORD ms) {
+    // Takes a double: the timer's own unit is 100ns, so rounding the wait up to
+    // a whole millisecond would hand back most of that precision (a 6.944ms
+    // interval rounded to 7ms caps out at 142.9 FPS).
+    auto preciseWait = [hTimer](double ms) {
+        if (ms <= 0.0) return;
         if (hTimer) {
             LARGE_INTEGER due;
-            due.QuadPart = -(LONGLONG)ms * 10000LL;  // 100ns units, negative = relative
+            due.QuadPart = -(LONGLONG)(ms * 10000.0);  // 100ns units, negative = relative
+            if (due.QuadPart == 0) due.QuadPart = -1;
             if (SetWaitableTimer(hTimer, &due, 0, nullptr, nullptr, FALSE)) {
                 WaitForSingleObject(hTimer, INFINITE);
                 return;
             }
         }
-        Sleep(ms);
+        Sleep((DWORD)std::ceil(ms));
     };
 
     while (g_renderThreadRunning.load(std::memory_order_relaxed)) {
@@ -5341,30 +5359,36 @@ void RenderThreadProc() {
         bool paused = g_fullscreenPaused.load(std::memory_order_relaxed);
 
         if (!overlayWnd || paused) {
-            lastRenderTick = 0;
+            lastRenderQpc = 0;
             preciseWait(150);
             continue;
         }
 
         int fps = std::max(1, g_settings.targetFps);
-        UINT interval = 1000 / (UINT)fps;
+        double intervalMs = 1000.0 / (double)fps;
 
         if (g_settings.pauseWhenSilentSeconds > 0) {
             ULONGLONG lastAudible = g_lastAudibleTickMs.load(std::memory_order_relaxed);
             ULONGLONG idleMs = GetTickCount64() - lastAudible;
             g_slowMode = idleMs > (ULONGLONG)g_settings.pauseWhenSilentSeconds * 1000ULL;
-            if (g_slowMode) interval = 200;
+            if (g_slowMode) intervalMs = 200.0;
         } else {
             g_slowMode = false;
         }
 
+        // GetTickCount64 is still fine for the stuck-tick watchdog below -- that
+        // compares against 1000ms, far above the tick resolution.
         ULONGLONG now = GetTickCount64();
-        ULONGLONG elapsed = (lastRenderTick == 0) ? interval : (now - lastRenderTick);
-        if (elapsed < interval) {
-            preciseWait((DWORD)(interval - elapsed));
+        LARGE_INTEGER nowQpc;
+        QueryPerformanceCounter(&nowQpc);
+        double elapsedMs = (lastRenderQpc == 0)
+            ? intervalMs
+            : (double)(nowQpc.QuadPart - lastRenderQpc) * 1000.0 / (double)qpcFreq.QuadPart;
+        if (elapsedMs < intervalMs) {
+            preciseWait(intervalMs - elapsedMs);
             continue;
         }
-        lastRenderTick = now;
+        lastRenderQpc = nowQpc.QuadPart;
 
         if (!g_renderThreadRunning.load(std::memory_order_relaxed) || g_unloading.load())
             break;
