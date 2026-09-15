@@ -13,7 +13,7 @@ Play music. Bars dance on your wallpaper. That's the whole idea.
 
 It listens to **whatever your PC is already playing** - Spotify, YouTube, a game, a call - and draws it behind your desktop icons. No virtual audio cable, no drivers, nothing to configure. It just picks up your system audio.
 
-This project rebuilt how it draws itself — frame pacing, blur caching, and render-surface sizing — for **roughly half the CPU and 18 °C cooler**, plus a pile of new shapes, colors and controls.
+This project rebuilt how it draws itself (frame pacing, blur caching, and render-surface sizing) for **roughly half the CPU and 18 °C cooler**, plus a pile of new shapes, colors and controls.
 
 ## ABOUT THIS PROJECT
 
@@ -139,7 +139,7 @@ The built-in **Tourne** color mode is drawn from these.
 **Orientation** - *Horizontal* = a row of bars growing up and down. *Vertical* = a column growing left and right.
 > The Oscilloscope follows Orientation as of v0.8.1 - in Vertical it's the horizontal layout rotated 90° clockwise, sweeping top to bottom. It still ignores Anchor. Its extent along the sweep axis is governed by Bar Count × Bar Width even though it has no bars, so if you're using it, expect to size it through those two settings rather than Bar Max Size.
 
-**Bar Count** - How many bars. More = finer detail, wider visualizer. Range **1–2048** (enough to span a 4K or ultrawide screen).
+**Bar Count** - How many bars. More = finer detail, wider visualizer. Range **1-2048** (enough to span a 4K or ultrawide screen).
 
 **Bar Width** - How fat each bar is, in pixels.
 
@@ -158,14 +158,14 @@ The built-in **Tourne** color mode is drawn from these.
 
 **Gradient Color 1 / 2** - Start and end colors for the gradient modes.
 
-**Sensitivity** - How hard the bars react. Too low and quiet music barely moves them; too high and everything slams to max. Range 0–300. Turn it down for bass-heavy tracks, up for quiet recordings.
+**Sensitivity** - How hard the bars react. Too low and quiet music barely moves them; too high and everything slams to max. Range 0-300. Turn it down for bass-heavy tracks, up for quiet recordings.
 > **Heads up:** past a certain point, raising Sensitivity mostly makes quiet passages louder rather than making loud passages hit any harder - once a band's signal is strong enough to reach max bar height, more gain has nothing left to add there. See **Sensitivity Curve** below for how that ceiling is handled.
 
 **Sensitivity Curve** - How the top of the Sensitivity range is handled once a frequency band would otherwise overshoot max bar height.
 - **Exponential (Soft)** - smoothest rolloff, but starts softening the loudest parts earliest.
 - **Knee (Balanced)**, default - quiet-to-moderate signal is left completely untouched, only the loud end gets compressed. Closest to how the visualizer looked before this setting existed, but with the "everything above X does nothing" problem fixed.
 - **Power (Headroom)** - cheapest curve, gives the most headroom before compressing kicks in, at the cost of being the least tunable at the very top.
-> **In short:** all three still hit max bar height on loud audio, but none of them silently discard how *far* above max the signal actually is anymore - Sensitivity now visibly does something across its whole 0–300 range instead of flatlining early.
+> **In short:** all three still hit max bar height on loud audio, but none of them silently discard how *far* above max the signal actually is anymore - Sensitivity now visibly does something across its whole 0-300 range instead of flatlining early.
 
 **Motion Smoothing** - Slows down how quickly bars rise and fall toward their target level. `0` is the original snappy response; raising it trades a bit of responsiveness for steadier, easier-to-read motion. Useful when the bars are rendered small on the desktop, where fast per-frame jitter is hard to track visually.
 
@@ -401,9 +401,9 @@ This barely registers as CPU% in Task Manager, because the thread is blocked, no
 
 > **Note:** this becomes exponentially more noticeable on AMD architecture.
 >
-> **Note:** also exponentially more noticeable if you have **C-States disabled** in your BIOS or elsewhere. Shoutout to Process Lasso, Core Director, Park Control and HWiNFO64 for helping me debug why the hell all my E-cores were sitting at 65–70 °C when they were supposed to be idle during my initial baseline testing.
+> **Note:** also exponentially more noticeable if you have **C-States disabled** in your BIOS or elsewhere. Shoutout to Process Lasso, Core Director, Park Control and HWiNFO64 for helping me debug why the hell all my E-cores were sitting at 65-70 °C when they were supposed to be idle during my initial baseline testing.
 
-**Fixed with** a high-resolution waitable timer firing only at the configured rate. Plain `Sleep()` wasn't good enough - it's quantized to ~15.6 ms, which would turn a 60 FPS target into stuttery 30–40 FPS.
+**Fixed with** a high-resolution waitable timer firing only at the configured rate. Plain `Sleep()` wasn't good enough - it's quantized to ~15.6 ms, which would turn a 60 FPS target into stuttery 30-40 FPS.
 
 ### 2. Pre-rendered background blur
 
@@ -478,7 +478,7 @@ That matches the root cause the profiler found: a render thread waking on every 
 | GPU power | 21.81 W | 21.24 W |
 | GPU temperature | 35.6 °C | 36.5 °C |
 
-**These differences are inside measurement noise - don't read them as real changes in either direction.** A flat GPU reading is exactly the right outcome here: this workload was never GPU-bound. It sits at 7–8 % in both builds. The blur fix moved work off the CPU-side Direct2D path; it was never going to show as a GPU reduction at this scale.
+**These differences are inside measurement noise - don't read them as real changes in either direction.** A flat GPU reading is exactly the right outcome here: this workload was never GPU-bound. It sits at 7-8 % in both builds. The blur fix moved work off the CPU-side Direct2D path; it was never going to show as a GPU reduction at this scale.
 
 I'm still working on the GPU side - I'd like both CPU and GPU sitting at a 3 % ceiling. It's already better than these numbers show; `.etl` traces are just enormous and parsing them means fighting a Windows tool currently stranded in a dead preview branch. Forgive me.
 
