@@ -94,6 +94,56 @@ Discard the first window after every change — it carries the rebuild hitch.
 
 ## What this does not settle
 
-Finding #5's premise was *"the shell's UI thread is parked inside `Present`"*, written against the old `@include explorer.exe` design. As a tool mod, `RenderVisualizer` runs on the mod's **own process**. Even if the 3.95% had been 40%, it would not be touching desktop responsiveness.
+**The measurement above was taken at 64 fps against a 144 fps target.** See below — the frame rate was capped by a pacing bug, not by choice.
 
-That architectural argument stands on its own. What these numbers add is the ability to say *"and here is what it actually costs"* rather than *"I don't think that applies."*
+That matters, because finding #5 predicts parking *"whenever the target FPS meets or exceeds the refresh rate."* At 64 fps on a 144 Hz display that precondition was never met. The data above is real, but it does **not** refute the finding — it was collected under conditions where the finding would not bite regardless. The question is still open until the same measurement is repeated at a genuine 144 fps.
+
+Finding #5's premise was also *"the shell's UI thread is parked inside `Present`"*, written against the old `@include explorer.exe` design. As a tool mod, `RenderVisualizer` runs on the mod's **own process**, so even a large figure would not be touching desktop responsiveness. That architectural argument stands on its own, independent of any measurement.
+
+---
+
+# `tourne-table-bench-qpc.wh.cpp` — the pacing fix
+
+A second instrument, identical to the one above except for frame pacing. Third `@id` (`tourne-table-bench-qpc`) so all three builds can be installed side by side.
+
+## The bug it fixes
+
+The shipping build measures elapsed frame time with `GetTickCount64()`:
+
+```cpp
+UINT interval = 1000 / (UINT)fps;              // 144 -> 6 ms (and 6.944 truncated)
+ULONGLONG now = GetTickCount64();              // ~15.625 ms resolution
+ULONGLONG elapsed = now - lastRenderTick;
+if (elapsed < interval) { preciseWait(interval - elapsed); continue; }
+```
+
+`GetTickCount64()` only advances on the system timer tick — **15.625 ms**. So `elapsed` can only ever read 0 or ~15–16. It can never read 6. The loop waits while `elapsed == 0`, then renders the instant the tick advances: **one frame per system tick = 1 ÷ 15.625 ms = 64.0 fps**.
+
+This caps *any* Target FPS above ~64. Measured: 63.97 fps (SD 0.158) against a 144 target.
+
+The waitable timer was never at fault — it is created with `CREATE_WAITABLE_TIMER_HIGH_RESOLUTION` and `preciseWait()` is accurate. Only the elapsed-time measurement was too coarse to use it.
+
+## What changed
+
+| | |
+|:--|:--|
+| Elapsed time | `QueryPerformanceCounter` instead of `GetTickCount64` — sub-microsecond, so a 6.944 ms interval is resolvable |
+| Interval | `1000.0 / (double)fps` instead of `1000 / (UINT)fps` — 6.944 ms, not 6 |
+| `preciseWait` | takes a `double`; the timer's own unit is 100 ns, so rounding to whole milliseconds would give back most of the precision (7 ms → 142.9 fps) |
+| Watchdog | still uses `GetTickCount64` — it compares against 1000 ms, far above the tick resolution |
+| Log line | adds `target=N` so requested vs achieved is unambiguous |
+
+**Not** fixed with `timeBeginPeriod()`. Raising the global timer resolution would also work, but it degrades system-wide power behaviour — the opposite of this mod's purpose.
+
+## What to measure
+
+Install all three, enable one at a time, **Target FPS 144** throughout.
+
+1. **`tourne-table-bench`** — expect ~64 fps. Confirms the cap.
+2. **`tourne-table-bench-qpc`** — expect ~144 fps. Confirms the fix.
+3. **`tourne-table-bench-qpc` at sync=1 vs sync=0** — this is the real test of finding #5, now that the target actually meets the refresh rate.
+
+Watch for two things beyond frame rate:
+
+- **CPU cost.** At 144 fps the render thread wakes 144×/sec instead of 64. The mod's cost should rise, plausibly close to double. That is the price of the setting working as documented, and it needs to be known before any performance claim is repeated.
+- **Whether `Present` starts blocking.** If `blocked %` jumps materially at 144 fps with `sync=1`, finding #5 was right and the precondition simply was never reached before.
