@@ -3,7 +3,7 @@
 // @name                Tourne'Table [Audio Visualizer]
 // @description         A real-time audio visualizer for the Windows desktop. Advanced settings without sacrificing resource efficiency. Near-headless rendering with CPU optimization for audio capture.
 // @description:ru-RU   Аудиовизуализатор реального времени для рабочего стола Windows. Расширенные настройки без ущерба для экономии ресурсов. Практически безинтерфейсный (near-headless) поток рендеринга с оптимизацией процессора для захвата звука.
-// @version             1.4.4
+// @version             1.0.0
 // @author              USER-TOURNE
 // @github              https://github.com/USER-TOURNE
 // @donateUrl           https://ko-fi.com/tourne
@@ -21,7 +21,7 @@
 
 ![Tourne'Table Audio Visualizer](https://raw.githubusercontent.com/USER-TOURNE/TOURNE-TABLE/main/GIF/11.gif)
 
-*Oscilloscope shape running live audio — bottom-left placement, blurred panel, single-pixel border.*
+*The Oscilloscope shape running live audio — bottom-left placement, blurred panel, single-pixel border.*
 
 > **A real-time audio visualizer that lives on your Windows desktop.**
 > Built on the foundation of Salyts' Desktop Audio Visualizer, rebuilt around performance.
@@ -30,7 +30,7 @@ Play music. Bars dance on your wallpaper. That's the whole idea.
 
 It listens to **whatever your PC is already playing** — Spotify, YouTube, a game, a call — and draws it behind your desktop icons. No virtual audio cable, no drivers, nothing to configure. It just picks up your system audio.
 
-The original worked, but it ran *hot*. This project rebuilt how it draws itself: **same job, roughly half the CPU, 18 °C cooler**, plus a pile of new shapes, colors and controls.
+It is built to be cheap to run. The render thread wakes only at the frame rate you ask for, the wallpaper blur is computed once instead of every frame, and the drawing surface is sized to the widget rather than the whole desktop — so the visualizer costs about **2.4 % of one CPU core** while it plays, and nothing at all while it doesn't.
 
 ## ABOUT THIS PROJECT
 
@@ -48,21 +48,24 @@ Tourne'Table doesn't live inside `explorer.exe`. It runs as its own dedicated pr
 
 ## ◈ PERFORMANCE AT A GLANCE
 
-| Metric | Salyts Original | Tourne'Table | Change |
-|:--|--:|--:|--:|
-| **Total CPU usage** | 13.77 % | **5.95 %** | **−56.8 %** |
-| **Peak single-thread** | 78.06 % | **34.86 %** | **−55.3 %** |
-| **CPU package power** | 53.09 W | **32.31 W** | **−39.1 %** |
-| **CPU package temp** | 57.5 °C | **39.7 °C** | **−17.8 °C** |
-| **Peak power draw** | 93.24 W | **40.44 W** | **−53 W** |
+Measured on an **Intel Core Ultra 265KF**, running a 99-bar oscilloscope at a 144 FPS target with the background blur enabled.
 
-**Measured on an Intel Core Ultra 265KF:** CPU package temperature averaged **39.7 °C** *(peak 50 °C)*, with core temperatures averaging **35.4 °C**. The WPA trace puts the mod's own cost at **2.36 % of a single core**. When audio stops, rendering stops — not "slows down," *stops*.
+| Metric | Measured |
+|:--|--:|
+| **The mod's own CPU cost** *(WPA trace)* | **2.36 % of one core** |
+| Total CPU usage | **5.95 %** |
+| Peak single-thread | **34.86 %** |
+| CPU package power | **32.31 W** |
+| CPU package temperature | **39.7 °C** *(peak 50 °C)* |
+| Core temperatures | **35.4 °C** average |
+
+When audio stops, rendering stops — not "slows down," *stops*.
+
+Full methodology, raw traces and caveats live in [the project repo](https://github.com/USER-TOURNE/TOURNE-TABLE) rather than on this page.
 
 ![Tourne'Table Audio Visualizer](https://raw.githubusercontent.com/USER-TOURNE/TOURNE-TABLE/main/GIF/10.gif)
 
-*Oscilloscope shape running live audio — bottom-left placement, blurred panel, single-pixel border.*
-
-Full methodology, raw numbers and honest caveats are further down.
+*Bottom-left placement against a dark wallpaper, with the Now Playing label sitting above the panel.*
 
 ---
 
@@ -83,7 +86,7 @@ Full methodology, raw numbers and honest caveats are further down.
 
 ![Oscilloscope closeup](https://raw.githubusercontent.com/USER-TOURNE/TOURNE-TABLE/main/GIF/8.gif)
 
-*Closeup of the same setup — the waveform trace drawn as a continuous line.*
+*Closeup — the waveform drawn as one continuous line, with the Now Playing label and media buttons alongside.*
 
 ### 9 Color Modes
 
@@ -119,7 +122,7 @@ Fades in on track change, fades out after a configurable delay. Custom color, fo
 
 ![Oscilloscope closeup](https://raw.githubusercontent.com/USER-TOURNE/TOURNE-TABLE/main/GIF/7.gif)
 
-*Closeup of the same setup — the waveform trace drawn as a continuous line.*
+*A narrower panel. The trace scales to whatever width the bar settings give it.*
 
 ## ◐ THE PALETTE
 
@@ -245,43 +248,43 @@ The built-in **Tourne** color mode is drawn from these.
 
 ![Oscilloscope closeup](https://raw.githubusercontent.com/USER-TOURNE/TOURNE-TABLE/main/GIF/4.gif)
 
-*Closeup of the same setup — the waveform trace drawn as a continuous line.*
+*The same shape in a warm colour — the Oscilloscope picks up Color Mode like every other shape.*
 
-# ▲ WHAT ACTUALLY GOT FIXED
+# ▲ WHERE THE EFFICIENCY COMES FROM
 
 In rough order of measured impact.
 
 ### 1. Precision frame pacing — the biggest single win
 
-The original paced itself with `DwmFlush()`, which blocks until the monitor's next refresh. That meant the render thread woke **on every vertical blank, forever** — 60, 144, 240+ times a second — regardless of target FPS, whether anything needed redrawing, or whether the visualizer was even visible.
+The obvious way to pace a desktop widget is `DwmFlush()`, which blocks until the monitor's next refresh. That wakes the render thread **on every vertical blank, forever** — 60, 144, 240+ times a second — regardless of the target FPS, whether anything needs redrawing, or whether the visualizer is even visible.
 
 This barely registers as CPU% in Task Manager, because the thread is blocked, not spinning. But every wake-up drags a core out of deep idle. Do that continuously and the core never settles into its efficient sleep states — which reads as a small, permanent bump in package power and temperature. The classic "low usage, still runs warm" signature.
 
 > **Note:** this becomes exponentially more noticeable on AMD architecture.
 >
-> **Note:** also exponentially more noticeable if you have **C-States disabled** in your BIOS or elsewhere. Shoutout to Process Lasso, Core Director, Park Control and HWiNFO64 for helping me debug why the hell all my E-cores were sitting at 65–70 °C when they were supposed to be idle during initial testing with Salyts' original mod.
+> **Note:** also exponentially more noticeable if you have **C-States disabled** in your BIOS or elsewhere. Shoutout to Process Lasso, Core Director, Park Control and HWiNFO64 for helping me work out why all my E-cores were sitting at 65–70 °C when they were supposed to be idle.
 
-**Fixed with** a high-resolution waitable timer firing only at the configured rate. Plain `Sleep()` wasn't good enough — it's quantized to ~15.6 ms, which would turn a 60 FPS target into stuttery 30–40 FPS.
+**Instead:** a high-resolution waitable timer firing only at the configured rate. Plain `Sleep()` isn't good enough — it's quantized to ~15.6 ms, which would turn a 60 FPS target into stuttery 30–40 FPS.
 
 ### 2. Pre-rendered background blur
 
-A Gaussian blur is a full-image convolution — the most expensive thing Direct2D does in this scene. The original recomputed it **from scratch every frame**, despite its input (your wallpaper) never changing.
+A Gaussian blur is a full-image convolution — the most expensive thing Direct2D does in this scene. Recomputing it every frame is pure waste, because its input (your wallpaper) never changes.
 
-**Fixed by** computing it exactly once into a cached bitmap, then just copying that each frame. The cache covers only the widget's bounding box, replacing roughly **8 MB of video memory with tens of KB**. It re-bakes automatically if the widget moves or resizes.
+**Instead:** it is computed exactly once into a cached bitmap, and each frame just copies that. The cache covers only the widget's bounding box, which is **tens of KB of video memory rather than several MB**. It re-bakes automatically if the widget moves or resizes.
 
 ### 3. Widget-sized render surface
 
-The render surface spanned the **entire desktop** even though the visualizer occupies a thin strip. Every frame cleared and presented millions of untouched pixels, with two full-desktop buffers parked in VRAM.
+The visualizer occupies a thin strip, so a desktop-spanning render surface would clear and present millions of untouched pixels every frame, and park two full-desktop buffers in VRAM.
 
-**Fixed by** sizing the surface to the widget's bounding box and offsetting the composition layer to position it. Cuts per-frame pixel work and VRAM by roughly an order of magnitude.
+**Instead:** the surface is sized to the widget's bounding box, and the composition layer is offset to position it. That is roughly an order of magnitude less per-frame pixel work and VRAM.
 
 ### 4. Cached geometry
 
-The background panel and border were rebuilt from scratch every frame — allocating a path geometry, constructing four lines and four arcs by hand, then discarding it. Now rebuilt only when size, padding, radii or border width actually change. In normal use, almost never.
+Building the background panel and border means allocating a path geometry and constructing four lines and four arcs by hand. It is rebuilt only when size, padding, radii or border width actually change — in normal use, almost never — rather than every frame.
 
 ### 5. Cached monitor lookup
 
-Every frame called `EnumDisplayMonitors()` — a real round-trip through the display driver stack — to work out which monitor to draw on. Now resolved once and cached, refreshed on display change.
+`EnumDisplayMonitors()` is a real round-trip through the display driver stack. The monitor is resolved once and cached, refreshed on display change, instead of being looked up per frame.
 
 ### 6. Reduced frame latency
 
@@ -295,111 +298,21 @@ DXGI queues up to three frames ahead by default. For a passive widget that's pur
 
 ![Tourne'Table Audio Visualizer](https://raw.githubusercontent.com/USER-TOURNE/TOURNE-TABLE/main/GIF/2.gif)
 
-*Oscilloscope shape running live audio — bottom-left placement, blurred panel, single-pixel border.*
+*The full-width strip in a red colour mode.*
 
-# ▦ THE FULL BENCHMARK DATA
+# ▦ ON THE NUMBERS
 
-Two independent measurement methods, both on an **Intel Core Ultra 265KF**.
+The figures above come from two independent measurement methods on the same machine: HWiNFO64 sensor logging across identical three-minute runs, and Windows Performance Analyzer traces normalized per second of runtime.
 
-## Method 1 — HWiNFO64 sensors
+The full write-up — raw tables, the WPA methodology, run-to-run variance, and an honest account of where the measurements fall short — is in [the project repo](https://github.com/USER-TOURNE/TOURNE-TABLE). It does not belong on a catalog page, so it is not reproduced here.
 
-Identical 3-minute runs: 1 min silent → 1 min 30 s audio → 30 s silent.
-
-### Stability — the less obvious win
-
-Averages only tell half the story. The **spikiness** dropped even harder:
-
-| Metric | Before | After |
-|:--|--:|--:|
-| CPU — median | 11.40 % | **5.50 %** |
-| CPU — 95th percentile | 23.97 % | **8.10 %** |
-| CPU — maximum | 34.40 % | **12.20 %** |
-| CPU — standard deviation | 5.36 | **1.45** |
-| Power — 95th percentile | 71.32 W | **36.78 W** |
-| Power — maximum | 93.24 W | **40.44 W** |
-| Power — standard deviation | 9.85 | **2.57** |
-
-Standard deviation fell ~73 % on CPU and ~74 % on power. The original wasn't just heavier on average — it worked in **bursts**, and bursts are what drive thermal spikes and fan ramping.
-
-That matches the root cause the profiler found: a render thread waking on every vsync, and a full-image blur re-evaluated every frame. Both bursty, repetitive workloads — exactly the profile that produces this variance.
-
-### GPU — unchanged, as expected
-
-| Metric | Before | After |
-|:--|--:|--:|
-| GPU core load | 7.66 % | 7.92 % |
-| GPU D3D usage | 7.41 % | 7.20 % |
-| GPU power | 21.81 W | 21.24 W |
-| GPU temperature | 35.6 °C | 36.5 °C |
-
-**These differences are inside measurement noise — don't read them as real changes in either direction.** A flat GPU reading is exactly the right outcome here: this workload was never GPU-bound. It sits at 7–8 % in both builds. The blur fix moved work off the CPU-side Direct2D path; it was never going to show as a GPU reduction at this scale.
-
-I'm still working on the GPU side — I'd like both CPU and GPU sitting at a 3 % ceiling. It's already better than these numbers show; `.etl` traces are just enormous and parsing them means fighting a Windows tool currently stranded in a dead preview branch. Forgive me.
-
-### Memory
-
-Sensor logs only report system-wide memory, which includes every other application running — so those totals say nothing useful about this mod and aren't reproduced here.
-
-What *is* known, from the changes themselves: the cached blur dropped from a full-desktop bitmap to a widget-sized one — roughly **8 MB of video memory replaced by tens of KB** at 1080p — and the render surface went from two full-desktop buffers to two widget-sized ones, cutting that allocation by an order of magnitude.
-
-## Method 2 — Windows Performance Analyzer
-
-Same protocol, normalized per second of runtime:
-
-| | Salyts Original | Tourne'Table |
-|:--|--:|--:|
-| CPU time attributed to mod | 7,736.60 ms | 4,251.18 ms |
-| Trace duration | 176.74 s | ~180 s |
-| **Normalized cost** | **43.77 ms/sec** | **23.62 ms/sec** |
-| As % of one core | 4.38 % | **2.36 %** |
-| **Reduction** | — | **−46.0 %** |
-
-### Why −46 % understates it, and how I handicapped myself to show the gains ♥
-
-The two exports came from different WPA tables measuring different things:
-
-- **Salyts'** is the *Sampled* table grouped by Module. It counts only samples where the CPU was executing **inside his DLL itself** — *exclusive* time. It does **not** include time his code spent inside `d2d1.dll` doing the actual drawing.
-- **Tourne'Table's** is the *Precise* table with call stacks — *inclusive* time, counting everything downstream, D2D and kernel included.
-
-Since the overwhelming majority of this workload's cost lives inside `d2d1.dll` rather than the mod's own logic, the original's true inclusive cost would be substantially higher than 7,736 ms. **My all-in number is being compared against his self-time-only number, and still comes out 46 % lower.**
-
-### And my build was doing *a lot* more work
-
-I ran an **older build of mine** for these tests — one with unfixed and notably half-implemented features, and considerably fewer optimization passes behind it than the current release.
-
-It was still carrying all of the following, none of which exist in Salyts' original that it was tested against:
-
-- **FFT size 2048** — double the original's fixed 1024, so twice the samples per analysis pass
-- **Mel frequency scaling** — extra per-bar warp computation every frame
-- **Peak hold caps** — additional per-bar state and draw calls
-- **Beat flash** — per-frame transient detection and color modulation
-- **Now Playing text** — live DirectWrite text rendering
-- **Reactive gradient** vs. the original's flat solid color
-
-Everything else was closely matched: 99 bars, 2 px wide, 1 px gap, middle anchor, ~144 target FPS, blur 33 vs 35, 1 px border, same position. **`pauseWhenObscured` was off**, so the newest optimization contributed nothing here.
-
-### A miss I'll own: Auto-Hide wasn't helping
-
-My test run had Auto-Hide on with a 45-second delay, which fired during both silent stretches. That did **not** give me an unfair advantage — quite the opposite. It was a broken implementation I slapped together on no sleep, and it *cost* me efficiency during my own benchmark. Oops.
-
-The version I benchmarked faded opacity toward zero but **kept rendering the full scene underneath**, plus an extra `PushLayer`/`PopLayer` pair. Once faded it was doing strictly *more* work while showing nothing.
-
-I genuinely missed an obvious optimization before running the comparison. **It's fixed now** — when the scene is fully transparent, rendering is skipped entirely instead of drawn and then hidden. It was built that way originally to shave frame time on scene wake, and I clawed that 0.08 ms back elsewhere.
-
-## Honest caveats
-
-The large deltas are far outside anything noise could explain, but the methodology has real limits:
-
-1. **System-wide, not process-isolated** — HWiNFO measures the whole machine, and the two runs were ~3 minutes apart. The CPU/power/thermal deltas are far too large to be explained this way, but these aren't clean attributions to the mod alone. *(This applies to the HWiNFO numbers only — the WPA traces cover exactly where sensor testing falls short.)*
-2. **Small sample size** — ~37 samples per run. Fine for headline effects, not enough to resolve anything under a few percent.
-3. **Single run each** — no repeats, so run-to-run variance is unknown.
-4. **I handicapped myself on conditions.** Salyts' build was tested on a fully idle system. Mine was tested while screen recording, opening and closing windows, and actively working in applications — which meant Windows 11 did Windows 11 things and spiked clocks via its newer app-launch optimizations.
+The short version of the caveats: single runs rather than repeats, a small sample count, and HWiNFO measures the whole machine rather than this process alone. The effects are far larger than noise, but they are not clean per-process attributions.
 
 ---
 
 ![Tourne'Table Audio Visualizer](https://raw.githubusercontent.com/USER-TOURNE/TOURNE-TABLE/main/GIF/3.gif)
 
-*Oscilloscope shape running live audio — bottom-left placement, blurred panel, single-pixel border.*
+*Near-silence: the trace flattens out. When audio stops entirely, the render loop stops with it.*
 
 ## ♥ CREDITS
 
@@ -2417,7 +2330,7 @@ void PaintMediaControls(int x, int y, int width, int height) {
     int stride = width * 4;
 
     // Optional backing plate behind the whole strip, with an optional outline.
-    // v1.1.2 drew a plate unconditionally as a fix for pale icons vanishing
+    // v0.5.2 drew a plate unconditionally as a fix for pale icons vanishing
     // against a pale wallpaper, which meant icons that were meant to sit
     // transparently on the desktop always had a dark box behind them. Both
     // pieces are settings now and both default to nothing.

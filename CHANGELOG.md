@@ -2,19 +2,27 @@
 
 *A lite version history for `Tourne'Table [Audio Visualizer]`.*
 
+> Everything below `v1.0.0` is pre-release development history, numbered `0.1.0` upward toward the first release. The internal build numbers used while this was being written have been folded into that sequence, so a version referenced inside one of these entries always matches a heading in this file.
+
 ---
 
-## ❀ v1.4.4 — The Buttons Were Padded, the Clicks Were Not
+## ❀ v1.0.0 — First Release
+
+The first public release of `Tourne'Table [Audio Visualizer]`. Everything below this line is the road that got here.
+
+**What ships in 1.0:** 8 shapes and 9 color modes, a configurable FFT with log / linear / mel frequency scaling, a peak-frequency readout, Now Playing text with album-art coloring from the native Windows media session, a clickable media control strip, keyboard and drag repositioning for every movable piece, independent panels and borders behind each text overlay, per-side padding that can shrink as well as grow, settings validation that tells you when a value didn't parse instead of silently defaulting, and idle behavior that stops rendering entirely when the audio stops.
+
+It runs as its own process rather than inside `explorer.exe`, and draws behind the desktop icons.
 
 ### ✦ Fixed: media control clicks landed left of the buttons
 
-Introduced by the padding setting in v1.4.2 and caught on a read-through, not in use.
+Introduced by the padding setting in v0.8.2 and caught on a read-through, not in use.
 
 `PaintMediaControls` draws the first icon inset by the plate padding. The click handler in `MediaWndProc` was never updated to match, and kept testing from the left edge of the window — so every button's clickable region sat `padding` pixels to the left of the button actually drawn there.
 
 At a small padding it read as buttons that were slightly awkward to hit near their right edge. Once padding exceeded the icon spacing, the regions shifted far enough that clicking **Play** triggered **Previous**.
 
-Only reachable with **Backing Plate Padding** above `0`. At the default of `0` the two agreed exactly, which is why v1.4.2 looked correct.
+Only reachable with **Backing Plate Padding** above `0`. At the default of `0` the two agreed exactly, which is why v0.8.2 looked correct.
 
 ### ✦ Note
 
@@ -22,7 +30,7 @@ Vertically the whole strip stays clickable, padding included, rather than only t
 
 ---
 
-## ❀ v1.4.3 — Every Color Setting's Help Text Was Cut in Half
+## ❀ v0.9.0 — Every Color Setting's Help Text Was Cut in Half
 
 ### ✦ Fixed: settings descriptions truncated at "Format is"
 
@@ -45,11 +53,11 @@ The mod's own settings validator can't catch this class of bug: it checks what u
 
 ---
 
-## ❀ v1.4.2 — Padding for the Media Controls Plate
+## ❀ v0.8.2 — Padding for the Media Controls Plate
 
 ### ✦ New: `Media Controls ▸ Backing Plate Padding`
 
-The Now Playing and frequency readout panels each got a padding setting in v1.4.0 and the media plate did not, which left its border and fill sitting flush against the icons with no way to open them up.
+The Now Playing and frequency readout panels each got a padding setting in v0.8.0 and the media plate did not, which left its border and fill sitting flush against the icons with no way to open them up.
 
 It **grows the strip** rather than shrinking the icons, so turning it up never makes the buttons smaller or harder to click.
 
@@ -68,7 +76,7 @@ The travel-range helper used by keyboard move duplicates the strip's sizing math
 
 ---
 
-## ❀ v1.4.1 — The Oscilloscope Respects Orientation
+## ❀ v0.8.1 — The Oscilloscope Respects Orientation
 
 ### ✦ Fixed: the Oscilloscope drew sideways when Orientation was Vertical
 
@@ -80,7 +88,7 @@ It's now the horizontal layout rotated 90° clockwise: the sweep runs **top to b
 
 ---
 
-## ❀ v1.4.0 — Panels and Borders for the Overlays
+## ❀ v0.8.0 — Panels and Borders for the Overlays
 
 Everything that draws on top of the wallpaper can now have something behind it.
 
@@ -107,13 +115,13 @@ Layout reserves room for the padding and border as well as the offset, so a pane
 
 ---
 
-## ❀ v1.3.0 — Transparent Icons Actually Transparent, Movable Text, Partial-Coverage Pausing
+## ❀ v0.7.0 — Transparent Icons Actually Transparent, Movable Text, Partial-Coverage Pausing
 
-All four from real-world use of v1.2.0.
+All four from real-world use of v0.6.0.
 
 ### ✦ Fixed: the dark box behind the media icons
 
-v1.1.2 added a translucent dark backing plate behind the icon strip to fix pale icons vanishing against a pale wallpaper. It was drawn unconditionally — which meant icons with their own transparency could never look transparent, because there was always a plate behind them.
+v0.5.2 added a translucent dark backing plate behind the icon strip to fix pale icons vanishing against a pale wallpaper. It was drawn unconditionally — which meant icons with their own transparency could never look transparent, because there was always a plate behind them.
 
 It's a setting now, **fully transparent by default**: `Media Controls ▸ Backing Plate Color`, with a corner radius to match. The contrast fix is still one alpha value away (`#8C141414` restores the old look) but you're no longer opted into it.
 
@@ -165,9 +173,9 @@ The same caveat is now in the modifier's own hover text and in the README, inclu
 
 ---
 
-## ❀ v1.2.0 — Keyboard Move, Media Controls Fixed, Settings That Tell You When They're Wrong
+## ❀ v0.6.0 — Keyboard Move, Media Controls Fixed, Settings That Tell You When They're Wrong
 
-v1.1.3 moved the drag hook off the render thread and it *still* felt like dragging through mud. So this release stops trying to make cursor-chasing fast and does the thing that doesn't need to be fast.
+v0.5.3 moved the drag hook off the render thread and it *still* felt like dragging through mud. So this release stops trying to make cursor-chasing fast and does the thing that doesn't need to be fast.
 
 ### ✦ New: Keyboard Move
 
@@ -208,9 +216,9 @@ Off-switch under **Settings Validation ▸ Warn About Invalid Settings**. The sa
 
 ---
 
-## ❀ v1.1.3 — Fixed: Drag Lag (For Real This Time)
+## ❀ v0.5.3 — Fixed: Drag Lag (For Real This Time)
 
-The diagnostic logging added in v1.1.2 paid off — the raw numbers pointed straight at the actual cause.
+The diagnostic logging added in v0.5.2 paid off — the raw numbers pointed straight at the actual cause.
 
 - **Fixed: dragging felt laggy/resistant the whole time, not just at release** — the drag hook and the render tick were sharing one thread. Every frame, that thread renders the visualizer via Direct2D and presents it, which can block for real time; while it's blocked, queued mouse-move messages back up behind it, so the box's position only advanced in bursts whenever a render tick let go of the thread — reads exactly like "laggy" or "resistant." The position math itself was correct throughout (confirmed from the logs), the display of it just kept getting stalled. Moved the mouse hook to its own dedicated thread, isolated from rendering, so cursor tracking is never delayed by a Present() call.
 - `g_cachedMonitor` made atomic — it's now read from a genuinely separate thread (the new drag-hook thread) instead of incidentally sharing the UI thread, so it needed real cross-thread safety instead of implicit same-thread ordering.
@@ -218,25 +226,25 @@ The diagnostic logging added in v1.1.2 paid off — the raw numbers pointed stra
 
 ---
 
-## ❀ v1.1.2 — Media Controls Contrast Fix + Drag Diagnostics
+## ❀ v0.5.2 — Media Controls Contrast Fix + Drag Diagnostics
 
-v1.1.1's fixes didn't resolve either report on retest -- this pass fixes one for real and adds logging for the other instead of guessing a third time.
+v0.5.1's fixes didn't resolve either report on retest -- this pass fixes one for real and adds logging for the other instead of guessing a third time.
 
 - **Fixed: Media Controls could be genuinely invisible** -- the default icon color is pure white on a fully transparent background; against a similarly light patch of wallpaper (easy to land on, since the default position sits near the bottom-center of the screen) that's close to indistinguishable. Added a translucent dark backing plate behind the whole icon strip, so it's visible against any wallpaper regardless of icon color.
-- **Drag rubberbanding not yet fixed** -- v1.1.1's desync theory didn't hold up (reducing the per-move workload made no difference on retest). Rather than guess again, added throttled diagnostic logging at drag start/move/end and at each render tick during a drag (`Wh_Log` lines prefixed `[Drag]`), so the next test run produces real evidence -- cursor position, computed travel range, resulting override percentage, and what the render tick actually saw -- instead of another speculative patch.
+- **Drag rubberbanding not yet fixed** -- v0.5.1's desync theory didn't hold up (reducing the per-move workload made no difference on retest). Rather than guess again, added throttled diagnostic logging at drag start/move/end and at each render tick during a drag (`Wh_Log` lines prefixed `[Drag]`), so the next test run produces real evidence -- cursor position, computed travel range, resulting override percentage, and what the render tick actually saw -- instead of another speculative patch.
 
 ---
 
-## ❀ v1.1.1 — Fixed: Drag Desync + Missing DPI Awareness
+## ❀ v0.5.1 — Fixed: Drag Desync + Missing DPI Awareness
 
-Found from actually running v1.1.0 for the first time -- thank you real-world testing.
+Found from actually running v0.5.0 for the first time -- thank you real-world testing.
 
 - **Fixed: dragging felt "laggy" and snapped back to the old spot on release** -- the window's on-screen position (updated on every mouse-move, from the drag hook) and the box's drawn content (only recomputed on the next render tick) were two independent calls to the same layout math, taken at different moments. During a fast continuous drag they drifted apart -- the window raced ahead, the content lagged behind -- and releasing let the content's next redraw "catch up," which read as snapping back. Fixed by having the regular render tick own repositioning every single frame, instead of the drag hook doing it separately on its own schedule.
-- **Added explicit Per-Monitor-V2 DPI awareness** -- running injected into `explorer.exe`, this was inherited for free (the shell is always DPI-aware). Running as our own standalone process since v1.0.0, nothing declared it, which risked every position/size calculation (the visualizer's own box, and the Media Controls window) running against a DPI-virtualized view of the desktop instead of true physical pixels on a scaled monitor -- plausibly why the Media Controls strip was hard to locate.
+- **Added explicit Per-Monitor-V2 DPI awareness** -- running injected into `explorer.exe`, this was inherited for free (the shell is always DPI-aware). Running as our own standalone process since v0.4.0, nothing declared it, which risked every position/size calculation (the visualizer's own box, and the Media Controls window) running against a DPI-virtualized view of the desktop instead of true physical pixels on a scaled monitor -- plausibly why the Media Controls strip was hard to locate.
 
 ---
 
-## ❀ v1.1.0 — Drag-to-Move
+## ❀ v0.5.0 — Drag-to-Move
 
 The visualizer stays click-through by design, but now with one deliberate exception: grab it and drag it.
 
@@ -246,15 +254,15 @@ The visualizer stays click-through by design, but now with one deliberate except
 - **Double-click to clear** — the same combo, clicked twice without dragging, clears a saved drag position and snaps back to the Position settings.
 - **Persists across restarts, quietly** — since Windhawk mods can only read settings, not write them, a dragged position is saved to its own small file (`%LOCALAPPDATA%\TourneTable\position_override.txt`) rather than back into the Position fields you see in the settings UI.
 
-## ❀ v1.0.1 — Fixed: Windows Weren't Being Pumped
+## ❀ v0.4.1 — Fixed: Windows Weren't Being Pumped
 
-A correctness bug from the v1.0.0 standalone-process conversion, caught while building the drag feature (which needed a real message loop to work at all).
+A correctness bug from the v0.4.0 standalone-process conversion, caught while building the drag feature (which needed a real message loop to work at all).
 
 - **All windows now sit on a real message-pumping thread** — the standalone conversion created the overlay, message, and media-control windows directly on `WhTool_ModInit`'s calling thread, which the tool-mod launcher terminates shortly after. Every one of those windows was at risk of losing its message queue (timers, settings-changed handling, media button clicks) once that thread went away. Fixed by spinning up a dedicated, persistent thread with an actual `GetMessage` loop and creating every window there instead.
 
 ---
 
-## ❀ v1.0.0 — Runs as Its Own Process
+## ❀ v0.4.0 — Runs as Its Own Process
 
 The mod no longer lives inside `explorer.exe`. It now runs as its own dedicated process using [Windhawk's tool-mod pattern](https://github.com/ramensoftware/windhawk/wiki/Mods-as-tools:-Running-mods-in-a-dedicated-process) — its own entry in Task Manager, separate from the shell.
 
@@ -267,7 +275,7 @@ The mod no longer lives inside `explorer.exe`. It now runs as its own dedicated 
 
 ---
 
-## ❀ v0.9.0 — Media Controls
+## ❀ v0.3.0 — Media Controls
 
 A small Previous / Play-Pause / Next button strip, wired to whatever's actually playing.
 
@@ -279,29 +287,29 @@ A small Previous / Play-Pause / Next button strip, wired to whatever's actually 
 
 ---
 
-## ❀ v0.8.1 — Smoother, More Precise Motion
+## ❀ v0.2.1 — Smoother, More Precise Motion
 
 - **Motion Smoothing** — new setting to slow down bar attack/decay, making small on-desktop bars easier to read without chasing every frame-to-frame jitter.
 - **Finer position control** — Horizontal/Vertical Position now accept decimals (`50.25`, not just `50`), so a single step is no longer a big jump on a large monitor.
 
-## ❀ v0.8.0 — Color Fixes & Beat Flash Rework
+## ❀ v0.2.0 — Color Fixes & Beat Flash Rework
 
 - **Beat Flash Color** — the flash-on-beat effect gets its own dedicated color (hex or `rgba()`/`rgb()`, with alpha), replacing an old "boost toward white" effect that washed out regardless of Color Mode.
 - **`rgba()` / `rgb()` support, mod-wide** — the shared color parser now accepts CSS-style color strings everywhere a hex color was accepted before.
 - **Acrylic mode fixed** — removed an alpha floor that kept it from ever truly disappearing in silence, as advertised.
 - **Now Playing text locale fixed** — swapped a hardcoded `en-us` for `GetUserDefaultLocaleName()`, improving font fallback/shaping for non-Latin text.
 
-## ❀ v0.7.2 — Negative Padding
+## ❀ v0.1.2 — Negative Padding
 
 - **Padding can now shrink, not just grow** — negative values pull a side of the background panel inward, past the bars if pushed far enough, instead of only ever expanding outward.
 - **Degenerate-rect safety net** — an extreme negative value holds that side open to a 1px sliver rather than inverting the panel's geometry.
 
-## ❀ v0.7.1 — Independent Panel Control
+## ❀ v0.1.1 — Independent Panel Control
 
 - **Peak Hold Cap Color** — no longer locked to Gradient Color 2; caps get their own independent, always-applied color regardless of Color Mode.
 - **Independent per-side Padding** — grow the background panel's left, right, top, or bottom edge on its own, without moving the bars or touching any other setting.
 
-## ❀ v0.7.0 — Foundation
+## ❀ v0.1.0 — Foundation
 
 - **Seqlock-based band publishing** — thread-safe handoff of per-band audio data from the capture thread to the render thread, replacing a per-element atomic approach that could tear under high refresh rates.
 - **Sensitivity Curve** — Exponential / Knee / Power handling for how the top of the Sensitivity range compresses once a band would otherwise overshoot max bar height.
@@ -310,4 +318,4 @@ A small Previous / Play-Pause / Next button strip, wired to whatever's actually 
 
 ### A note on "efficiency improvements"
 
-A handful of performance-adjacent spots got a close look across this span — Target FPS's integer-division quantization, `GetWorkerW`'s permanent materialization of a `WorkerW`, and whether `FillRoundedRectPerCorner` could share the background panel's geometry cache. None of them turned into changes: the FPS quantization is harmless in practice, the `WorkerW` side effect is inherent to the behind-the-icons technique itself (and matches what every comparable mod does), and the per-bar geometry changes too often each frame for a cache to help. Rather than efficiency wins, this span was mostly correctness fixes and new customization — the bigger performance rewrite (roughly half the CPU, 18°C cooler) predates this changelog.
+A handful of performance-adjacent spots got a close look across this span — Target FPS's integer-division quantization, `GetWorkerW`'s permanent materialization of a `WorkerW`, and whether `FillRoundedRectPerCorner` could share the background panel's geometry cache. None of them turned into changes: the FPS quantization is harmless in practice, the `WorkerW` side effect is inherent to the behind-the-icons technique itself (and matches what every comparable mod does), and the per-bar geometry changes too often each frame for a cache to help. Rather than efficiency wins, this span was mostly correctness fixes and new customization — the bigger performance rewrite predates this changelog.

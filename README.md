@@ -300,7 +300,7 @@ The reason is what each thing is positioned *against*. The visualizer and the st
 
 ### Drag-to-Move
 
-**Off by default as of v1.2.0.** Hold the modifier + mouse button anywhere over the visualizer and drag. While dragging, bar rendering pauses and only the background/border box moves (if Background is off, there's nothing to see moving until you let go - it's still repositioning correctly underneath).
+**Off by default as of v0.6.0.** Hold the modifier + mouse button anywhere over the visualizer and drag. While dragging, bar rendering pauses and only the background/border box moves (if Background is off, there's nothing to see moving until you let go - it's still repositioning correctly underneath).
 
 > This rides a global mouse hook and has to repaint the whole visualizer to keep up with the cursor. On a heavy shape or a high bar count that repaint is the bottleneck, and dragging feels like pulling through mud - the position is always correct, it just can't redraw fast enough to show you. The keyboard move above has no such problem, because one keypress is one discrete jump instead of a stream of positions to chase. Drag is still here if you prefer it; it's no longer the default way in.
 
@@ -325,7 +325,7 @@ A small Previous / Play-Pause / Next strip you can click, talking to whatever ap
 **Icon Spacing** - Gap between buttons, in pixels.
 
 **Backing Plate Color / Corner Radius** - A panel drawn behind the whole strip. **Fully transparent by default**, so icons with transparency sit directly on the wallpaper with nothing behind them.
-> v1.1.2 through v1.2.0 drew this plate unconditionally, as a fix for pale icons disappearing against a pale wallpaper. That made it impossible to have transparent icons actually look transparent. It's a setting now - if you do hit the contrast problem, something like `#8C141414` gives you the old soft dark plate back.
+> v0.5.2 through v0.6.0 drew this plate unconditionally, as a fix for pale icons disappearing against a pale wallpaper. That made it impossible to have transparent icons actually look transparent. It's a setting now - if you do hit the contrast problem, something like `#8C141414` gives you the old soft dark plate back.
 
 **Backing Plate Padding** - Breathing room between the icons and the edge of the plate, in pixels. `0` for none.
 > This **grows the strip** rather than shrinking the icons, so turning it up never makes the buttons smaller or harder to click. It applies whether or not the plate is visible, which means it very slightly shifts where the Horizontal / Vertical Position percentages land - the position is a percentage of the *remaining* screen space, and a wider strip leaves slightly less of it.
@@ -345,7 +345,7 @@ A small Previous / Play-Pause / Next strip you can click, talking to whatever ap
 
 **Warn About Invalid Settings** - On by default.
 
-Several settings on this page are free-text boxes: colors, positions, padding, corner radii, icon paths, font name. Windhawk saves whatever you type into them, valid or not. Up to v1.1.3 the mod then quietly fell back to a default on anything it couldn't parse - so a typo looked exactly like a setting that had saved fine and simply did nothing.
+Several settings on this page are free-text boxes: colors, positions, padding, corner radii, icon paths, font name. Windhawk saves whatever you type into them, valid or not. Up to v0.5.3 the mod then quietly fell back to a default on anything it couldn't parse - so a typo looked exactly like a setting that had saved fine and simply did nothing.
 
 With this on, a summary window appears listing every field that couldn't be read, what you typed, what format was expected, and what it's using instead. It appears when the mod loads and whenever you save settings - never when everything parses.
 
