@@ -135,15 +135,48 @@ The waitable timer was never at fault — it is created with `CREATE_WAITABLE_TI
 
 **Not** fixed with `timeBeginPeriod()`. Raising the global timer resolution would also work, but it degrades system-wide power behaviour — the opposite of this mod's purpose.
 
-## What to measure
+## Results — 2026-09-15, Target FPS 144
 
-Install all three, enable one at a time, **Target FPS 144** throughout.
+Raw data in `present-timings-qpc-2026-09-15.log`. 27 windows, 23 after excluding rebuilds.
 
-1. **`tourne-table-bench`** — expect ~64 fps. Confirms the cap.
-2. **`tourne-table-bench-qpc`** — expect ~144 fps. Confirms the fix.
-3. **`tourne-table-bench-qpc` at sync=1 vs sync=0** — this is the real test of finding #5, now that the target actually meets the refresh rate.
+### The fix works
 
-Watch for two things beyond frame rate:
+| Build | Windows | fps | SD | % of a 144 target |
+|:--|--:|--:|--:|--:|
+| `tourne-table-bench` *(GetTickCount64)* | 45 | 63.97 | 0.156 | **44.4%** |
+| `tourne-table-bench-qpc` | 23 | **141.71** | 0.104 | **98.4%** |
 
-- **CPU cost.** At 144 fps the render thread wakes 144×/sec instead of 64. The mod's cost should rise, plausibly close to double. That is the price of the setting working as documented, and it needs to be known before any performance claim is repeated.
-- **Whether `Present` starts blocking.** If `blocked %` jumps materially at 144 fps with `sync=1`, finding #5 was right and the precondition simply was never reached before.
+**2.22× the frames.** The remaining 1.6% is timer wake latency — 7.058 ms actual against 6.944 ms requested, ~0.11 ms of overshoot per frame. That is about as close as a waitable timer gets.
+
+### Finding #5, now tested with its precondition actually met
+
+At a genuine 141.7 fps against a 144 Hz display, the target *does* meet the refresh rate — the condition the finding names. Buffers held at 2:
+
+| Metric | sync=1 (n=11) | sync=0 (n=4) | Δ | t | p |
+|:--|--:|--:|--:|--:|--:|
+| Present avg | 0.448 ms | 0.367 ms | −0.081 | −0.50 | 0.615 |
+| Blocked % | 6.36% | 5.17% | −1.189 | −0.52 | 0.602 |
+| fps | 141.709 | 141.700 | −0.009 | −0.14 | 0.892 |
+
+**Still no difference.** This is the result the 64 fps run could not produce, because the precondition was never reached there.
+
+*Caveat: n=4 for sync=0. The comparison is underpowered — it can rule out a large effect, not a small one.*
+
+### What 2.22× the frames costs
+
+Shipping config (sync=1, buffers=2), 64 fps vs 144 fps:
+
+| Metric | 64 fps | 144 fps | Ratio | p |
+|:--|--:|--:|--:|--:|
+| fps | 63.960 | 141.709 | **×2.22** | <0.0001 |
+| Present avg | 0.608 ms | 0.448 ms | ×0.74 | 0.154 |
+| **Blocked % of wall** | **3.88%** | **6.36%** | **×1.64** | 0.099 |
+| Worst | 3.691 ms | 3.782 ms | ×1.02 | 0.904 |
+
+The arithmetic is consistent: 2.22× the calls at 0.74× the per-call cost = 1.64× the total blocked time.
+
+**Variance rises sharply.** Blocked-% SD goes from 1.27 to 5.01, with individual windows at 17.0%, 22.2%, 15.4% and 14.4% — values that never appear in the 64 fps data. The 144 fps path is materially less consistent frame to frame.
+
+### Still unmeasured
+
+**CPU cost.** These logs measure `Present` and frame rate, not processor time. 2.22× the frames means 2.22× the Direct2D work, the FFT sampling and the render-thread wakeups. That has a price, and it is not in this data. Before the fix goes into the shipping mod, run HWiNFO against `tourne-table-bench-qpc` and compare against the existing 64 fps baselines — the performance claims on the mod page were all measured at an effective 64 fps.
