@@ -1,0 +1,62 @@
+# Raw [BENCH] output — Windhawk mod log, tourne-table-bench, 2026-09-14
+# 48 windows x 5 s = 240 s, 15,376 frames, four configurations switched live.
+# Intel Core Ultra 265KF, 1920x1080. Music playing continuously throughout.
+# Windows marked FIRST are the first after a settings change and carry
+# swap-chain rebuild cost; they are excluded from steady-state statistics.
+
+23:45:55.133  sync=1 buffers=2 | 315 frames (63.0 fps) | Present avg 0.724 ms, worst  4.261 ms | blocked 4.6%
+23:46:00.152  sync=1 buffers=2 | 321 frames (64.0 fps) | Present avg 0.783 ms, worst  3.886 ms | blocked 5.0%
+23:46:05.153  sync=1 buffers=2 | 320 frames (64.0 fps) | Present avg 0.737 ms, worst  4.307 ms | blocked 4.7%
+23:46:10.165  sync=1 buffers=2 | 321 frames (64.0 fps) | Present avg 0.730 ms, worst  3.958 ms | blocked 4.7%
+23:46:15.169  sync=1 buffers=2 | 320 frames (63.9 fps) | Present avg 0.680 ms, worst  4.393 ms | blocked 4.3%
+23:46:20.184  sync=1 buffers=2 | 321 frames (64.0 fps) | Present avg 0.742 ms, worst  3.953 ms | blocked 4.7%
+23:46:25.198  sync=1 buffers=2 | 321 frames (64.0 fps) | Present avg 0.712 ms, worst  3.981 ms | blocked 4.6%
+23:46:30.210  sync=1 buffers=2 | 321 frames (64.0 fps) | Present avg 0.766 ms, worst  3.946 ms | blocked 4.9%
+23:46:35.212  sync=1 buffers=2 | 320 frames (64.0 fps) | Present avg 0.519 ms, worst  4.535 ms | blocked 3.3%
+23:46:40.228  sync=1 buffers=2 | 321 frames (64.0 fps) | Present avg 0.224 ms, worst  0.578 ms | blocked 1.4%
+23:46:45.231  sync=1 buffers=2 | 320 frames (64.0 fps) | Present avg 0.644 ms, worst  4.011 ms | blocked 4.1%
+23:46:50.245  sync=1 buffers=2 | 321 frames (64.0 fps) | Present avg 0.306 ms, worst  3.809 ms | blocked 2.0%
+23:46:55.245  sync=1 buffers=2 | 320 frames (64.0 fps) | Present avg 0.551 ms, worst  3.777 ms | blocked 3.5%
+
+# --- settings change: sync 1 -> 0 ---
+23:47:00.245  sync=0 buffers=2 | 320 frames (64.0 fps) | Present avg 0.467 ms, worst 17.646 ms | blocked 3.0%   FIRST
+23:47:05.248  sync=0 buffers=2 | 320 frames (64.0 fps) | Present avg 0.502 ms, worst  4.038 ms | blocked 3.2%
+23:47:10.261  sync=0 buffers=2 | 321 frames (64.0 fps) | Present avg 0.727 ms, worst  3.894 ms | blocked 4.7%
+23:47:15.262  sync=0 buffers=2 | 320 frames (64.0 fps) | Present avg 0.672 ms, worst  4.188 ms | blocked 4.3%
+23:47:20.272  sync=0 buffers=2 | 321 frames (64.1 fps) | Present avg 0.622 ms, worst  3.689 ms | blocked 4.0%
+
+# --- settings change: buffers 2 -> 3 (swap chain rebuilt) ---
+23:47:25.276  sync=0 buffers=3 | 319 frames (63.7 fps) | Present avg 0.592 ms, worst 15.593 ms | blocked 3.8%   FIRST
+23:47:30.282  sync=0 buffers=3 | 320 frames (63.9 fps) | Present avg 0.382 ms, worst  3.865 ms | blocked 2.4%
+23:47:35.282  sync=0 buffers=3 | 320 frames (64.0 fps) | Present avg 0.758 ms, worst  4.167 ms | blocked 4.9%
+23:47:40.290  sync=0 buffers=3 | 321 frames (64.1 fps) | Present avg 0.728 ms, worst  4.078 ms | blocked 4.7%
+23:47:45.292  sync=0 buffers=3 | 320 frames (64.0 fps) | Present avg 0.699 ms, worst  4.371 ms | blocked 4.5%
+23:47:50.292  sync=0 buffers=3 | 320 frames (64.0 fps) | Present avg 0.711 ms, worst  3.837 ms | blocked 4.5%
+
+# --- settings change: sync 0 -> 1 ---
+23:47:55.293  sync=1 buffers=3 | 318 frames (63.6 fps) | Present avg 0.752 ms, worst 11.995 ms | blocked 4.8%   FIRST
+23:48:00.309  sync=1 buffers=3 | 321 frames (64.0 fps) | Present avg 0.677 ms, worst  3.720 ms | blocked 4.3%
+23:48:05.322  sync=1 buffers=3 | 321 frames (64.0 fps) | Present avg 0.814 ms, worst  4.963 ms | blocked 5.2%
+23:48:10.339  sync=1 buffers=3 | 320 frames (63.8 fps) | Present avg 0.827 ms, worst  6.754 ms | blocked 5.3%
+23:48:15.355  sync=1 buffers=3 | 321 frames (64.0 fps) | Present avg 0.739 ms, worst  4.058 ms | blocked 4.7%
+23:48:20.367  sync=1 buffers=3 | 320 frames (63.9 fps) | Present avg 0.663 ms, worst 18.101 ms | blocked 4.2%
+23:48:25.384  sync=1 buffers=3 | 321 frames (64.0 fps) | Present avg 0.213 ms, worst  0.997 ms | blocked 1.4%
+23:48:30.401  sync=1 buffers=3 | 321 frames (64.0 fps) | Present avg 0.676 ms, worst  3.913 ms | blocked 4.3%
+23:48:35.415  sync=1 buffers=3 | 321 frames (64.0 fps) | Present avg 0.711 ms, worst  4.580 ms | blocked 4.6%
+23:48:40.415  sync=1 buffers=3 | 320 frames (64.0 fps) | Present avg 0.683 ms, worst  3.792 ms | blocked 4.4%
+23:48:45.416  sync=1 buffers=3 | 320 frames (64.0 fps) | Present avg 0.719 ms, worst  3.973 ms | blocked 4.6%
+23:48:50.431  sync=1 buffers=3 | 321 frames (64.0 fps) | Present avg 0.300 ms, worst  3.422 ms | blocked 1.9%
+
+# --- settings change: buffers 3 -> 2 (swap chain rebuilt), back to shipping config ---
+23:48:55.448  sync=1 buffers=2 | 321 frames (64.0 fps) | Present avg 0.722 ms, worst 16.466 ms | blocked 4.6%   FIRST
+23:49:00.461  sync=1 buffers=2 | 321 frames (64.0 fps) | Present avg 0.824 ms, worst  4.507 ms | blocked 5.3%
+23:49:05.461  sync=1 buffers=2 | 320 frames (64.0 fps) | Present avg 0.676 ms, worst  4.253 ms | blocked 4.3%
+23:49:10.463  sync=1 buffers=2 | 320 frames (64.0 fps) | Present avg 0.770 ms, worst  3.826 ms | blocked 4.9%
+23:49:15.480  sync=1 buffers=2 | 321 frames (64.0 fps) | Present avg 0.834 ms, worst  4.103 ms | blocked 5.3%
+23:49:20.493  sync=1 buffers=2 | 321 frames (64.1 fps) | Present avg 0.699 ms, worst  3.853 ms | blocked 4.5%
+23:49:25.494  sync=1 buffers=2 | 320 frames (64.0 fps) | Present avg 0.377 ms, worst  3.598 ms | blocked 2.4%
+23:49:30.506  sync=1 buffers=2 | 321 frames (64.0 fps) | Present avg 0.268 ms, worst  1.471 ms | blocked 1.7%
+23:49:35.507  sync=1 buffers=2 | 320 frames (64.0 fps) | Present avg 0.586 ms, worst  4.052 ms | blocked 3.8%
+23:49:40.510  sync=1 buffers=2 | 320 frames (64.0 fps) | Present avg 0.755 ms, worst  4.734 ms | blocked 4.8%
+23:49:45.525  sync=1 buffers=2 | 321 frames (64.0 fps) | Present avg 0.728 ms, worst  4.551 ms | blocked 4.7%
+23:49:50.542  sync=1 buffers=2 | 321 frames (64.0 fps) | Present avg 0.203 ms, worst  0.419 ms | blocked 1.3%
