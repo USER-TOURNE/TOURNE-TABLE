@@ -1,0 +1,42 @@
+# Raw [BENCH] output — tourne-table-bench-qpc, 2026-09-15 00:21-00:23
+# Target FPS = 144 throughout. Compare against present-timings-2026-09-14.log,
+# which is the same instrument on the GetTickCount64 pacing (64 fps cap).
+#
+# Windows marked FIRST follow a settings change and carry swap-chain rebuild
+# cost; excluded from steady-state statistics.
+
+00:21:10.168  sync=1 buffers=2 target=144 | 709 frames (141.6 fps) | Present avg 0.261 ms, worst  5.940 ms | blocked  3.7%
+00:21:15.175  sync=1 buffers=2 target=144 | 710 frames (141.8 fps) | Present avg 0.598 ms, worst  5.324 ms | blocked  8.5%
+00:21:20.182  sync=1 buffers=2 target=144 | 709 frames (141.6 fps) | Present avg 0.218 ms, worst  4.125 ms | blocked  3.1%
+00:21:25.183  sync=1 buffers=2 target=144 | 709 frames (141.8 fps) | Present avg 1.196 ms, worst  6.912 ms | blocked 17.0%
+
+# --- sync 1 -> 0 ---
+00:21:30.188  sync=0 buffers=2 target=144 | 700 frames (139.9 fps) | Present avg 0.493 ms, worst 20.989 ms | blocked  6.9%   FIRST
+00:21:35.189  sync=0 buffers=2 target=144 | 708 frames (141.6 fps) | Present avg 0.368 ms, worst  3.806 ms | blocked  5.2%
+00:21:40.197  sync=0 buffers=2 target=144 | 709 frames (141.6 fps) | Present avg 0.710 ms, worst  4.553 ms | blocked 10.0%
+00:21:45.203  sync=0 buffers=2 target=144 | 710 frames (141.8 fps) | Present avg 0.199 ms, worst  2.828 ms | blocked  2.8%
+00:21:50.205  sync=0 buffers=2 target=144 | 709 frames (141.8 fps) | Present avg 0.190 ms, worst  0.603 ms | blocked  2.7%
+
+# --- buffers 2 -> 3 (swap chain rebuilt) ---
+00:21:55.211  sync=0 buffers=3 target=144 | 702 frames (140.2 fps) | Present avg 0.252 ms, worst 17.466 ms | blocked  3.5%   FIRST
+00:22:00.215  sync=0 buffers=3 target=144 | 709 frames (141.7 fps) | Present avg 0.274 ms, worst  3.545 ms | blocked  3.9%
+00:22:05.218  sync=0 buffers=3 target=144 | 709 frames (141.7 fps) | Present avg 0.637 ms, worst  4.121 ms | blocked  9.0%
+
+# --- sync 0 -> 1 ---
+00:22:10.223  sync=1 buffers=3 target=144 | 701 frames (140.0 fps) | Present avg 0.630 ms, worst 12.476 ms | blocked  8.8%   FIRST
+00:22:15.229  sync=1 buffers=3 target=144 | 709 frames (141.6 fps) | Present avg 0.520 ms, worst  4.698 ms | blocked  7.4%
+00:22:20.233  sync=1 buffers=3 target=144 | 710 frames (141.9 fps) | Present avg 1.565 ms, worst 10.039 ms | blocked 22.2%
+00:22:25.238  sync=1 buffers=3 target=144 | 709 frames (141.7 fps) | Present avg 0.328 ms, worst  4.570 ms | blocked  4.6%
+00:22:30.244  sync=1 buffers=3 target=144 | 710 frames (141.8 fps) | Present avg 0.510 ms, worst  6.030 ms | blocked  7.2%
+00:22:35.250  sync=1 buffers=3 target=144 | 709 frames (141.6 fps) | Present avg 0.331 ms, worst  4.312 ms | blocked  4.7%
+00:22:40.255  sync=1 buffers=3 target=144 | 709 frames (141.7 fps) | Present avg 1.084 ms, worst  6.720 ms | blocked 15.4%
+
+# --- buffers 3 -> 2 (swap chain rebuilt), back to shipping config ---
+00:22:45.255  sync=1 buffers=2 target=144 | 698 frames (139.6 fps) | Present avg 0.638 ms, worst 31.877 ms | blocked  8.9%   FIRST
+00:22:50.261  sync=1 buffers=2 target=144 | 709 frames (141.6 fps) | Present avg 0.494 ms, worst  4.188 ms | blocked  7.0%
+00:22:55.268  sync=1 buffers=2 target=144 | 709 frames (141.6 fps) | Present avg 0.324 ms, worst  4.004 ms | blocked  4.6%
+00:23:00.271  sync=1 buffers=2 target=144 | 710 frames (141.9 fps) | Present avg 0.202 ms, worst  0.719 ms | blocked  2.9%
+00:23:05.273  sync=1 buffers=2 target=144 | 709 frames (141.7 fps) | Present avg 0.198 ms, worst  0.776 ms | blocked  2.8%
+00:23:10.275  sync=1 buffers=2 target=144 | 708 frames (141.6 fps) | Present avg 0.239 ms, worst  2.030 ms | blocked  3.4%
+00:23:15.275  sync=1 buffers=2 target=144 | 709 frames (141.8 fps) | Present avg 1.014 ms, worst  6.816 ms | blocked 14.4%
+00:23:20.276  sync=1 buffers=2 target=144 | 709 frames (141.8 fps) | Present avg 0.183 ms, worst  0.766 ms | blocked  2.6%
