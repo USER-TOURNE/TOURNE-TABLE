@@ -55,3 +55,6 @@ $RECYCLE.BIN/
 *.bak
 *.orig
 *.rej
+
+# ...except benchmark evidence, which is the point of BENCH/ existing.
+!BENCH/*.log
