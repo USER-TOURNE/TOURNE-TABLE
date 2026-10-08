@@ -19,6 +19,12 @@ TT_CBUFFER(FrameCB, b0) {
     float4 fPlateRect;
     float4 fScopeColor;
     float fGonioDot, fCorrY, fCorrH, fCorr;
+    // Terminal shape: palette (dim, low, high, label, peak), grid origin and
+    // cell size in px, grid and glyph-atlas dimensions.
+    float4 fTermColors[5];
+    float4 fTermGeom;   // origin x, origin y, cell width, cell height
+    float4 fTermAtlas;  // atlas width, atlas height, -, -
+    uint fTermCols, fTermRows, fTermAtlasCols, fTermPad;
 }
 TT_CBUFFER_END
 

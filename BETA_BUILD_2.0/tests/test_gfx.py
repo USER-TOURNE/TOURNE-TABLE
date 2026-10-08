@@ -259,6 +259,29 @@ cfg = dict(base, shape=6, bars=48, vw=320, vh=320, cx=160.3, cy=159.7, maxSize=1
 got = raster(dict({k: v for k, v in cfg.items() if k != "col"}, passes=[4, 48]))
 compare("radial capsules", got, ref_render(320, 320, ref_radial(cfg)), tol_max=0.15, tol_area=0.01)
 
+# ---- Terminal glyph pass ----------------------------------------------------------
+cw, chh, cols, rows, tx, ty = 7, 12, 9, 5, 3, 5
+cells = []
+for i in range(cols * rows):
+    ch = int(rng.integers(32, 127))
+    cells.append(ch | (int(rng.integers(0, 5)) << 8))
+img = raster(dict(vw=80, vh=80, termCols=cols, termRows=rows, cellW=cw, cellH=chh, tx=tx, ty=ty, sceneAlpha=1,
+                  cells=cells, passes=[8, cols * rows]))
+ref = np.zeros((80, 80, 4))
+for i, cell in enumerate(cells):
+    ch, ci = cell & 127, (cell >> 8) & 7
+    if ch <= 32:
+        continue
+    g = ch - 32
+    col = (0.2 * (ci + 1), 1.0 - 0.15 * ci, 0.5, 1.0)
+    x0, y0 = tx + (i % cols) * cw, ty + (i // cols) * chh
+    for y in range(chh):
+        for x in range(cw):
+            a = ((g * 7 + x * 3 + y * 5) % 11) / 10.0
+            ref[y0 + y, x0 + x] = [col[0] * a, col[1] * a, col[2] * a, a]
+err = np.max(np.abs(img - ref))
+check("terminal glyphs: every cell, UV and colour exact", err < 1e-5, f"max err {err:.2e}")
+
 # ---- Colours: Color Mode rules vs the 1.5 code ------------------------------------
 def hsv(h, s, v, a):
     h = h % 360
