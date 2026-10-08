@@ -1,7 +1,7 @@
 // ==WindhawkMod==
 // @id                  tourne-table-desktop-audio-visualizer-scope
 // @name                Tourne'Table [Audio Visualizer] (Beta 2.0)
-// @description         BETA BUILD. Tourne'Table 2.0: a precision analysis core (every bar its own frequency band, IEC 61260 / musical bands, A/C weighting, real ballistics, LUFS and true peak), a choice of where the work runs (GPU, CPU or Hybrid), and a Direct3D 11 renderer that skips unchanged frames and idles to nothing. Installs alongside the release build. Not for publishing.
+// @description         BETA BUILD. Tourne'Table 2.0: a right-click menu for live settings and audio source (any output, input or virtual device), a Terminal shape, a media-widget layout, a precision analysis core (every bar its own frequency band, IEC 61260 / musical bands, A/C weighting, real ballistics, LUFS and true peak), a choice of where the work runs (GPU, CPU or Hybrid), and a Direct3D 11 renderer that skips unchanged frames and idles to nothing. Installs alongside the release build. Not for publishing.
 // @description:ru-RU   Аудиовизуализатор реального времени для рабочего стола Windows. Расширенные настройки без ущерба для экономии ресурсов. Практически безинтерфейсный (near-headless) поток рендеринга с оптимизацией процессора для захвата звука.
 // @version             2.0.0
 // @author              USER-TOURNE
@@ -64,6 +64,8 @@ The 1.4 analysis is still there as **Analysis Engine = Classic**.
 **A new renderer built to cost next to nothing.** **Renderer = Direct3D 11** draws everything from one tiny shader and a buffer of bar heights, **skips any frame where nothing moved**, keeps the text on its own surface that only redraws when the text changes, and tells Windows when the panel is opaque so it copies instead of blending. When audio stops, drawing stops, and after a few more seconds of silence the audio stream itself stops (**Deep Idle**). The 1.5 Direct2D path is still there for comparison.
 
 **Target FPS 0** matches your display's refresh rate, whatever it is.
+
+**Right-click for quick settings.** Shape, colours, analysis, readout, overlays and **which audio device it listens to**, any output, input or virtual device (VB-Audio, Voicemeeter, an Ableton return), all live, without opening Windhawk. Plus a **Terminal** shape (text characters: columns, a waterfall or text meters) and a **media widget** layout: title and artist inside the panel, pixel-sharp text, a track progress bar and media controls pinned to the panel.
 
 ---
 
@@ -162,6 +164,80 @@ This project follows my personal theming palette: reflected in the repo screensh
 | Dark Teal *(background)* | `#121c21` | `18, 28, 33` |
 
 The built-in **Tourne** color mode is drawn from these.
+
+---
+
+## ☰ RIGHT-CLICK MENU *(2.0)*
+
+Right-click the visualizer for quick settings, applied the moment you pick them:
+
+- **Audio Source**: the default output (what you hear), the default input, or **any active device by name**, outputs and inputs, virtual ones included. VB-Audio Cable and Matrix, Voicemeeter buses, an Ableton return routed to its own device: if Windows lists it, it's there. Outputs are captured by loopback, inputs recorded directly.
+- **Shape**, **Terminal Style**, **Color Mode**, **Analysis Engine**, **Band Layout**, **Weighting**, **Ballistics**, **Readout**, **Workload**, **Renderer**, **Target FPS**.
+- Toggles for Peak Hold Caps, Beat Flash, Now Playing, the Track Progress Bar, Media Controls, Pixel-Sharp Text, **Pixel Snap** and **Subpixel Nudges**.
+- **Pause Visualizer**, which blanks it and stops the audio stream until you right-click the same spot again (or the media strip) and untick it.
+- **Reset Quick Settings**.
+
+Windhawk lets a mod read its settings but not write them, so a menu choice is kept as the mod's own saved value and laid over the settings page. The page keeps showing what's underneath, which is why the menu says how many quick settings are active. **Reset Quick Settings** hands everything back to the page.
+
+The menu only opens where the visualizer is actually showing on the desktop, never through a window that covers it, and a right-click there doesn't open the desktop's own menu. If you'd rather keep a plain right-click for the desktop, set **Right-Click Menu** (Interaction) to **Ctrl + Right-Click**. Right-clicking the media strip opens the same menu.
+
+---
+
+## ◫ SHARP AT EVERY SIZE, OR BETWEEN PIXELS *(2.0)*
+
+**Why it could look soft.** Every size was scaled by your display scaling and every position was a percentage of the screen, both kept as exact fractions. At 125% a 2 px bar is 2.5 px wide, and a Position of 50% can put the visualizer at x = 812.37. A bar that starts or ends partway through a pixel gets an antialiased edge, so some sizes came out crisp and others blurry.
+
+**Pixel Snap** *(Position, on by default)* rounds the position and every scaled size (bar width, gap, max size, panel padding) to whole pixels, so every bar edge, the panel and the text sit exactly on the pixel grid at any size and any scaling. Bar heights stay fractional, which keeps their motion smooth. The process also declares per-monitor DPI awareness on each of its own threads now, so Windows never stretches the picture on a monitor whose scaling differs from your main one.
+
+**Subpixel placement** is Pixel Snap **off**. The picture can then sit between pixels, so it moves by fractions of a pixel, at the cost of slightly soft edges. Physically, a crisp edge and a position between two pixels can't both happen.
+
+- **Keyboard Move Fine Step** *(Interaction)*: 1/2, 1/4, 1/8 or 1/16 px.
+- Hold **Keyboard Move Fine Key** with the move modifier, or tick **Subpixel Nudges** in the right-click menu to make every nudge fine.
+- Fine steps move the visualizer. The media strip and the text overlays still move whole pixels, since a window and a text box can't sit between them.
+- With Pixel Snap on, fine nudges still add up: four quarter-pixel presses move the picture one pixel.
+
+---
+
+## ▣ THE TERMINAL SHAPE *(2.0)*
+
+**Shape = Terminal** draws the visualizer as text: a grid of characters in a monospace font, in three styles.
+
+- **Columns**: every bar a column of characters (`#` by default) that turns the **Hot Color** above **Hot Threshold**, with the peak cap as a character of its own. The cava / btop look.
+- **Waterfall**: a spectrogram in characters. Each line is one moment and each column one band, with the character picked from **Waterfall Ramp** by level and the newest line on top.
+- **Meters**: text meters, `Bass:    [######     48%]`, for bass, mid, treble and the loudest band.
+
+It runs on the same per-bar levels as every other shape, so the engine, band layout, weighting and ballistics all apply. With the Direct3D 11 renderer the characters come from a glyph atlas baked once, and the whole grid is one instanced draw: a few hundred cells cost the same as a few hundred bars. Pick a pixel font and **Text Rendering = Pixel** for hard-edged characters.
+
+---
+
+## ◰ RECIPES
+
+**A compact media widget** (coral bars on a dark teal panel, the title over the artist on the right, controls at the top left, a progress bar underneath):
+
+| Setting | Value |
+|:--|:--|
+| Shape / Bar Count / Bar Width / Bar Gap | Stereo / `64` / `2` / `2` |
+| Bar Max Size / Idle Size / Corner Radius | `36` / `2` / `0` |
+| Color Mode / Color | Solid / `#FFFF8F8F` |
+| Background Color / Padding / Corner Radius | `#FF121C21` / `12 12 52 12` / `4` |
+| Background Border Size / Color | `1` / `#FF2A3A40` |
+| Now Playing | on, Display Seconds `0`, Layout **Two lines**, Placement **Inside the panel, top**, Alignment **Right** |
+| Now Playing Color / Artist Color | `#FFFF8F8F` / `#FF64AA89` |
+| Font / Text Rendering | a pixel font (e.g. Press Start 2P at `8`) / **Pixel** |
+| Track Progress | on, Below the panel, Height `2`, Gap `6`, Color `#FFFF8F8F`, Track `#FF64AA89` |
+| Media Controls | on, Icon Size `14`, Spacing `8`, Icon Color `#FF64AA89`, Anchor **Panel, top left**, Insets `10` / `10` |
+
+The two colours are the Red and Pale Green of the palette above, and the panel is its Dark Teal.
+
+**A terminal readout** (green and red characters on black):
+
+| Setting | Value |
+|:--|:--|
+| Shape | Terminal |
+| Terminal Style | Columns, Waterfall or Meters |
+| Font / Size | Consolas or Cascadia Mono / `12` |
+| Background Color / Corner Radius | `#FF000000` / `0` |
+| Peak Hold Caps | on (Columns) |
 
 ---
 
@@ -613,6 +689,7 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
         - radial: Radial
         - oscilloscope: Oscilloscope
         - goniometer: Goniometer (stereo field)
+        - terminal: Terminal (text characters, see the Terminal section)
     - orientation: horizontal
       $name: Orientation
       $description: Whether bars run left-to-right or bottom-to-top
@@ -775,7 +852,7 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
       $description: Text size, in points
     - nowPlayingDisplaySeconds: 6
       $name: Now Playing Display Seconds
-      $description: How long the text stays visible after a track changes, before fading out
+      $description: How long the text stays visible after a track changes, before fading out. 0 keeps it on screen all the time, like a media widget
     - nowPlayingOffsetX: 0
       $name: Now Playing Offset X
       $description: Shifts the artist/title text sideways from where it normally sits, in pixels. Negative moves it left, positive right. It still travels with the visualizer -- this only changes where it sits relative to it, which is how you move it clear of the background panel. Can also be nudged live with the keyboard (Interaction, move target 2). A keyboard nudge ADDS to this number rather than replacing it, so whatever you type here always counts
@@ -818,7 +895,116 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
     - peakFreqBgBorderColor: '#40FFFFFF'
       $name: Peak Readout Background Border Color
       $description: 'Color of the readout panel''s outline. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b)'
+    - nowPlayingLayout: one_line
+      $name: Now Playing Layout
+      $description: One line ("Artist - Title") or two (the title, with the artist underneath in its own colour)
+      $options:
+        - one_line: One line
+        - two_lines: Two lines (title, then artist)
+    - nowPlayingPlacement: above
+      $name: Now Playing Placement
+      $description: Above the bars, as before, or inside the background panel, in the padding above or below the bars, as wide as the bars so Left and Right line up with them. For the inside placements give the panel enough padding on that side (Background, Padding) to hold the text
+      $options:
+        - above: Above the visualizer
+        - panel_top: Inside the panel, top
+        - panel_bottom: Inside the panel, bottom
+    - nowPlayingAlign: center
+      $name: Now Playing Alignment
+      $options:
+        - center: Center
+        - left: Left
+        - right: Right
+    - nowPlayingArtistColor: '#B3FFFFFF'
+      $name: Now Playing Artist Color
+      $description: 'Colour of the artist: the second line in the two-line layout, the "Artist" part of the one-line layout. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b)'
+    - textRendering: smooth
+      $name: Text Rendering
+      $description: Smooth antialiases text. Pixel draws it without antialiasing, on whole pixels, for pixel fonts (e.g. Press Start 2P, Silkscreen, Pixelify Sans, installed in Windows) at a multiple of their design size. Applies to the Now Playing text, the readout and the Terminal shape
+      $options:
+        - smooth: Smooth
+        - pixel: Pixel (no antialiasing)
   $name: Appearance
+- audio:
+    - source: default_output
+      $name: Audio Source
+      $description: What the visualizer listens to. The default output is what you hear (as before). An input is a microphone, a line-in or the recording side of a virtual cable. Or pick a device by name, which covers any output or input, virtual ones included (VB-Audio Cable / Matrix, Voicemeeter, an Ableton return routed to its own device). The right-click menu lists every active device and switches live
+      $options:
+        - default_output: Default output (what you hear)
+        - default_input: Default input
+        - named: A device by name (below)
+    - deviceName: ''
+      $name: Device Name
+      $description: 'Part of the device''s name, as Windows Sound settings show it, e.g. "VB-Audio Matrix" or "CABLE Output". Outputs are captured by loopback, inputs recorded directly. If it isn''t connected the default output stands in, with a heads-up, until it is. Only used when Audio Source is "A device by name"'
+  $name: Audio Source
+- progress:
+    - enabled: false
+      $name: Track Progress Bar
+      $description: A thin bar showing how far into the current track you are, from the same Windows media session as Now Playing. Works with players that report their position (Spotify, most browsers, foobar2000, MusicBee and more)
+    - placement: below
+      $name: Placement
+      $options:
+        - below: Below the panel
+        - above: Above the panel
+        - panel_bottom: Inside the panel, under the bars
+    - height: 2
+      $name: Height
+      $description: In pixels
+    - gap: 6
+      $name: Gap
+      $description: Distance from the panel (or, inside it, from the bars), in pixels
+    - color: '#FFFFFFFF'
+      $name: Color
+      $description: 'The played part. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b)'
+    - trackColor: '#40FFFFFF'
+      $name: Track Color
+      $description: 'The rest of the bar. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b)'
+  $name: Track Progress
+- terminal:
+    - style: columns
+      $name: Terminal Style
+      $description: Only used when Shape is Terminal. Columns draws every bar as a column of characters. Waterfall is a spectrogram in characters, newest line on top. Meters prints Bass, Mid, Treble and Volume as text meters
+      $options:
+        - columns: Columns
+        - waterfall: Waterfall
+        - meters: Meters
+    - font: Consolas
+      $name: Font
+      $description: A monospace font installed in Windows (Consolas, Cascadia Mono, a Nerd Font, a pixel font)
+    - fontSize: 14
+      $name: Font Size
+      $description: In points. Sets the cell size, and with it the size of the whole grid; Bar Width, Gap and Max Size don't apply to this shape
+    - rows: 16
+      $name: Rows
+      $description: Height of Columns and Waterfall, in lines. Columns are one per bar (Bar Count, or the band layout)
+    - meterColumns: 40
+      $name: Meter Width
+      $description: Width of the Meters style, in characters
+    - hotThreshold: 75
+      $name: Hot Threshold (%)
+      $description: Above this share of full height a character turns the Hot Color
+    - columnGlyph: '#'
+      $name: Column Glyph
+      $description: The character columns and meters are built from. One printable ASCII character
+    - peakGlyph: '-'
+      $name: Peak Glyph
+      $description: The peak cap in Columns (with Peak Hold on). One printable ASCII character
+    - ramp: ' .:-=+*#%@'
+      $name: Waterfall Ramp
+      $description: Characters from quiet to loud for the Waterfall. Printable ASCII
+    - scrollRate: 20
+      $name: Waterfall Speed
+      $description: Lines per second
+    - lowColor: '#FF33FF66'
+      $name: Color
+    - highColor: '#FFFF3B3B'
+      $name: Hot Color
+    - dimColor: '#FF1E6B34'
+      $name: Dim Color
+      $description: The faintest level of the Waterfall
+    - labelColor: '#FFB8FFB8'
+      $name: Label Color
+      $description: The Meters labels
+  $name: Terminal
 - analysis:
     - engine: precision
       $name: Analysis Engine
@@ -957,6 +1143,9 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
     - monitor: 1
       $name: Monitor
       $description: 1-based monitor index
+    - pixelSnap: true
+      $name: Pixel Snap
+      $description: Puts the panel, every bar, the text and the grid on whole pixels, so edges stay razor sharp at any size and any display scaling (at 125% or 150%, sizes otherwise land on half pixels and blur). Turn off for subpixel placement, which moves the picture by fractions of a pixel at the cost of antialiased, slightly soft edges. Bar heights move smoothly either way
   $name: Position
 - interaction:
     - keyMoveEnabled: true
@@ -987,6 +1176,23 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
     - keyMoveFastStep: 10
       $name: Keyboard Move Fast Step
       $description: How far one press moves it while the Fast Key below is also held, in pixels
+    - keyMoveFineStep: '0.25'
+      $name: Keyboard Move Fine Step
+      $description: A subpixel step for the visualizer, used while the Fine Key is held or with Subpixel Nudges ticked in the right-click menu. Only shows as movement with Pixel Snap off (Position); with it on, the position still accumulates and the picture moves a whole pixel at a time
+      $options:
+        - '0.5': 1/2 pixel
+        - '0.25': 1/4 pixel
+        - '0.125': 1/8 pixel
+        - '0.0625': 1/16 pixel
+    - keyMoveFineKey: none
+      $name: Keyboard Move Fine Key
+      $description: Held alongside the modifier for the fine step. Must not be one of the modifier's keys or the Fast Key. None leaves fine steps to the right-click menu's Subpixel Nudges
+      $options:
+        - none: None
+        - shift: Shift
+        - ctrl: Ctrl
+        - alt: Alt
+        - win: Win
     - keyMoveFastKey: shift
       $name: Keyboard Move Fast Key
       $description: Held alongside the modifier to use the larger step. Must not be one of the keys already used by the modifier above
@@ -1014,6 +1220,13 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
         - left: Left Click
         - middle: Middle Click
         - right: Right Click
+    - contextMenu: right_click
+      $name: Right-Click Menu
+      $description: Right-click the visualizer for a menu of quick settings (shape, colours, analysis, audio source, overlays, pause). It only opens where the visualizer is actually showing on the desktop, never through a window covering it. Ctrl + Right-Click leaves a plain right-click to the desktop
+      $options:
+        - right_click: Right-Click
+        - ctrl_right_click: Ctrl + Right-Click
+        - 'off': 'Off'
   $name: Interaction
 - media_controls:
     - enabled: false
@@ -1088,6 +1301,21 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
     - verticalPosition: '95'
       $name: Vertical Position
       $description: 0-100, percentage down the monitor's work area. Decimals allowed. Same caveat as Horizontal Position -- a saved keyboard position takes priority over this field until it is cleared
+    - anchor: screen
+      $name: Anchor
+      $description: Screen places the strip with the two Position percentages above. A panel corner pins it inside that corner of the visualizer's background panel instead, so it moves with the visualizer (drags included) and the Position settings are ignored. Give the panel enough padding on that side to hold it
+      $options:
+        - screen: Screen (Position settings)
+        - panel_top_left: Panel, top left
+        - panel_top_right: Panel, top right
+        - panel_bottom_left: Panel, bottom left
+        - panel_bottom_right: Panel, bottom right
+    - anchorOffsetX: 8
+      $name: Anchor Inset X
+      $description: Distance in from the panel's left or right edge, in pixels. Only used with a panel anchor
+    - anchorOffsetY: 8
+      $name: Anchor Inset Y
+      $description: Distance in from the panel's top or bottom edge, in pixels. Only used with a panel anchor
   $name: Media Controls
 - background:
     - enabled: true
@@ -1233,6 +1461,7 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cwctype>
 #include <condition_variable>
 #include <cstdint>
 #include <cstdio>
@@ -1277,11 +1506,12 @@ using Microsoft::WRL::ComPtr;
 // both hand the job to the message window, which lives on the UI thread.
 #define WM_APP_HW_NOTICE (WM_APP + 7)        // lParam: heap std::wstring*, owned by receiver
 #define WM_APP_REBUILD_DEVICE (WM_APP + 8)   // wParam: 1 = device was lost
+#define WM_APP_CONTEXT_MENU (WM_APP + 9)     // wParam, lParam: screen x, y
 #define OVERLAY_WINDOW_CLASS (L"DesktopAudioVisOverlay_" WH_MOD_ID)
 #define MESSAGE_WINDOW_CLASS (L"DesktopAudioVisMessage_" WH_MOD_ID)
 #define MEDIA_WINDOW_CLASS (L"DesktopAudioVisMedia_" WH_MOD_ID)
 
-enum class VizShape { Stereo, Mountain, Mirror, Wave, Breathe, Dots, Radial, Oscilloscope, Goniometer };
+enum class VizShape { Stereo, Mountain, Mirror, Wave, Breathe, Dots, Radial, Oscilloscope, Goniometer, Terminal };
 enum class VizColorMode { Solid, Gradient, ReactiveGradient, Accent, AlbumArt, DynamicAlbum, Acrylic, RainbowCycle, Tourne };
 enum class VizEQ { Default, Bass, Rock, Pop, Jazz, Electronic };
 enum class VizSensitivityCurve { Exponential, Knee, Power };
@@ -1324,6 +1554,12 @@ enum class VizChannel { Mix, Left, Right, Mid, Side };
 enum class VizBallisticsPreset { Snappy, Smooth, Analyzer, Vu, PpmEbu, PpmDin, Custom };
 enum class VizPeakFall { Gravity, Linear };
 enum class VizReadout { Frequency, Loudness, LoudnessFull, Both };
+enum class VizTermStyle { Columns, Waterfall, Meters };
+enum class VizNpLayout { OneLine, TwoLines };
+enum class VizNpPlacement { Above, PanelTop, PanelBottom };
+enum class VizProgressPlacement { Below, Above, PanelBottom };
+enum class VizMediaAnchor { Screen, PanelTopLeft, PanelTopRight, PanelBottomLeft, PanelBottomRight };
+enum class VizContextMenu { RightClick, CtrlRightClick, Off };
 
 struct Settings {
     VizShape shape = VizShape::Stereo;
@@ -1357,6 +1593,10 @@ struct Settings {
     int keyMoveStep = 1;
     int keyMoveFastStep = 10;
     unsigned keyMoveFastKey = VIZ_MOD_SHIFT;
+    float keyMoveFineStep = 0.25f;           // px, for subpixel nudges
+    unsigned keyMoveFineKey = VIZ_MOD_NONE;  // held for a fine step
+    bool keyMoveFine = false;                // every nudge fine (right-click menu)
+    bool pixelSnap = true;
 
     bool dragEnabled = false;
     VizDragModifier dragModifier = VizDragModifier::Ctrl;
@@ -1463,6 +1703,40 @@ struct Settings {
     VizReadout readout = VizReadout::Frequency;
     bool loudnessResetOnTrack = true;
     int layoutBandCount = 0;  // bars implied by an IEC / musical layout, 0 = use Bar Count
+
+    // Audio source (2.0): "" / default_output, default_input, id:<endpoint>, name:<text>.
+    std::wstring audioSourceKey;
+
+    // Media widget (2.0).
+    VizNpLayout npLayout = VizNpLayout::OneLine;
+    VizNpPlacement npPlacement = VizNpPlacement::Above;
+    VizTextAlignH npAlign = VizTextAlignH::Center;
+    BYTE npArtistA = 0xB3, npArtistR = 255, npArtistG = 255, npArtistB = 255;
+    bool textPixel = false;
+    bool progressEnabled = false;
+    VizProgressPlacement progressPlacement = VizProgressPlacement::Below;
+    int progressHeight = 2, progressGap = 6;
+    BYTE progressA = 255, progressR = 255, progressG = 255, progressB = 255;
+    BYTE progressTrackA = 0x40, progressTrackR = 255, progressTrackG = 255, progressTrackB = 255;
+    VizMediaAnchor mediaAnchor = VizMediaAnchor::Screen;
+    int mediaAnchorOffsetX = 8, mediaAnchorOffsetY = 8;
+    VizContextMenu contextMenu = VizContextMenu::RightClick;
+
+    // Terminal shape (2.0).
+    VizTermStyle termStyle = VizTermStyle::Columns;
+    std::wstring termFont = L"Consolas";
+    int termFontSize = 14;
+    int termRows = 16;
+    int termMeterColumns = 40;
+    int termHotThreshold = 75;
+    wchar_t termColumnGlyph = L'#';
+    wchar_t termPeakGlyph = L'-';
+    std::wstring termRamp = L" .:-=+*#%@";
+    int termScrollRate = 20;
+    BYTE termDimA = 255, termDimR = 0x1E, termDimG = 0x6B, termDimB = 0x34;
+    BYTE termLowA = 255, termLowR = 0x33, termLowG = 0xFF, termLowB = 0x66;
+    BYTE termHighA = 255, termHighR = 0xFF, termHighG = 0x3B, termHighB = 0x3B;
+    BYTE termLabelA = 255, termLabelR = 0xB8, termLabelG = 0xFF, termLabelB = 0xB8;
 };
 
 // A 4K display fits ~1280 bars at 2 px wide with 1 px gaps, and ultrawides more
@@ -1540,6 +1814,8 @@ ComPtr<ID2D1StrokeStyle> g_roundCapStrokeStyle;
 ComPtr<IDWriteFactory> g_dwriteFactory;
 ComPtr<IDWriteTextFormat> g_dwriteTextFormat;
 ComPtr<ID2D1SolidColorBrush> g_nowPlayingBrush;
+ComPtr<ID2D1SolidColorBrush> g_npArtistBrush;
+ComPtr<ID2D1SolidColorBrush> g_progressBrush;
 ComPtr<ID2D1SolidColorBrush> g_textPanelBrush;
 int g_dwriteTextFormatFontSize = -1;
 std::wstring g_dwriteTextFormatFontName;
@@ -1672,6 +1948,13 @@ inline float VizEaseForFrame(float perFrame) {
 }
 
 float g_dpiScale = 1.0f;
+
+// A size in settings pixels, DPI-scaled, and with Pixel Snap on rounded to a
+// whole device pixel so edges land on the pixel grid.
+inline float VizPx(float v) {
+    float p = v * g_dpiScale;
+    return g_settings.pixelSnap ? roundf(p) : p;
+}
 FILETIME g_lastWallpaperTime = {};
 std::atomic<HMONITOR> g_cachedMonitor{nullptr};
 
@@ -1762,6 +2045,26 @@ float g_visualOffsetX = 0.f, g_visualOffsetY = 0.f;
 
 std::mutex g_nowPlayingMutex;
 std::wstring g_nowPlayingDisplay;
+std::wstring g_nowPlayingTitle, g_nowPlayingArtist;  // the parts, for the two-line layout
+
+// Track timeline from the media session, for the progress bar: start, end and
+// position in 100 ns units, and the tick at which the position was current.
+// Between updates the bar extrapolates while playing, since most players only
+// report the position on a seek or a state change.
+std::atomic<bool> g_tlValid{false};
+std::atomic<int64_t> g_tlStart{0}, g_tlEnd{0}, g_tlPos{0};
+std::atomic<ULONGLONG> g_tlTick{0};
+
+float VizTrackProgress() {
+    if (!g_tlValid.load(std::memory_order_relaxed)) return -1.f;
+    double start = (double)g_tlStart.load(std::memory_order_relaxed);
+    double dur = (double)g_tlEnd.load(std::memory_order_relaxed) - start;
+    if (dur <= 0.0) return -1.f;
+    double pos = (double)g_tlPos.load(std::memory_order_relaxed) - start;
+    if (g_mediaIsPlaying.load(std::memory_order_relaxed))
+        pos += (double)(GetTickCount64() - g_tlTick.load(std::memory_order_relaxed)) * 10000.0;
+    return (float)std::clamp(pos / dur, 0.0, 1.0);
+}
 std::atomic<ULONGLONG> g_nowPlayingChangedTick{0};
 
 static float VIZ_SEEDS[VIZ_BARS_MAX] = {};
@@ -2625,6 +2928,8 @@ void FetchAlbumArtColorAsync() {
                                                         : (artist + L" - " + title);
                 if (!display.empty()) {
                     std::lock_guard<std::mutex> lock(g_nowPlayingMutex);
+                    g_nowPlayingTitle = title;
+                    g_nowPlayingArtist = artist;
                     if (g_nowPlayingDisplay != display) {
                         g_nowPlayingDisplay = display;
                         g_nowPlayingChangedTick.store(GetTickCount64(), std::memory_order_relaxed);
@@ -2744,6 +3049,7 @@ void FetchAlbumArtColorAsync() {
 
 static winrt::event_token g_gsmtcMediaPropsToken{};
 static winrt::event_token g_gsmtcPlaybackToken{};
+static winrt::event_token g_gsmtcTimelineToken{};
 static winrt::event_token g_gsmtcSessionToken{};
 [[clang::no_destroy]] static GlobalSystemMediaTransportControlsSessionManager g_gsmtcMgr{ nullptr };
 [[clang::no_destroy]] static GlobalSystemMediaTransportControlsSession        g_gsmtcSession{ nullptr };
@@ -2759,16 +3065,48 @@ void RefreshMediaPlaybackStatus() {
     if (g_mediaWnd) PostMessage(g_mediaWnd, WM_APP_MEDIA_REPAINT, 0, 0);
 }
 
+// Reads the session's timeline for the progress bar. LastUpdatedTime says how
+// old the position already is; a player that leaves it unset gets age 0.
+void RefreshMediaTimeline() {
+    if (!g_gsmtcSession) {
+        g_tlValid.store(false, std::memory_order_relaxed);
+        return;
+    }
+    try {
+        auto tl = g_gsmtcSession.GetTimelineProperties();
+        if (!tl) {
+            g_tlValid.store(false, std::memory_order_relaxed);
+            return;
+        }
+        int64_t start = tl.StartTime().count(), end = tl.EndTime().count(), pos = tl.Position().count();
+        int64_t ageMs = std::chrono::duration_cast<std::chrono::milliseconds>(winrt::clock::now() -
+                                                                              tl.LastUpdatedTime())
+                            .count();
+        if (ageMs < 0 || ageMs > 6LL * 3600 * 1000) ageMs = 0;
+        g_tlStart.store(start, std::memory_order_relaxed);
+        g_tlEnd.store(end, std::memory_order_relaxed);
+        g_tlPos.store(pos, std::memory_order_relaxed);
+        g_tlTick.store(GetTickCount64() - (ULONGLONG)ageMs, std::memory_order_relaxed);
+        g_tlValid.store(end > start, std::memory_order_relaxed);
+    } catch (...) {
+        g_tlValid.store(false, std::memory_order_relaxed);
+    }
+}
+
 void SetupGsmtcSessionListener() {
     if (!g_gsmtcMgr) return;
     try {
         if (g_gsmtcSession) {
             try { g_gsmtcSession.MediaPropertiesChanged(g_gsmtcMediaPropsToken); } catch (...) {}
             try { g_gsmtcSession.PlaybackInfoChanged(g_gsmtcPlaybackToken); } catch (...) {}
+            try { g_gsmtcSession.TimelinePropertiesChanged(g_gsmtcTimelineToken); } catch (...) {}
             g_gsmtcSession = nullptr;
         }
         g_gsmtcSession = g_gsmtcMgr.GetCurrentSession();
-        if (!g_gsmtcSession) return;
+        if (!g_gsmtcSession) {
+            g_tlValid.store(false, std::memory_order_relaxed);
+            return;
+        }
         g_gsmtcMediaPropsToken = g_gsmtcSession.MediaPropertiesChanged(
             [](auto const&, auto const&) {
                 if (g_settings.colorMode == VizColorMode::AlbumArt ||
@@ -2777,8 +3115,14 @@ void SetupGsmtcSessionListener() {
                     FetchAlbumArtColorAsync();
             });
         g_gsmtcPlaybackToken = g_gsmtcSession.PlaybackInfoChanged(
-            [](auto const&, auto const&) { RefreshMediaPlaybackStatus(); });
+            [](auto const&, auto const&) {
+                RefreshMediaPlaybackStatus();
+                RefreshMediaTimeline();  // pausing freezes the bar where it is
+            });
+        g_gsmtcTimelineToken = g_gsmtcSession.TimelinePropertiesChanged(
+            [](auto const&, auto const&) { RefreshMediaTimeline(); });
         RefreshMediaPlaybackStatus();
+        RefreshMediaTimeline();
     } catch (...) {}
 }
 
@@ -2816,6 +3160,7 @@ void InitGsmtcListener() {
             if (g_gsmtcSession) {
                 g_gsmtcSession.MediaPropertiesChanged(g_gsmtcMediaPropsToken);
                 g_gsmtcSession.PlaybackInfoChanged(g_gsmtcPlaybackToken);
+                g_gsmtcSession.TimelinePropertiesChanged(g_gsmtcTimelineToken);
             }
             if (g_gsmtcMgr) {
                 g_gsmtcMgr.CurrentSessionChanged(g_gsmtcSessionToken);
@@ -3269,6 +3614,22 @@ void RepositionAndRepaintMediaControls() {
     int x = mi.rcWork.left + (int)std::lround((workWidth - width) * (hPercent / 100.0f));
     int y = mi.rcWork.top + (int)std::lround((workHeight - height) * (vPercent / 100.0f));
 
+    // Anchored to the visualizer's panel (2.0): a corner of the panel as last
+    // drawn, inset by the anchor offsets, replacing the position above. The
+    // panel publishes its rect every frame and re-posts this when it moves.
+    if (g_settings.mediaAnchor != VizMediaAnchor::Screen && g_drawRectValid.load(std::memory_order_relaxed)) {
+        LONG pl = g_drawRectL.load(std::memory_order_relaxed), pt = g_drawRectT.load(std::memory_order_relaxed);
+        LONG pr = g_drawRectR.load(std::memory_order_relaxed), pb = g_drawRectB.load(std::memory_order_relaxed);
+        int ox = (int)std::lround(g_settings.mediaAnchorOffsetX * dpiScale);
+        int oy = (int)std::lround(g_settings.mediaAnchorOffsetY * dpiScale);
+        bool right = g_settings.mediaAnchor == VizMediaAnchor::PanelTopRight ||
+                     g_settings.mediaAnchor == VizMediaAnchor::PanelBottomRight;
+        bool bottom = g_settings.mediaAnchor == VizMediaAnchor::PanelBottomLeft ||
+                      g_settings.mediaAnchor == VizMediaAnchor::PanelBottomRight;
+        x = right ? (int)pr - ox - width : (int)pl + ox;
+        y = bottom ? (int)pb - oy - height : (int)pt + oy;
+    }
+
     Wh_Log(L"[Media] Reposition xywh=(%d,%d,%d,%d) work=(%ld,%ld,%ld,%ld) monitor=%d dpiScale=%.2f",
            x, y, width, height, mi.rcWork.left, mi.rcWork.top, mi.rcWork.right, mi.rcWork.bottom,
            g_settings.monitor, dpiScale);
@@ -3316,6 +3677,16 @@ LRESULT CALLBACK MediaWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
 
         case WM_APP_MEDIA_REPAINT:
             RepositionAndRepaintMediaControls();
+            return 0;
+
+        // Right-click on the strip opens the same quick-settings menu as the
+        // visualizer (handy when the visualizer is paused from it).
+        case WM_RBUTTONUP:
+            if (g_messageWnd && g_settings.contextMenu != VizContextMenu::Off) {
+                POINT pt;
+                GetCursorPos(&pt);
+                PostMessage(g_messageWnd, WM_APP_CONTEXT_MENU, (WPARAM)pt.x, (LPARAM)pt.y);
+            }
             return 0;
 
         case WM_DESTROY:
@@ -5399,6 +5770,172 @@ inline void Shutdown() {
 
 }  // namespace ttnpu
 
+// ---- Audio source ---------------------------------------------------------------------
+//
+// Up to 2.0 the mod always listened to the default playback device. Anyone who
+// routes audio through virtual devices (VB-Audio Matrix / Voicemeeter / VAIO
+// cables, an Ableton return on its own device, ...) had nothing to show, since
+// the default device was silent. Now any active endpoint can be the source:
+//
+//   * an output device, captured the way the default one always was
+//     (WASAPI loopback: what is being played to it), or
+//   * an input device: a microphone, a line-in, or the capture side of a
+//     virtual cable, read as an ordinary recording stream.
+//
+// The source is a short key string:
+//   ""  / "default_output"   the default playback device (the old behaviour)
+//   "default_input"          the default recording device
+//   "id:<endpoint id>"       one exact device (what the right-click menu stores)
+//   "name:<text>"            the first device whose name contains <text>
+//                            (what the Windhawk setting stores, since a person
+//                            can type a name but not an endpoint id)
+
+static const PROPERTYKEY kPKEY_DeviceFriendlyName = {
+    {0xa45c254e, 0xdf1c, 0x4efd, {0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}}, 14};
+
+std::wstring VizDeviceName(IMMDevice* d) {
+    std::wstring out;
+    ComPtr<IPropertyStore> ps;
+    if (!d || FAILED(d->OpenPropertyStore(STGM_READ, &ps)) || !ps) return out;
+    PROPVARIANT v;
+    PropVariantInit(&v);
+    if (SUCCEEDED(ps->GetValue(kPKEY_DeviceFriendlyName, &v)) && v.vt == VT_LPWSTR && v.pwszVal) out = v.pwszVal;
+    PropVariantClear(&v);
+    return out;
+}
+
+std::wstring VizDeviceId(IMMDevice* d) {
+    std::wstring out;
+    LPWSTR id = nullptr;
+    if (d && SUCCEEDED(d->GetId(&id)) && id) {
+        out = id;
+        CoTaskMemFree(id);
+    }
+    return out;
+}
+
+bool VizDeviceIsRender(IMMDevice* d) {
+    ComPtr<IMMEndpoint> ep;
+    EDataFlow flow = eRender;
+    if (d && SUCCEEDED(d->QueryInterface(__uuidof(IMMEndpoint), (void**)ep.GetAddressOf())) && ep)
+        ep->GetDataFlow(&flow);
+    return flow == eRender;
+}
+
+static bool ContainsNoCase(const std::wstring& hay, const std::wstring& needle) {
+    if (needle.empty()) return false;
+    auto it = std::search(hay.begin(), hay.end(), needle.begin(), needle.end(),
+                          [](wchar_t a, wchar_t b) { return towlower(a) == towlower(b); });
+    return it != hay.end();
+}
+
+struct VizAudioEndpoint {
+    std::wstring id, name;
+    bool render = true;
+};
+
+// Every active endpoint, outputs first. Used by the right-click menu.
+std::vector<VizAudioEndpoint> VizListAudioEndpoints(IMMDeviceEnumerator* e) {
+    std::vector<VizAudioEndpoint> out;
+    if (!e) return out;
+    for (EDataFlow flow : {eRender, eCapture}) {
+        ComPtr<IMMDeviceCollection> col;
+        if (FAILED(e->EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE, &col)) || !col) continue;
+        UINT n = 0;
+        col->GetCount(&n);
+        for (UINT i = 0; i < n; i++) {
+            ComPtr<IMMDevice> d;
+            if (FAILED(col->Item(i, &d)) || !d) continue;
+            VizAudioEndpoint ep;
+            ep.id = VizDeviceId(d.Get());
+            ep.name = VizDeviceName(d.Get());
+            ep.render = (flow == eRender);
+            if (ep.name.empty()) ep.name = ep.id;
+            out.push_back(ep);
+        }
+    }
+    return out;
+}
+
+// Resolves a source key to a device. Falls back to the default output (and
+// says so through *fellBack) when the asked-for device isn't there, so a
+// device that was unplugged or renamed leaves the visualizer working.
+ComPtr<IMMDevice> VizResolveAudioDevice(IMMDeviceEnumerator* e, const std::wstring& key, bool* loopback,
+                                        bool* fellBack) {
+    ComPtr<IMMDevice> d;
+    *fellBack = false;
+    *loopback = true;
+    if (!e) return d;
+    if (key == L"default_input") {
+        if (SUCCEEDED(e->GetDefaultAudioEndpoint(eCapture, eConsole, &d)) && d) {
+            *loopback = false;
+            return d;
+        }
+        *fellBack = true;
+    } else if (key.rfind(L"id:", 0) == 0) {
+        if (SUCCEEDED(e->GetDevice(key.c_str() + 3, &d)) && d) {
+            DWORD state = 0;
+            if (SUCCEEDED(d->GetState(&state)) && state == DEVICE_STATE_ACTIVE) {
+                *loopback = VizDeviceIsRender(d.Get());
+                return d;
+            }
+        }
+        d.Reset();
+        *fellBack = true;
+    } else if (key.rfind(L"name:", 0) == 0) {
+        std::wstring want = key.substr(5);
+        for (const auto& ep : VizListAudioEndpoints(e)) {
+            if (ContainsNoCase(ep.name, want) && SUCCEEDED(e->GetDevice(ep.id.c_str(), &d)) && d) {
+                *loopback = ep.render;
+                return d;
+            }
+        }
+        d.Reset();
+        *fellBack = true;
+    }
+    if (SUCCEEDED(e->GetDefaultAudioEndpoint(eRender, eConsole, &d))) *loopback = true;
+    return d;
+}
+
+// The source in effect, as the engine thread reads it. Written on the UI
+// thread by VizPublishAudioSource (from LoadSettings); a change flags a
+// reopen the same way a device change does.
+std::mutex g_audioSourceMutex;
+std::wstring g_audioSourceKeyShared;
+std::atomic<bool> g_audioOnFallback{false};
+
+std::wstring VizAudioSourceKey() {
+    std::lock_guard<std::mutex> lock(g_audioSourceMutex);
+    return g_audioSourceKeyShared;
+}
+
+// Whether a change of Windows' default device for `flow` affects the stream:
+// only when the source is that default, or the chosen device is missing and
+// the default output is standing in for it.
+bool VizSourceFollowsDefault(EDataFlow flow) {
+    std::wstring key = VizAudioSourceKey();
+    if (flow == eCapture) return key == L"default_input";
+    return key.empty() || key == L"default_output" || g_audioOnFallback.load(std::memory_order_relaxed);
+}
+
+// A readable name for a source key, for messages.
+std::wstring VizAudioSourceLabel(const std::wstring& key) {
+    if (key.empty() || key == L"default_output") return L"default output";
+    if (key == L"default_input") return L"default input";
+    if (key.rfind(L"name:", 0) == 0) return L"\"" + key.substr(5) + L"\"";
+    return L"the device picked from the right-click menu";
+}
+
+// Reported through the message window as an Audio settings warning (the
+// receiver frees the string).
+void VizPostAudioNotice(const std::wstring& msg) {
+    Wh_Log(L"[Audio] %s", msg.c_str());
+    HWND wnd = g_messageWnd;
+    if (!wnd) return;
+    auto* heap = new std::wstring(msg);
+    if (!PostMessage(wnd, WM_APP_HW_NOTICE, 1, (LPARAM)heap)) delete heap;
+}
+
 class VizEndpointNotificationClient : public IMMNotificationClient {
    public:
     virtual ~VizEndpointNotificationClient() = default;
@@ -5419,7 +5956,8 @@ class VizEndpointNotificationClient : public IMMNotificationClient {
         return E_NOINTERFACE;
     }
     HRESULT STDMETHODCALLTYPE OnDefaultDeviceChanged(EDataFlow flow, ERole, LPCWSTR) override {
-        if (flow == eRender) g_deviceChanged.store(true, std::memory_order_relaxed);
+        if ((flow == eRender || flow == eCapture) && VizSourceFollowsDefault(flow))
+            g_deviceChanged.store(true, std::memory_order_relaxed);
         return S_OK;
     }
     HRESULT STDMETHODCALLTYPE OnDeviceAdded(LPCWSTR) override {
@@ -5488,6 +6026,7 @@ struct VizBandFrame {
     int count = 0;
     float level[VIZ_BARS_MAX] = {};  // display height 0..1, after ballistics
     float zone[3] = {};              // summed level per EQ zone (low / mid / high)
+    float zoneCount[3] = {};         // bands in each zone, for averages (Terminal meters)
 };
 std::atomic<uint32_t> g_bandFrameSeq{0};
 VizBandFrame g_bandFrame;
@@ -5499,6 +6038,7 @@ void PublishBandFrame(const VizBandFrame& f) {
     g_bandFrame.count = f.count;
     memcpy(g_bandFrame.level, f.level, sizeof(float) * (size_t)std::clamp(f.count, 0, VIZ_BARS_MAX));
     memcpy(g_bandFrame.zone, f.zone, sizeof(f.zone));
+    memcpy(g_bandFrame.zoneCount, f.zoneCount, sizeof(f.zoneCount));
     g_bandFrameSeq.store(seq + 2, std::memory_order_release);
 }
 
@@ -5509,6 +6049,7 @@ void ReadBandFrame(VizBandFrame& dst) {
         dst.count = std::clamp(g_bandFrame.count, 0, VIZ_BARS_MAX);
         memcpy(dst.level, g_bandFrame.level, sizeof(float) * (size_t)dst.count);
         memcpy(dst.zone, g_bandFrame.zone, sizeof(dst.zone));
+        memcpy(dst.zoneCount, g_bandFrame.zoneCount, sizeof(dst.zoneCount));
         std::atomic_thread_fence(std::memory_order_acquire);
         if (seq1 == g_bandFrameSeq.load(std::memory_order_relaxed)) return;
     }
@@ -5574,19 +6115,23 @@ HANDLE g_engineWake = nullptr;    // auto-reset: settings, pause, resume, unload
 HANDLE g_engineClosed = nullptr;  // manual-reset: set while the stream is closed
 std::atomic<int> g_idleState{(int)VizIdleState::Playing};
 
-// Opens the default render endpoint for loopback. Same as 1.5 apart from the
-// buffer (see above) and the extra outputs: the channel mask for loudness
-// weighting, and the device itself for the deep-idle peak meter.
+// Opens the chosen audio source (see VizResolveAudioDevice): an output
+// device by loopback, as 1.5 always did with the default one, or an input
+// device as a plain recording stream. Same buffer and outputs as before: the
+// channel mask for loudness weighting, and the device itself for the
+// deep-idle peak meter. *fellBack says the chosen device wasn't there.
 bool VizInitAudioClient(IMMDeviceEnumerator* pEnum, ComPtr<IMMDevice>& pDevOut,
                         ComPtr<IAudioClient>& pClient, ComPtr<IAudioCaptureClient>& pCapture,
                         UINT32& sampleRate, UINT32& channels, bool& isFloat, DWORD& channelMask,
-                        HANDLE hEvent) {
+                        HANDLE hEvent, bool* loopbackOut, bool* fellBack) {
     pClient.Reset();
     pCapture.Reset();
     pDevOut.Reset();
 
-    ComPtr<IMMDevice> pDev;
-    if (FAILED(pEnum->GetDefaultAudioEndpoint(eRender, eConsole, &pDev))) return false;
+    bool loopback = true;
+    ComPtr<IMMDevice> pDev = VizResolveAudioDevice(pEnum, VizAudioSourceKey(), &loopback, fellBack);
+    if (!pDev) return false;
+    *loopbackOut = loopback;
 
     ComPtr<IAudioClient> pC;
     if (FAILED(pDev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
@@ -5609,7 +6154,7 @@ bool VizInitAudioClient(IMMDeviceEnumerator* pEnum, ComPtr<IMMDevice>& pDevOut,
 
     // 500 ms, in 100 ns units.
     HRESULT hr = pC->Initialize(AUDCLNT_SHAREMODE_SHARED,
-                                AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+                                (loopback ? AUDCLNT_STREAMFLAGS_LOOPBACK : 0u) | AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
                                 5000000, 0, pwfx, nullptr);
     CoTaskMemFree(pwfx);
     if (FAILED(hr)) return false;
@@ -5674,7 +6219,10 @@ public:
         UINT32 sr = 48000, ch = 2;
         bool fl = true;
         DWORD mask = 0;
-        if (VizInitAudioClient(enum_.Get(), device_, client_, capture_, sr, ch, fl, mask, audioEvent_)) {
+        bool loopback = true, fellBack = false;
+        std::wstring source = VizAudioSourceKey();
+        if (VizInitAudioClient(enum_.Get(), device_, client_, capture_, sr, ch, fl, mask, audioEvent_, &loopback,
+                               &fellBack)) {
             sampleRate_ = sr;
             channels_ = ch;
             isFloat_ = fl;
@@ -5686,7 +6234,19 @@ public:
             configuredGen_ = 0;  // sample rate may have changed: rebuild the precision engine
             g_audioOpen.store(true);
             if (g_engineClosed) ResetEvent(g_engineClosed);
-            Wh_Log(L"[Audio] loopback open: %u Hz, %u ch, %s", sr, ch, fl ? L"float" : L"int16");
+            Wh_Log(L"[Audio] %s open (%s): %u Hz, %u ch, %s", loopback ? L"loopback" : L"capture",
+                   VizDeviceName(device_.Get()).c_str(), sr, ch, fl ? L"float" : L"int16");
+            // Said once per source: a missing device is worth one heads-up,
+            // not one per reconnect attempt.
+            if (fellBack && source != warnedSource_) {
+                warnedSource_ = source;
+                VizPostAudioNotice(L"The chosen audio source (" + VizAudioSourceLabel(source) +
+                                   L") isn't connected or enabled, so the visualizer is listening to the "
+                                   L"default output until it comes back.");
+            } else if (!fellBack) {
+                warnedSource_.clear();
+            }
+            g_audioOnFallback.store(fellBack, std::memory_order_relaxed);
         }
     }
 
@@ -6161,11 +6721,13 @@ private:
         VizBandFrame& out = frame_;
         out.count = nb;
         out.zone[0] = out.zone[1] = out.zone[2] = 0.f;
+        out.zoneCount[0] = out.zoneCount[1] = out.zoneCount[2] = 0.f;
         for (int b = 0; b < nb; b++) {
             float x = disp.ToNorm(db[b]);
             bandLevel_[b] = ttdsp::BallisticsStep(bandLevel_[b], x, dt, cfg_.ball, range);
             out.level[b] = bandLevel_[b];
             out.zone[bandZone_[b]] += bandLevel_[b];
+            out.zoneCount[bandZone_[b]] += 1.f;
             maxX = std::max(maxX, x);
             rawMax = std::max(rawMax, db[b]);
             if (bandBass_[b]) bass = std::max(bass, x);
@@ -6252,6 +6814,7 @@ private:
     DWORD channelMask_ = 0;
     bool stopped_ = false;
     ULONGLONG lastReinit_ = 0;
+    std::wstring warnedSource_;  // the source last reported missing
     LONGLONG lastPacketQpc_ = 0;
     float blockPeak_ = 0.f;
 
@@ -6373,6 +6936,7 @@ void UpdateVisualizerTargets() {
 
         switch (g_settings.shape) {
             case VizShape::Stereo:
+            case VizShape::Terminal:
                 target = sampleBands(warpT(freqT)) * eqForT(warpT(freqT));
                 break;
             case VizShape::Mountain: {
@@ -6577,7 +7141,8 @@ void VizPublishEngineConfig() {
     c.workload = g_settings.workload;
     // GPU analysis needs both the Precision engine and the Direct3D 11
     // renderer; without either it is Hybrid (LoadSettings has said why).
-    if (c.workload == VizWorkload::Gpu && (!c.precision || g_settings.renderer != VizRenderer::D3D11))
+    if (c.workload == VizWorkload::Gpu &&
+        (!c.precision || g_settings.renderer != VizRenderer::D3D11 || g_settings.shape == VizShape::Terminal))
         c.workload = VizWorkload::Hybrid;
     auto& s = c.spec;
     s.fftSize = g_settings.fftSize;
@@ -6634,6 +7199,15 @@ void VizPublishEngineConfig() {
         g_engineCfg = c;
     }
     g_engineCfgGen.fetch_add(1, std::memory_order_acq_rel);
+    // Audio source: a different one reopens the stream on the engine thread.
+    {
+        std::lock_guard<std::mutex> lock(g_audioSourceMutex);
+        std::wstring key = g_settings.audioSourceKey == L"default_output" ? L"" : g_settings.audioSourceKey;
+        if (key != g_audioSourceKeyShared) {
+            g_audioSourceKeyShared = key;
+            g_deviceChanged.store(true, std::memory_order_relaxed);
+        }
+    }
     if (g_engineWake) SetEvent(g_engineWake);
 }
 
@@ -7139,6 +7713,257 @@ bool DragModifierHeld() {
     return false;
 }
 
+// ---- Terminal shape -----------------------------------------------------------------
+//
+// The visualizer drawn as text: a grid of character cells in a monospace
+// font, each cell one glyph in one of five colours. Three styles:
+//
+//   Columns    every bar a column of glyphs (Terminal Column Glyph), turning
+//              the hot colour above Hot Threshold, with the peak cap as a
+//              glyph of its own. The cava / btop look.
+//   Waterfall  a spectrogram in characters: each row is one moment, each
+//              column one band, the glyph picked from Terminal Glyph Ramp by
+//              level, newest row on top, scrolling at Terminal Scroll Rate.
+//   Meters     text meters, "Bass:    [||||||        48%]", for bass, mid,
+//              treble and the loudest band.
+//
+// The grid is built here on the CPU from the same per-bar levels the other
+// shapes draw (so every engine, layout and ballistics setting applies), then
+// drawn by the Direct3D 11 renderer from a baked glyph atlas in one instanced
+// call, or by Direct2D as text runs.
+
+constexpr int VIZ_TERM_MAX_CELLS = 65536;
+
+struct VizTermGrid {
+    int cols = 0, rows = 0;
+    std::vector<uint32_t> cells;  // char | colour << 8; colours: 0 dim, 1 low, 2 high, 3 label, 4 peak
+};
+VizTermGrid g_termGrid;
+std::vector<float> g_termHistory;  // waterfall: rows x cols levels, row 0 newest
+float g_termScrollAcc = 0.f;
+
+// Cell size for the terminal font, in whole pixels so glyphs land 1:1.
+ComPtr<IDWriteTextFormat> g_termFormat;
+std::wstring g_termFormatFont;
+float g_termFormatPx = -1.f;
+int g_termCellW = 8, g_termCellH = 16;
+
+bool VizTermEnsureFormat() {
+    float px = (float)std::clamp(g_settings.termFontSize, 6, 96) * g_dpiScale;
+    if (g_termFormat && g_termFormatFont == g_settings.termFont && g_termFormatPx == px) return true;
+    g_termFormat.Reset();
+    if (!g_dwriteFactory) return false;
+    if (FAILED(g_dwriteFactory->CreateTextFormat(g_settings.termFont.c_str(), nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+                                                 DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, px, L"en-us",
+                                                 &g_termFormat)))
+        return false;
+    g_termFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+    g_termFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+    g_termFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+    g_termFormatFont = g_settings.termFont;
+    g_termFormatPx = px;
+    // Cell = the advance of "M" and the font's line height, rounded up. For a
+    // proportional font every glyph still gets an M-wide cell, which reads as
+    // monospaced; a real monospace font is the intended use.
+    ComPtr<IDWriteTextLayout> lay;
+    DWRITE_TEXT_METRICS m{};
+    if (SUCCEEDED(g_dwriteFactory->CreateTextLayout(L"M", 1, g_termFormat.Get(), 1000.f, 1000.f, &lay)) && lay &&
+        SUCCEEDED(lay->GetMetrics(&m))) {
+        g_termCellW = std::max(1, (int)ceilf(m.widthIncludingTrailingWhitespace - 0.01f));
+        g_termCellH = std::max(1, (int)ceilf(m.height - 0.01f));
+    } else {
+        g_termCellW = std::max(1, (int)ceilf(px * 0.6f));
+        g_termCellH = std::max(1, (int)ceilf(px * 1.2f));
+    }
+    return true;
+}
+
+void VizTermGridSize(int* cols, int* rows) {
+    if (g_settings.termStyle == VizTermStyle::Meters) {
+        *cols = std::clamp(g_settings.termMeterColumns, 20, 200);
+        *rows = 4;
+    } else {
+        *cols = VizEffectiveBarCount();
+        *rows = std::clamp(g_settings.termRows, 2, 128);
+    }
+    while (*cols * *rows > VIZ_TERM_MAX_CELLS && *rows > 2) (*rows)--;
+}
+
+// The grid's size in pixels: what the layout reserves for this shape instead
+// of a bar group. Bar Width, Gap and Max Size don't apply; the font does.
+void VizTermBox(float* w, float* h) {
+    int cols = 0, rows = 0;
+    VizTermGridSize(&cols, &rows);
+    VizTermEnsureFormat();
+    *w = (float)(cols * g_termCellW);
+    *h = (float)(rows * g_termCellH);
+}
+
+static inline uint32_t TermCell(wchar_t c, int color) {
+    uint32_t ch = (c >= 32 && c < 127) ? (uint32_t)c : (uint32_t)'?';
+    return ch | ((uint32_t)color << 8);
+}
+
+// Levels for the Meters style: bass / mid / treble as the average drawn level
+// of each EQ zone, and "Volume" as the loudest band.
+void VizTermMeterLevels(float out[4]) {
+    if (g_settings.engine == VizEngineKind::Precision) {
+        const VizBandFrame& f = g_drawBands;
+        float mx = 0.f;
+        for (int b = 0; b < f.count; b++) mx = std::max(mx, f.level[b]);
+        for (int z = 0; z < 3; z++) out[z] = (f.zoneCount[z] > 0.f) ? f.zone[z] / f.zoneCount[z] : 0.f;
+        out[3] = mx;
+    } else {
+        float b[VIZ_NUM_BANDS];
+        ReadBands(b);
+        float n[3] = {0, 0, 0};
+        out[0] = out[1] = out[2] = out[3] = 0.f;
+        for (int i = 0; i < VIZ_NUM_BANDS; i++) {
+            out[VIZ_BAND_EQ_ZONE[i]] += b[i];
+            n[VIZ_BAND_EQ_ZONE[i]] += 1.f;
+            out[3] = std::max(out[3], b[i]);
+        }
+        for (int z = 0; z < 3; z++) out[z] = n[z] > 0.f ? out[z] / n[z] : 0.f;
+    }
+    for (int i = 0; i < 4; i++) out[i] = std::clamp(out[i], 0.f, 1.f);
+}
+
+void VizBuildTermGrid() {
+    VizTermGrid& g = g_termGrid;
+    VizTermGridSize(&g.cols, &g.rows);
+    g.cells.assign((size_t)g.cols * g.rows, TermCell(L' ', 0));
+    const float hot = std::clamp(g_settings.termHotThreshold, 1, 100) / 100.0f;
+    auto at = [&](int c, int r) -> uint32_t& { return g.cells[(size_t)r * g.cols + c]; };
+
+    if (g_settings.termStyle == VizTermStyle::Meters) {
+        static const wchar_t* kLabels[4] = {L"Bass:", L"Mid:", L"Treble:", L"Volume:"};
+        float lv[4];
+        VizTermMeterLevels(lv);
+        const int labelW = 9, barN = std::max(1, g.cols - labelW - 6);
+        for (int r = 0; r < 4; r++) {
+            int c = 0;
+            for (const wchar_t* p = kLabels[r]; *p && c < labelW; p++) at(c++, r) = TermCell(*p, 3);
+            c = labelW;
+            at(c++, r) = TermCell(L'[', 1);
+            int filled = (int)lroundf(lv[r] * barN);
+            for (int j = 0; j < barN; j++)
+                at(c++, r) = (j < filled) ? TermCell(g_settings.termColumnGlyph, ((j + 1) > hot * barN) ? 2 : 1)
+                                          : TermCell(L' ', 0);
+            wchar_t pct[8];
+            swprintf_s(pct, L"%3d%%", (int)lroundf(lv[r] * 100.f));
+            for (const wchar_t* p = pct; *p && c < g.cols - 1; p++) at(c++, r) = TermCell(*p, 1);
+            if (c < g.cols) at(c, r) = TermCell(L']', 1);
+        }
+        return;
+    }
+
+    if (g_settings.termStyle == VizTermStyle::Waterfall) {
+        const std::wstring& ramp = g_settings.termRamp;
+        const int nr = (int)ramp.size();
+        size_t need = (size_t)g.cols * g.rows;
+        if (g_termHistory.size() != need) {
+            g_termHistory.assign(need, 0.f);
+            g_termScrollAcc = 0.f;
+        }
+        // Scroll by whole rows at the configured rate; the newest row always
+        // shows the current levels, so the top line stays live between steps.
+        g_termScrollAcc += g_frameDt * (float)std::clamp(g_settings.termScrollRate, 1, 120);
+        int steps = std::min((int)g_termScrollAcc, g.rows);
+        g_termScrollAcc -= (float)(int)g_termScrollAcc;
+        if (steps > 0) {
+            memmove(&g_termHistory[(size_t)steps * g.cols], &g_termHistory[0],
+                    sizeof(float) * (size_t)(g.rows - steps) * g.cols);
+        }
+        for (int c = 0; c < g.cols; c++) g_termHistory[c] = std::max(0.f, g_vizPeak[c]);
+        for (int r = 0; r < g.rows; r++) {
+            for (int c = 0; c < g.cols; c++) {
+                float v = g_termHistory[(size_t)r * g.cols + c];
+                if (nr <= 0 || v < 0.02f) continue;
+                int idx = std::clamp((int)(v * (nr - 1) + 0.5f), 0, nr - 1);
+                wchar_t ch = ramp[idx];
+                if (ch == L' ') continue;
+                at(c, r) = TermCell(ch, v > hot ? 2 : (idx == 0 ? 0 : 1));
+            }
+        }
+        return;
+    }
+
+    // Columns.
+    for (int c = 0; c < g.cols; c++) {
+        float v = std::max(0.f, g_vizPeak[c]) * g.rows;
+        int full = std::min(g.rows, (int)v);
+        float frac = v - (float)full;
+        for (int k = 0; k < full; k++) {
+            int r = g.rows - 1 - k;
+            at(c, r) = TermCell(g_settings.termColumnGlyph, ((float)(k + 1) / g.rows > hot) ? 2 : 1);
+        }
+        if (full < g.rows && frac >= 0.5f) {
+            int r = g.rows - 1 - full;
+            at(c, r) = TermCell(L'.', ((float)(full + 1) / g.rows > hot) ? 2 : 1);
+        }
+        if (g_settings.peakHoldEnabled) {
+            int pr = (int)lroundf(g_vizPeakHold[c] * g.rows);
+            if (pr > full && pr >= 1 && pr <= g.rows) at(c, g.rows - pr) = TermCell(g_settings.termPeakGlyph, 4);
+        }
+    }
+}
+
+// Terminal palette as straight-alpha floats, in cell colour order.
+void VizTermPalette(float out[5][4]) {
+    const BYTE* c[5][4] = {
+        {&g_settings.termDimA, &g_settings.termDimR, &g_settings.termDimG, &g_settings.termDimB},
+        {&g_settings.termLowA, &g_settings.termLowR, &g_settings.termLowG, &g_settings.termLowB},
+        {&g_settings.termHighA, &g_settings.termHighR, &g_settings.termHighG, &g_settings.termHighB},
+        {&g_settings.termLabelA, &g_settings.termLabelR, &g_settings.termLabelG, &g_settings.termLabelB},
+        {&g_settings.peakHoldA, &g_settings.peakHoldR, &g_settings.peakHoldG, &g_settings.peakHoldB}};
+    for (int i = 0; i < 5; i++) {
+        out[i][0] = *c[i][1] / 255.f;
+        out[i][1] = *c[i][2] / 255.f;
+        out[i][2] = *c[i][3] / 255.f;
+        out[i][3] = *c[i][0] / 255.f;
+    }
+}
+
+// Direct2D fallback: each row as runs of same-coloured text.
+void VizDrawTermGridD2D(float originX, float originY) {
+    if (!VizTermEnsureFormat() || !g_barBrush) return;
+    const VizTermGrid& g = g_termGrid;
+    float pal[5][4];
+    VizTermPalette(pal);
+    D2D1_TEXT_ANTIALIAS_MODE prev = g_dc->GetTextAntialiasMode();
+    g_dc->SetTextAntialiasMode(g_settings.textPixel ? D2D1_TEXT_ANTIALIAS_MODE_ALIASED
+                                                    : D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+    std::wstring run;
+    for (int r = 0; r < g.rows; r++) {
+        int c = 0;
+        while (c < g.cols) {
+            uint32_t cell = g.cells[(size_t)r * g.cols + c];
+            if ((cell & 127u) <= 32u) {
+                c++;
+                continue;
+            }
+            int color = (int)((cell >> 8) & 7u);
+            int start = c;
+            run.clear();
+            while (c < g.cols) {
+                uint32_t k = g.cells[(size_t)r * g.cols + c];
+                bool blank = (k & 127u) <= 32u;
+                if (!blank && (int)((k >> 8) & 7u) != color) break;
+                run.push_back(blank ? L' ' : (wchar_t)(k & 127u));
+                c++;
+            }
+            while (!run.empty() && run.back() == L' ') run.pop_back();
+            int ci = std::min(color, 4);
+            g_barBrush->SetColor(D2D1::ColorF(pal[ci][0], pal[ci][1], pal[ci][2], pal[ci][3]));
+            float x = originX + start * g_termCellW, y = originY + r * g_termCellH;
+            g_dc->DrawText(run.c_str(), (UINT32)run.size(), g_termFormat.Get(),
+                           D2D1::RectF(x, y, x + (float)(run.size() + 1) * g_termCellW, y + g_termCellH),
+                           g_barBrush.Get());
+        }
+    }
+    g_dc->SetTextAntialiasMode(prev);
+}
+
 // Hit-tests against the bounds of the last drawn frame (already tracked for
 // the occlusion check), so "over the visualizer" means the box as it's
 // actually being shown right now, including mid-drag.
@@ -7155,15 +7980,17 @@ bool ComputeVizLayout(VizLayout* out) {
     if (!out) return false;
 
     int barCount  = VizEffectiveBarCount();
-    float barW    = (float)std::max(1, g_settings.barWidth) * g_dpiScale;
-    float barGap  = (float)std::max(0, g_settings.barGap) * g_dpiScale;
-    float maxSize = (float)std::max(2, g_settings.barMaxSize) * g_dpiScale;
+    float barW    = std::max(1.f, VizPx((float)std::max(1, g_settings.barWidth)));
+    float barGap  = VizPx((float)std::max(0, g_settings.barGap));
+    float maxSize = std::max(2.f, VizPx((float)std::max(2, g_settings.barMaxSize)));
 
     bool horizontal = (g_settings.orientation == VizOrientation::Horizontal);
     float barsThickness = barCount * barW + (barCount - 1) * barGap;
 
     float totalWidth, totalHeight;
-    if (g_settings.shape == VizShape::Radial || g_settings.shape == VizShape::Goniometer) {
+    if (g_settings.shape == VizShape::Terminal) {
+        VizTermBox(&totalWidth, &totalHeight);
+    } else if (g_settings.shape == VizShape::Radial || g_settings.shape == VizShape::Goniometer) {
         totalWidth = totalHeight = maxSize * 2.0f;
     } else {
         totalWidth  = horizontal ? barsThickness : maxSize;
@@ -7191,11 +8018,17 @@ bool ComputeVizLayout(VizLayout* out) {
 
     float blockX = waLeft + (workWidth  - totalWidth)  * (hPercent / 100.0f);
     float blockY = waTop  + (workHeight - totalHeight) * (vPercent / 100.0f);
+    // Pixel Snap: the block on a whole pixel. With the sizes above already
+    // whole, every bar edge and the panel then sit exactly on the grid.
+    if (g_settings.pixelSnap) {
+        blockX = roundf(blockX);
+        blockY = roundf(blockY);
+    }
 
-    float padL = g_settings.backgroundEnabled ? (float)g_settings.bgPaddingL * g_dpiScale : 0.f;
-    float padR = g_settings.backgroundEnabled ? (float)g_settings.bgPaddingR * g_dpiScale : 0.f;
-    float padT = g_settings.backgroundEnabled ? (float)g_settings.bgPaddingT * g_dpiScale : 0.f;
-    float padB = g_settings.backgroundEnabled ? (float)g_settings.bgPaddingB * g_dpiScale : 0.f;
+    float padL = g_settings.backgroundEnabled ? VizPx((float)g_settings.bgPaddingL) : 0.f;
+    float padR = g_settings.backgroundEnabled ? VizPx((float)g_settings.bgPaddingR) : 0.f;
+    float padT = g_settings.backgroundEnabled ? VizPx((float)g_settings.bgPaddingT) : 0.f;
+    float padB = g_settings.backgroundEnabled ? VizPx((float)g_settings.bgPaddingB) : 0.f;
 
     // Safety margin so nothing gets clipped at the edges of the smaller target:
     // stroked shapes (oscilloscope, radial) centre their line on the path and so
@@ -7234,10 +8067,22 @@ bool ComputeVizLayout(VizLayout* out) {
     if (g_settings.nowPlayingEnabled) {
         float npOffX = reserveFor(std::abs(EffectiveNowPlayingOffsetX()) + npPanel);
         float npOffY = reserveFor(std::abs(EffectiveNowPlayingOffsetY()) + npPanel);
-        textTop    = std::max(textTop, fontPx * 1.6f + 8.0f * g_dpiScale + npOffY);
+        if (g_settings.npPlacement == VizNpPlacement::Above) {
+            float lines = (g_settings.npLayout == VizNpLayout::TwoLines) ? 2.7f : 1.6f;
+            textTop = std::max(textTop, fontPx * lines + 8.0f * g_dpiScale + npOffY);
+            textAnchorSide = std::max(textAnchorSide, 100.0f * g_dpiScale);
+        } else {
+            // Inside the panel: only an offset can take it past the edge.
+            textTop = std::max(textTop, npOffY);
+        }
         textBottom = std::max(textBottom, npOffY);
-        textAnchorSide = std::max(textAnchorSide, 100.0f * g_dpiScale);
         extraSide  = std::max(extraSide, npOffX);
+    }
+    if (g_settings.progressEnabled && g_settings.progressPlacement != VizProgressPlacement::PanelBottom) {
+        float need = (float)(std::max(1, g_settings.progressHeight) + g_settings.progressGap) * g_dpiScale +
+                     2.0f * g_dpiScale;
+        if (g_settings.progressPlacement == VizProgressPlacement::Above) textTop += need;
+        else textBottom = std::max(textBottom, need);
     }
     if (g_settings.peakFreqEnabled) {
         float pfOffX = reserveFor(std::abs(EffectivePeakFreqOffsetX()) + pfPanel);
@@ -7488,13 +8333,15 @@ bool GetVizTravelRange(float* travelX, float* travelY) {
     if (!GetMonitorInfo(monitor, &mi)) return false;
 
     int barCount = VizEffectiveBarCount();
-    float barW = (float)std::max(1, g_settings.barWidth) * g_dpiScale;
-    float barGap = (float)std::max(0, g_settings.barGap) * g_dpiScale;
-    float maxSize = (float)std::max(2, g_settings.barMaxSize) * g_dpiScale;
+    float barW = std::max(1.f, VizPx((float)std::max(1, g_settings.barWidth)));
+    float barGap = VizPx((float)std::max(0, g_settings.barGap));
+    float maxSize = std::max(2.f, VizPx((float)std::max(2, g_settings.barMaxSize)));
     bool horizontal = (g_settings.orientation == VizOrientation::Horizontal);
     float barsThickness = barCount * barW + (barCount - 1) * barGap;
     float totalWidth, totalHeight;
-    if (g_settings.shape == VizShape::Radial || g_settings.shape == VizShape::Goniometer) {
+    if (g_settings.shape == VizShape::Terminal) {
+        VizTermBox(&totalWidth, &totalHeight);
+    } else if (g_settings.shape == VizShape::Radial || g_settings.shape == VizShape::Goniometer) {
         totalWidth = totalHeight = maxSize * 2.0f;
     } else {
         totalWidth  = horizontal ? barsThickness : maxSize;
@@ -7612,7 +8459,7 @@ bool KeyMoveDirection(DWORD vk, int* dx, int* dy) {
 // hook thread, and read by nothing else.
 VizMoveTarget g_keyMoveTarget = VizMoveTarget::Visualizer;
 
-void NudgeVisualizerPx(int dxPx, int dyPx) {
+void NudgeVisualizerPx(float dxPx, float dyPx) {
     float travelX = 0.f, travelY = 0.f;
     if (!GetVizTravelRange(&travelX, &travelY)) return;
 
@@ -7622,8 +8469,8 @@ void NudgeVisualizerPx(int dxPx, int dyPx) {
     float v = active ? g_dragOverrideV.load(std::memory_order_relaxed)
                      : g_settings.verticalPosition;
 
-    if (dxPx && travelX > 1.0f) h = std::clamp(h + (dxPx / travelX) * 100.0f, 0.0f, 100.0f);
-    if (dyPx && travelY > 1.0f) v = std::clamp(v + (dyPx / travelY) * 100.0f, 0.0f, 100.0f);
+    if (dxPx != 0.f && travelX > 1.0f) h = std::clamp(h + (dxPx / travelX) * 100.0f, 0.0f, 100.0f);
+    if (dyPx != 0.f && travelY > 1.0f) v = std::clamp(v + (dyPx / travelY) * 100.0f, 0.0f, 100.0f);
 
     g_dragOverrideH.store(h, std::memory_order_relaxed);
     g_dragOverrideV.store(v, std::memory_order_relaxed);
@@ -7753,8 +8600,14 @@ LRESULT CALLBACK MoveKeyboardHookProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     bool fast = g_settings.keyMoveFastKey != VIZ_MOD_NONE &&
                                 ModKeysHeld(g_settings.keyMoveFastKey);
                     int step = fast ? g_settings.keyMoveFastStep : g_settings.keyMoveStep;
+                    // Fine: a fraction of a pixel. Only the visualizer can sit
+                    // between pixels; the strip and the text move whole pixels.
+                    bool fine = !fast && (g_settings.keyMoveFine ||
+                                          (g_settings.keyMoveFineKey != VIZ_MOD_NONE &&
+                                           ModKeysHeld(g_settings.keyMoveFineKey)));
+                    float vstep = fine ? g_settings.keyMoveFineStep : (float)step;
                     if (g_keyMoveTarget == VizMoveTarget::Visualizer) {
-                        NudgeVisualizerPx(dx * step, dy * step);
+                        NudgeVisualizerPx(dx * vstep, dy * vstep);
                     } else if (g_keyMoveTarget == VizMoveTarget::MediaControls) {
                         NudgeMediaControlsPx(dx * step, dy * step);
                     } else {
@@ -7800,7 +8653,54 @@ LRESULT CALLBACK MoveKeyboardHookProc(int nCode, WPARAM wParam, LPARAM lParam) {
     return CallNextHookEx(nullptr, nCode, wParam, lParam);
 }
 
+// True when what is under `pt` is the desktop the visualizer lives on (its
+// WorkerW / Progman layer), not an application window covering it. Window
+// lookup and class names only, no messages: this runs inside a low-level
+// mouse hook, where anything slow holds up all input.
+bool VizDesktopUnderPoint(POINT pt) {
+    HWND h = WindowFromPoint(pt);
+    if (!h) return false;
+    HWND root = GetAncestor(h, GA_ROOT);
+    if (!root) root = h;
+    WCHAR cls[32] = {};
+    GetClassNameW(root, cls, ARRAYSIZE(cls));
+    return wcscmp(cls, L"WorkerW") == 0 || wcscmp(cls, L"Progman") == 0;
+}
+
+std::atomic<bool> g_userPaused{false};  // Pause Visualizer, from the right-click menu
+bool g_menuButtonDown = false;          // hook thread only
+
+// Right-click over the visualizer opens the quick-settings menu (Interaction,
+// Right-Click Menu). The press and release are both swallowed, so the
+// desktop's own menu doesn't open as well; a drag bound to the right button
+// with its modifier held keeps priority.
+bool VizMenuHook(WPARAM wParam, const MSLLHOOKSTRUCT* info) {
+    if (g_settings.contextMenu == VizContextMenu::Off) return false;
+    if (wParam == WM_RBUTTONDOWN) {
+        g_menuButtonDown = false;
+        if (g_settings.dragEnabled && g_settings.dragButton == VizDragButton::Right && DragModifierHeld())
+            return false;
+        if (g_settings.contextMenu == VizContextMenu::CtrlRightClick && !(GetAsyncKeyState(VK_CONTROL) & 0x8000))
+            return false;
+        // Hidden for a fullscreen app or a covering window: nothing to click.
+        if (g_fullscreenPaused.load(std::memory_order_relaxed) && !g_userPaused.load(std::memory_order_relaxed))
+            return false;
+        if (!PointInVisualizerBounds(info->pt) || !VizDesktopUnderPoint(info->pt)) return false;
+        g_menuButtonDown = true;
+        return true;
+    }
+    if (wParam == WM_RBUTTONUP && g_menuButtonDown) {
+        g_menuButtonDown = false;
+        if (g_messageWnd) PostMessage(g_messageWnd, WM_APP_CONTEXT_MENU, (WPARAM)info->pt.x, (LPARAM)info->pt.y);
+        return true;
+    }
+    return false;
+}
+
 LRESULT CALLBACK DragMouseHookProc(int nCode, WPARAM wParam, LPARAM lParam) {
+    if (nCode == HC_ACTION && !g_unloading.load(std::memory_order_relaxed) &&
+        VizMenuHook(wParam, (const MSLLHOOKSTRUCT*)lParam))
+        return 1;
     if (nCode == HC_ACTION && !g_unloading.load(std::memory_order_relaxed) &&
         g_settings.dragEnabled) {
         MSLLHOOKSTRUCT* info = (MSLLHOOKSTRUCT*)lParam;
@@ -7864,6 +8764,7 @@ DWORD g_inputHookThreadId = 0;
 // low-level hook whose thread doesn't service messages promptly, so this
 // thread does nothing but pump.
 DWORD WINAPI InputHookThreadProc(LPVOID) {
+    SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     HINSTANCE hInst = (HINSTANCE)GetCurrentModuleHandle();
 
     g_dragMouseHook = SetWindowsHookEx(WH_MOUSE_LL, DragMouseHookProc, hInst, 0);
@@ -8010,6 +8911,8 @@ void ReleaseVisualResources() {
         g_bgGeoCacheRadii[2] = g_bgGeoCacheRadii[3] = -1.f;
     g_borderCacheBorderSize = -1;
     g_nowPlayingBrush.Reset();
+    g_npArtistBrush.Reset();
+    g_progressBrush.Reset();
     g_textPanelBrush.Reset();
     // Smooth Mode caches. Every settings change and wallpaper re-bake comes
     // through here, so none of them needs its own invalidation for colors,
@@ -8115,6 +9018,8 @@ bool RecreateVisualResources() {
         }
     }
 
+    if (g_settings.progressEnabled) g_dc->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 1), &g_progressBrush);
+
     if (g_settings.nowPlayingEnabled || g_settings.peakFreqEnabled) {
         // One scratch brush shared by both text panels and both their borders.
         // Each use sets its colour first -- four separate brushes would be four
@@ -8126,6 +9031,7 @@ bool RecreateVisualResources() {
             D2D1::ColorF(g_settings.nowPlayingR / 255.0f, g_settings.nowPlayingG / 255.0f,
                         g_settings.nowPlayingB / 255.0f, g_settings.nowPlayingA / 255.0f);
         g_dc->CreateSolidColorBrush(npColor, &g_nowPlayingBrush);
+        g_dc->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 1), &g_npArtistBrush);
 
         int fontSize = std::max(6, g_settings.nowPlayingFontSize);
         if (g_dwriteFactory && (!g_dwriteTextFormat || g_dwriteTextFormatFontSize != fontSize ||
@@ -9458,7 +10364,7 @@ static_assert(sizeof(FrameCB) == 26 * 16, "FrameCB must match tt_cb.hlsl");
 static_assert(sizeof(PassCB) == 16, "PassCB must match tt_cb.hlsl");
 static_assert(sizeof(CsCB) == 9 * 16, "CsCB must match tt_cb.hlsl");
 
-enum Pass : uint32_t { kPlate = 0, kBars, kCaps, kDots, kRadial, kScope, kGonio, kCorr, kPassCount };
+enum Pass : uint32_t { kPlate = 0, kBars, kCaps, kDots, kRadial, kScope, kGonio, kCorr, kTerm, kPassCount };
 constexpr int kMaxPoints = 8192;
 constexpr int kGonioFrames = 6;  // persistence: this frame and the five before it
 
@@ -9522,6 +10428,15 @@ struct State {
     uint64_t textKey = 0;
     bool textForce = true;
     bool blankPresented = false;
+
+    // Terminal shape: the cell grid and the baked glyph atlas, created on
+    // first use so nobody who never picks the shape pays for them.
+    ComPtr<ID3D11Buffer> cellsDyn;
+    ComPtr<ID3D11ShaderResourceView> cellsSRV;
+    ComPtr<ID3D11Texture2D> glyphTex;
+    ComPtr<ID3D11ShaderResourceView> glyphSRV;
+    uint64_t glyphKey = 0;
+    UINT glyphW = 0, glyphH = 0;
 
     // Goniometer persistence.
     std::vector<float> gonioHist[kGonioFrames];
@@ -9719,6 +10634,8 @@ void ReleaseDevice() {
     for (auto& p : g.passCB) p.Reset();
     g.barsDyn.Reset(); g.globalsDyn.Reset(); g.waveDyn.Reset(); g.pointsDyn.Reset();
     g.barsDynSRV.Reset(); g.globalsDynSRV.Reset(); g.waveSRV.Reset(); g.pointsSRV.Reset();
+    g.cellsDyn.Reset(); g.cellsSRV.Reset(); g.glyphTex.Reset(); g.glyphSRV.Reset();
+    g.glyphKey = 0;
     g.sampler.Reset(); g.blend.Reset(); g.raster.Reset();
     if (g.ctx) g.ctx->ClearState();
     g.ctx.Reset();
@@ -10164,6 +11081,80 @@ int BuildGonioPoints(float* out4, int maxPoints) {
     return count;
 }
 
+// ---- Terminal shape ----------------------------------------------------------------------
+//
+// Printable ASCII (32-126) baked once, white, into a 16 x 6 atlas of cells
+// exactly the size of a grid cell, so the pixel shader samples it 1:1 with
+// point filtering: a pixel font stays pixel-exact, and the whole grid is one
+// instanced draw. Rebaked only when the font, its size or the text rendering
+// mode changes.
+constexpr UINT kAtlasCols = 16, kAtlasRows = 6;
+
+bool EnsureTermResources() {
+    if (!g.cellsDyn &&
+        FAILED(MakeStructured(4, VIZ_TERM_MAX_CELLS, true, false, nullptr, g.cellsDyn, &g.cellsSRV, nullptr)))
+        return false;
+    if (!VizTermEnsureFormat() || !g_d2dDevice) return false;
+    uint64_t key = 1469598103934665603ull;
+    for (wchar_t c : g_termFormatFont) Mix(key, (uint64_t)c);
+    MixF(key, g_termFormatPx, 64.f);
+    Mix(key, (uint64_t)g_termCellW * 4096u + (uint64_t)g_termCellH);
+    Mix(key, g_settings.textPixel ? 1u : 0u);
+    if (g.glyphSRV && key == g.glyphKey) return true;
+    g.glyphSRV.Reset();
+    g.glyphTex.Reset();
+    UINT w = kAtlasCols * (UINT)g_termCellW, h = kAtlasRows * (UINT)g_termCellH;
+    D3D11_TEXTURE2D_DESC td = {};
+    td.Width = w;
+    td.Height = h;
+    td.MipLevels = 1;
+    td.ArraySize = 1;
+    td.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    td.SampleDesc.Count = 1;
+    td.Usage = D3D11_USAGE_DEFAULT;
+    td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+    if (FAILED(g_d3dDevice->CreateTexture2D(&td, nullptr, &g.glyphTex))) return false;
+    ComPtr<IDXGISurface> surf;
+    ComPtr<ID2D1DeviceContext> dc;
+    ComPtr<ID2D1Bitmap1> target;
+    ComPtr<ID2D1SolidColorBrush> white;
+    if (FAILED(g.glyphTex.As(&surf)) ||
+        FAILED(g_d2dDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &dc)))
+        return false;
+    D2D1_BITMAP_PROPERTIES1 bp = {};
+    bp.pixelFormat = D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED);
+    bp.dpiX = bp.dpiY = 96.f;
+    bp.bitmapOptions = D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW;
+    if (FAILED(dc->CreateBitmapFromDxgiSurface(surf.Get(), &bp, &target)) ||
+        FAILED(dc->CreateSolidColorBrush(D2D1::ColorF(1.f, 1.f, 1.f, 1.f), &white)))
+        return false;
+    dc->SetTarget(target.Get());
+    dc->SetTextAntialiasMode(g_settings.textPixel ? D2D1_TEXT_ANTIALIAS_MODE_ALIASED
+                                                  : D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+    dc->BeginDraw();
+    dc->Clear(D2D1::ColorF(0, 0, 0, 0));
+    for (wchar_t c = 33; c < 127; c++) {
+        UINT i = (UINT)(c - 32);
+        float x = (float)((i % kAtlasCols) * g_termCellW), y = (float)((i / kAtlasCols) * g_termCellH);
+        dc->DrawText(&c, 1, g_termFormat.Get(), D2D1::RectF(x, y, x + g_termCellW, y + g_termCellH), white.Get(),
+                     D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    }
+    if (FAILED(dc->EndDraw())) {
+        g.glyphTex.Reset();
+        return false;
+    }
+    dc->SetTarget(nullptr);
+    if (FAILED(g_d3dDevice->CreateShaderResourceView(g.glyphTex.Get(), nullptr, &g.glyphSRV))) {
+        g.glyphTex.Reset();
+        return false;
+    }
+    g.glyphKey = key;
+    g.glyphW = w;
+    g.glyphH = h;
+    g.forcePresent = true;
+    return true;
+}
+
 // ---- The frame -------------------------------------------------------------------------------
 struct FrameInputs {
     const VizLayout* layout;
@@ -10187,11 +11178,12 @@ bool Render(const FrameInputs& in) {
     const bool horizontal = g_settings.orientation == VizOrientation::Horizontal;
     const VizShape shape = g_settings.shape;
     const int bars = VizEffectiveBarCount();
-    const float barW = (float)std::max(1, g_settings.barWidth) * g_dpiScale;
-    const float barGap = (float)std::max(0, g_settings.barGap) * g_dpiScale;
-    const float maxSize = (float)std::max(2, g_settings.barMaxSize) * g_dpiScale;
-    const float idleSize = (float)std::max(0, g_settings.barIdleSize) * g_dpiScale;
+    const float barW = std::max(1.f, VizPx((float)std::max(1, g_settings.barWidth)));
+    const float barGap = VizPx((float)std::max(0, g_settings.barGap));
+    const float maxSize = std::max(2.f, VizPx((float)std::max(2, g_settings.barMaxSize)));
+    const float idleSize = VizPx((float)std::max(0, g_settings.barIdleSize));
     const bool roundShape = shape == VizShape::Radial || shape == VizShape::Goniometer;
+    const bool term = shape == VizShape::Terminal;
 
     // ---- Surface: the panel, or the bars plus their bleed without one -----
     float margin = std::max(4.0f * g_dpiScale, barW);
@@ -10248,8 +11240,10 @@ bool Render(const FrameInputs& in) {
     }
 
     // ---- Bar state ---------------------------------------------------------------
+    // The Terminal grid is built on the CPU from the bar levels, so that
+    // shape keeps the analysis there (Hybrid).
     const bool gpuWork = g_settings.workload == VizWorkload::Gpu && g_settings.engine == VizEngineKind::Precision &&
-                         !in.dragPause;
+                         !in.dragPause && !term;
     bool gpuOk = false;
     if (gpuWork) {
         int st = EnsureGpuAnalysis();
@@ -10327,6 +11321,22 @@ bool Render(const FrameInputs& in) {
             col = HSVtoRGB(fmodf(in.rainbowBase, 360.f), 0.85f, 1.0f, in.c1.a);
         setCol(f.scopeColor, col);
     }
+    // Terminal: palette, grid origin on a whole pixel (glyphs land 1:1), cell
+    // size, atlas size.
+    bool termReady = false;
+    if (term && !in.dragPause) {
+        termReady = EnsureTermResources() && !g_termGrid.cells.empty();
+        VizTermPalette(f.termColors);
+        f.termGeom[0] = floorf(f.block[0] + 0.5f);
+        f.termGeom[1] = floorf(f.block[1] + 0.5f);
+        f.termGeom[2] = (float)g_termCellW;
+        f.termGeom[3] = (float)g_termCellH;
+        f.termAtlas[0] = (float)g.glyphW;
+        f.termAtlas[1] = (float)g.glyphH;
+        f.termCols = (uint32_t)g_termGrid.cols;
+        f.termRows = (uint32_t)g_termGrid.rows;
+        f.termAtlasCols = kAtlasCols;
+    }
     f.plateRect[0] = 0.f;
     f.plateRect[1] = 0.f;
     f.plateRect[2] = (float)g.w;
@@ -10386,6 +11396,18 @@ bool Render(const FrameInputs& in) {
         }
         for (int i = 0; i < VIZ_WAVE_SAMPLES; i++) MixF(hash, in.scopeDisp[i] * f.ampScale, 4.f);
     }
+    if (termReady) {
+        size_t n = std::min(g_termGrid.cells.size(), (size_t)VIZ_TERM_MAX_CELLS);
+        if (SUCCEEDED(g.ctx->Map(g.cellsDyn.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
+            memcpy(ms.pData, g_termGrid.cells.data(), n * sizeof(uint32_t));
+            g.ctx->Unmap(g.cellsDyn.Get(), 0);
+        }
+        Mix(hash, g.glyphKey);
+        Mix(hash, (uint64_t)g_termGrid.cols * 65536u + (uint64_t)g_termGrid.rows);
+        for (size_t i = 0; i < n; i++) Mix(hash, g_termGrid.cells[i]);
+        for (int c = 0; c < 5; c++)
+            for (int k = 0; k < 4; k++) MixF(hash, f.termColors[c][k], 255.f);
+    }
     int points = 0;
     if (shape == VizShape::Goniometer && drawBars) {
         if (SUCCEEDED(g.ctx->Map(g.pointsDyn.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
@@ -10425,6 +11447,12 @@ bool Render(const FrameInputs& in) {
     g.ctx->VSSetShaderResources(0, 4, vsSrv);
     ID3D11ShaderResourceView* psSrv[5] = {nullptr, nullptr, nullptr, nullptr, g.plateSRV.Get()};
     g.ctx->PSSetShaderResources(0, 5, psSrv);
+    if (termReady) {
+        ID3D11ShaderResourceView* cells = g.cellsSRV.Get();
+        ID3D11ShaderResourceView* glyphs = g.glyphSRV.Get();
+        g.ctx->VSSetShaderResources(10, 1, &cells);
+        g.ctx->PSSetShaderResources(11, 1, &glyphs);
+    }
     ID3D11SamplerState* smp = g.sampler.Get();
     g.ctx->PSSetSamplers(0, 1, &smp);
     ID3D11Buffer* fcb = g.frameCB.Get();
@@ -10441,6 +11469,9 @@ bool Render(const FrameInputs& in) {
         switch (shape) {
             case VizShape::Dots: draw(kDots, (UINT)bars * f.dotSlots); break;
             case VizShape::Radial: draw(kRadial, (UINT)bars); break;
+            case VizShape::Terminal:
+                if (termReady) draw(kTerm, (UINT)(g_termGrid.cols * g_termGrid.rows));
+                break;
             case VizShape::Oscilloscope: draw(kScope, VIZ_WAVE_SAMPLES - 1); break;
             case VizShape::Goniometer:
                 draw(kGonio, (UINT)points);
@@ -10455,6 +11486,10 @@ bool Render(const FrameInputs& in) {
     ID3D11ShaderResourceView* nullSrv[5] = {};
     g.ctx->VSSetShaderResources(0, 4, nullSrv);
     g.ctx->PSSetShaderResources(0, 5, nullSrv);
+    if (termReady) {
+        g.ctx->VSSetShaderResources(10, 1, nullSrv);
+        g.ctx->PSSetShaderResources(11, 1, nullSrv);
+    }
 
     HRESULT hr = g.sc->Present(0, 0);
     VizCheckDeviceLost(S_OK, hr);
@@ -10470,28 +11505,39 @@ bool Render(const FrameInputs& in) {
 void VizPublishDrawRect(const VizLayout& layout) {
     int virtualScreenX = GetSystemMetrics(SM_XVIRTUALSCREEN);
     int virtualScreenY = GetSystemMetrics(SM_YVIRTUALSCREEN);
-    float padL = g_settings.backgroundEnabled ? (float)g_settings.bgPaddingL * g_dpiScale : 0.f;
-    float padR = g_settings.backgroundEnabled ? (float)g_settings.bgPaddingR * g_dpiScale : 0.f;
-    float padT = g_settings.backgroundEnabled ? (float)g_settings.bgPaddingT * g_dpiScale : 0.f;
-    float padB = g_settings.backgroundEnabled ? (float)g_settings.bgPaddingB * g_dpiScale : 0.f;
+    float padL = g_settings.backgroundEnabled ? VizPx((float)g_settings.bgPaddingL) : 0.f;
+    float padR = g_settings.backgroundEnabled ? VizPx((float)g_settings.bgPaddingR) : 0.f;
+    float padT = g_settings.backgroundEnabled ? VizPx((float)g_settings.bgPaddingT) : 0.f;
+    float padB = g_settings.backgroundEnabled ? VizPx((float)g_settings.bgPaddingB) : 0.f;
     float visL = layout.originX + layout.blockX - padL;
     float visT = layout.originY + layout.blockY - padT;
     float visR = layout.originX + layout.blockX + layout.totalWidth + padR;
     float visB = layout.originY + layout.blockY + layout.totalHeight + padB;
-    g_drawRectL.store((LONG)visL + virtualScreenX, std::memory_order_relaxed);
-    g_drawRectT.store((LONG)visT + virtualScreenY, std::memory_order_relaxed);
-    g_drawRectR.store((LONG)visR + virtualScreenX, std::memory_order_relaxed);
-    g_drawRectB.store((LONG)visB + virtualScreenY, std::memory_order_relaxed);
+    LONG l = (LONG)visL + virtualScreenX, t = (LONG)visT + virtualScreenY;
+    LONG r = (LONG)visR + virtualScreenX, b = (LONG)visB + virtualScreenY;
+    bool moved = !g_drawRectValid.load(std::memory_order_relaxed) ||
+                 l != g_drawRectL.load(std::memory_order_relaxed) ||
+                 t != g_drawRectT.load(std::memory_order_relaxed) ||
+                 r != g_drawRectR.load(std::memory_order_relaxed) ||
+                 b != g_drawRectB.load(std::memory_order_relaxed);
+    g_drawRectL.store(l, std::memory_order_relaxed);
+    g_drawRectT.store(t, std::memory_order_relaxed);
+    g_drawRectR.store(r, std::memory_order_relaxed);
+    g_drawRectB.store(b, std::memory_order_relaxed);
     g_drawRectValid.store(true, std::memory_order_relaxed);
+    // Media controls anchored to the panel follow it (a drag, a settings
+    // change, a nudge). Only on an actual move, so a still panel costs nothing.
+    if (moved && g_mediaWnd && g_settings.mediaControlsEnabled && g_settings.mediaAnchor != VizMediaAnchor::Screen)
+        PostMessage(g_mediaWnd, WM_APP_MEDIA_REPAINT, 0, 0);
 }
 
 // The background panel's rectangle (layout-local) and corner radii, with the
 // same guard as the Direct2D path against negative padding inverting it.
 void VizPanelRect(const VizLayout& layout, D2D1_RECT_F* out, float radii[4]) {
-    float padL = (float)g_settings.bgPaddingL * g_dpiScale;
-    float padR = (float)g_settings.bgPaddingR * g_dpiScale;
-    float padT = (float)g_settings.bgPaddingT * g_dpiScale;
-    float padB = (float)g_settings.bgPaddingB * g_dpiScale;
+    float padL = VizPx((float)g_settings.bgPaddingL);
+    float padR = VizPx((float)g_settings.bgPaddingR);
+    float padT = VizPx((float)g_settings.bgPaddingT);
+    float padB = VizPx((float)g_settings.bgPaddingB);
     D2D1_RECT_F r = D2D1::RectF(layout.blockX - padL, layout.blockY - padT, layout.blockX + layout.totalWidth + padR,
                                 layout.blockY + layout.totalHeight + padB);
     if (r.right - r.left < 1.0f) {
@@ -10565,8 +11611,10 @@ void VizResolveColors(RGBA* c1, RGBA* cGrad1, RGBA* c2) {
 // split is what lets the Direct3D 11 renderer redraw the text surface only
 // when one of those values changes.
 struct VizTextFrame {
-    std::wstring np;
+    std::wstring np;            // one line: "Artist - Title"
+    std::wstring npTitle, npArtist;
     float npAlpha = 0.f;
+    float progress = -1.f;      // track position 0..1, or -1 for no bar
     std::wstring pf;
     bool pfWide = false;  // a loudness readout: wider box, never wrapped
 };
@@ -10588,13 +11636,18 @@ void VizBuildTextFrame(VizTextFrame& t) {
         ULONGLONG npElapsed = GetTickCount64() - changedAt;
         ULONGLONG showMs = (ULONGLONG)std::max(0, g_settings.nowPlayingDisplaySeconds) * 1000ULL;
         constexpr ULONGLONG kNpFadeMs = 800;
-        if (changedAt != 0 && npElapsed < showMs + kNpFadeMs)
+        if (changedAt != 0 && showMs == 0)
+            t.npAlpha = 1.0f;  // Display Seconds 0: always shown, a widget rather than a toast
+        else if (changedAt != 0 && npElapsed < showMs + kNpFadeMs)
             t.npAlpha = (npElapsed < showMs) ? 1.0f : 1.0f - (float)(npElapsed - showMs) / (float)kNpFadeMs;
         if (t.npAlpha > 0.01f) {
             std::lock_guard<std::mutex> lock(g_nowPlayingMutex);
             t.np = g_nowPlayingDisplay;
+            t.npTitle = g_nowPlayingTitle;
+            t.npArtist = g_nowPlayingArtist;
         }
     }
+    if (g_settings.progressEnabled && g_progressBrush) t.progress = VizTrackProgress();
     if (g_settings.peakFreqEnabled && g_dwriteTextFormat && g_nowPlayingBrush) {
         std::wstring freq;
         float hz = g_dominantFreqHz.load(std::memory_order_relaxed);
@@ -10655,25 +11708,138 @@ float VizReadoutWidthEstimate() {
     return fontPx * 0.58f * chars;
 }
 
+// Where the track progress bar goes, layout-local. False when it isn't shown.
+bool VizProgressRect(const VizLayout& layout, D2D1_RECT_F* out) {
+    float h = (float)std::max(1, g_settings.progressHeight) * g_dpiScale;
+    float gap = (float)g_settings.progressGap * g_dpiScale;
+    D2D1_RECT_F panel;
+    float radii[4];
+    VizPanelRect(layout, &panel, radii);
+    bool hasPanel = g_settings.backgroundEnabled;
+    float l = hasPanel ? panel.left : layout.blockX, r = hasPanel ? panel.right : layout.blockX + layout.totalWidth;
+    float top = hasPanel ? panel.top : layout.blockY, bottom = hasPanel ? panel.bottom : layout.blockY + layout.totalHeight;
+    float y;
+    switch (g_settings.progressPlacement) {
+        case VizProgressPlacement::Above: y = top - gap - h; break;
+        case VizProgressPlacement::PanelBottom:
+            // Inside the panel, under the bars, as wide as the bars.
+            l = layout.blockX;
+            r = layout.blockX + layout.totalWidth;
+            y = layout.blockY + layout.totalHeight + gap;
+            break;
+        default: y = bottom + gap; break;
+    }
+    // Whole pixels: a 2 px bar on a half pixel would read as a 3 px smear.
+    *out = D2D1::RectF(roundf(l), roundf(y), roundf(r), roundf(y) + roundf(h));
+    return out->right > out->left;
+}
+
 void VizDrawTextOverlays(const VizTextFrame& t, const VizLayout& layout, bool smooth) {
     const float blockX = layout.blockX, blockY = layout.blockY;
     const float totalWidth = layout.totalWidth, totalHeight = layout.totalHeight;
+    const bool pixel = g_settings.textPixel;
+    // Pixel-sharp text: no antialiasing, and every box on a whole pixel, so a
+    // pixel font at its design size lands exactly on the grid.
+    g_dc->SetTextAntialiasMode(pixel ? D2D1_TEXT_ANTIALIAS_MODE_ALIASED : D2D1_TEXT_ANTIALIAS_MODE_DEFAULT);
+    auto snap = [&](D2D1_RECT_F r) {
+        if (!pixel && !g_settings.pixelSnap) return r;
+        float dx = roundf(r.left) - r.left, dy = roundf(r.top) - r.top;
+        return D2D1::RectF(r.left + dx, r.top + dy, r.right + dx, r.bottom + dy);
+    };
+
+    if (t.progress >= 0.f && g_progressBrush) {
+        D2D1_RECT_F pr;
+        if (VizProgressRect(layout, &pr)) {
+            g_progressBrush->SetColor(D2D1::ColorF(g_settings.progressTrackR / 255.f, g_settings.progressTrackG / 255.f,
+                                                   g_settings.progressTrackB / 255.f, g_settings.progressTrackA / 255.f));
+            g_dc->FillRectangle(pr, g_progressBrush.Get());
+            float fillR = pr.left + roundf((pr.right - pr.left) * std::clamp(t.progress, 0.f, 1.f));
+            if (fillR > pr.left) {
+                g_progressBrush->SetColor(D2D1::ColorF(g_settings.progressR / 255.f, g_settings.progressG / 255.f,
+                                                       g_settings.progressB / 255.f, g_settings.progressA / 255.f));
+                g_dc->FillRectangle(D2D1::RectF(pr.left, pr.top, fillR, pr.bottom), g_progressBrush.Get());
+            }
+        }
+    }
+
     if (!t.np.empty() && t.npAlpha > 0.01f) {
         g_nowPlayingBrush->SetColor(D2D1::ColorF(g_settings.nowPlayingR / 255.0f, g_settings.nowPlayingG / 255.0f,
                                                  g_settings.nowPlayingB / 255.0f,
                                                  (g_settings.nowPlayingA / 255.0f) * t.npAlpha));
+        if (g_npArtistBrush)
+            g_npArtistBrush->SetColor(D2D1::ColorF(g_settings.npArtistR / 255.0f, g_settings.npArtistG / 255.0f,
+                                                   g_settings.npArtistB / 255.0f,
+                                                   (g_settings.npArtistA / 255.0f) * t.npAlpha));
+        const float fontPx = (float)std::max(6, g_settings.nowPlayingFontSize) * g_dpiScale;
+        const bool two = g_settings.npLayout == VizNpLayout::TwoLines && !t.npTitle.empty() && !t.npArtist.empty();
+        // Two lines: title, then artist. One line: "Artist - Title", the
+        // artist part in the artist colour.
+        std::wstring text = two ? t.npTitle + L"\n" + t.npArtist : t.np;
+        UINT32 artistAt = 0, artistLen = 0;
+        if (two) {
+            artistAt = (UINT32)t.npTitle.size() + 1;
+            artistLen = (UINT32)t.npArtist.size();
+        } else if (!t.npArtist.empty() && !t.npTitle.empty() && t.np.rfind(t.npArtist, 0) == 0) {
+            artistLen = (UINT32)t.npArtist.size();
+        }
         float npMargin = 8.0f * g_dpiScale;
-        float npHeight = (float)std::max(6, g_settings.nowPlayingFontSize) * g_dpiScale * 1.6f;
+        float npHeight = fontPx * (two ? 2.7f : 1.6f);
         float npOffX = EffectiveNowPlayingOffsetX();
         float npOffY = EffectiveNowPlayingOffsetY();
-        D2D1_RECT_F npRect = D2D1::RectF(blockX - layout.textAnchorSide + npOffX, blockY - npHeight - npMargin + npOffY,
-                                         blockX + totalWidth + layout.textAnchorSide + npOffX, blockY - npMargin + npOffY);
+        D2D1_RECT_F npRect;
+        if (g_settings.npPlacement == VizNpPlacement::Above) {
+            npRect = D2D1::RectF(blockX - layout.textAnchorSide, blockY - npHeight - npMargin,
+                                 blockX + totalWidth + layout.textAnchorSide, blockY - npMargin);
+        } else {
+            // Inside the panel: in the band of padding above (or below) the
+            // bars, as wide as the bars, so Left / Right line up with them.
+            float padT = g_settings.backgroundEnabled ? VizPx((float)g_settings.bgPaddingT) : 0.f;
+            float padB = g_settings.backgroundEnabled ? VizPx((float)g_settings.bgPaddingB) : 0.f;
+            float y = (g_settings.npPlacement == VizNpPlacement::PanelTop)
+                          ? blockY - padT + std::max(0.f, (padT - npHeight) * 0.5f)
+                          : blockY + totalHeight + std::max(0.f, (padB - npHeight) * 0.5f);
+            npRect = D2D1::RectF(blockX, y, blockX + totalWidth, y + npHeight);
+        }
+        npRect = snap(D2D1::RectF(npRect.left + npOffX, npRect.top + npOffY, npRect.right + npOffX,
+                                  npRect.bottom + npOffY));
         TextPanelStyle npPanel{g_settings.npBgA, g_settings.npBgR, g_settings.npBgG, g_settings.npBgB,
                                g_settings.npBgBorderA, g_settings.npBgBorderR, g_settings.npBgBorderG,
                                g_settings.npBgBorderB, g_settings.npBgPadding, g_settings.npBgCornerRadius,
                                g_settings.npBgBorderSize};
-        DrawOverlayText(t.np.c_str(), (UINT32)t.np.length(), npRect, g_nowPlayingBrush.Get(), npPanel, t.npAlpha,
-                        smooth ? &g_npLayoutCache : nullptr);
+        // Build the layout here (alignment, the artist's colour) and hand it
+        // to DrawOverlayText through its cache, which then measures the panel
+        // from it and draws it as is.
+        static uint64_t s_npKey = 0;
+        uint64_t key = (uint64_t)g_settings.npAlign * 7u + (uint64_t)two * 3u + (uint64_t)artistLen * 131u +
+                       (uint64_t)(uintptr_t)g_npArtistBrush.Get();
+        float boxW = npRect.right - npRect.left, boxH = npRect.bottom - npRect.top;
+        VizTextLayoutCache& c = g_npLayoutCache;
+        bool same = c.layout && s_npKey == key && c.w == boxW && c.h == boxH && c.text == text;
+        if (!same && g_dwriteFactory && g_dwriteTextFormat) {
+            c.Reset();
+            if (SUCCEEDED(g_dwriteFactory->CreateTextLayout(text.c_str(), (UINT32)text.size(), g_dwriteTextFormat.Get(),
+                                                            boxW, boxH, &c.layout)) &&
+                c.layout) {
+                c.layout->SetTextAlignment(g_settings.npAlign == VizTextAlignH::Left    ? DWRITE_TEXT_ALIGNMENT_LEADING
+                                           : g_settings.npAlign == VizTextAlignH::Right ? DWRITE_TEXT_ALIGNMENT_TRAILING
+                                                                                        : DWRITE_TEXT_ALIGNMENT_CENTER);
+                c.layout->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+                if (artistLen && g_npArtistBrush) {
+                    DWRITE_TEXT_RANGE r{artistAt, artistLen};
+                    c.layout->SetDrawingEffect(g_npArtistBrush.Get(), r);
+                    if (two) c.layout->SetFontWeight(DWRITE_FONT_WEIGHT_NORMAL, r);
+                }
+                c.text = text;
+                c.w = boxW;
+                c.h = boxH;
+                s_npKey = key;
+            } else {
+                c.Reset();
+            }
+        }
+        (void)smooth;
+        DrawOverlayText(text.c_str(), (UINT32)text.size(), npRect, g_nowPlayingBrush.Get(), npPanel, t.npAlpha,
+                        &g_npLayoutCache);
     }
     if (!t.pf.empty()) {
         g_nowPlayingBrush->SetColor(D2D1::ColorF(g_settings.nowPlayingR / 255.0f, g_settings.nowPlayingG / 255.0f,
@@ -10700,7 +11866,7 @@ void VizDrawTextOverlays(const VizTextFrame& t, const VizLayout& layout, bool sm
             default: pfY = blockY + pfMargin; break;
         }
         pfY += pfOffY;
-        D2D1_RECT_F pfRect = D2D1::RectF(pfX, pfY, pfX + pfWidth, pfY + pfHeight);
+        D2D1_RECT_F pfRect = snap(D2D1::RectF(pfX, pfY, pfX + pfWidth, pfY + pfHeight));
         TextPanelStyle pfPanel{g_settings.pfBgA, g_settings.pfBgR, g_settings.pfBgG, g_settings.pfBgB,
                                g_settings.pfBgBorderA, g_settings.pfBgBorderR, g_settings.pfBgBorderG,
                                g_settings.pfBgBorderB, g_settings.pfBgPadding, g_settings.pfBgCornerRadius,
@@ -10734,6 +11900,7 @@ bool RenderVisualizerD3D(float sceneAlpha) {
         if (!dragPause) {
             VizComputeBarFrame();
             if (g_settings.shape == VizShape::Oscilloscope) VizUpdateScopeTrace();
+            if (g_settings.shape == VizShape::Terminal) VizBuildTermGrid();
         }
         VizResolveColors(&in.c1, &in.cGrad1, &in.c2);
         in.rainbowBase = VizClockPhase(VizClockSeconds(), (double)g_settings.rainbowSpeed, 360.0);
@@ -10753,6 +11920,13 @@ bool RenderVisualizerD3D(float sceneAlpha) {
     for (wchar_t c : tf.np) ttgfx::Mix(key, (uint64_t)c);
     ttgfx::MixF(key, tf.npAlpha, 255.f);
     for (wchar_t c : tf.pf) ttgfx::Mix(key, (uint64_t)c);
+    for (wchar_t c : tf.npArtist) ttgfx::Mix(key, (uint64_t)c);
+    // The progress bar redraws the text surface once per pixel it grows.
+    if (tf.progress >= 0.f) {
+        D2D1_RECT_F pr;
+        float wpx = VizProgressRect(layout, &pr) ? pr.right - pr.left : 0.f;
+        ttgfx::Mix(key, 1000003u + (uint64_t)lroundf(std::clamp(tf.progress, 0.f, 1.f) * wpx));
+    }
     ttgfx::MixF(key, sceneAlpha, 255.f);
     ttgfx::MixF(key, layout.blockX, 64.f);
     ttgfx::MixF(key, layout.blockY, 64.f);
@@ -10853,13 +12027,16 @@ void RenderVisualizer() {
 
     // Every bar's height and peak cap for this frame, for either engine (see
     // VizComputeBarFrame). The loops below only draw them.
-    if (!g_dragRenderPauseActive.load(std::memory_order_relaxed)) VizComputeBarFrame();
+    if (!g_dragRenderPauseActive.load(std::memory_order_relaxed)) {
+        VizComputeBarFrame();
+        if (g_settings.shape == VizShape::Terminal) VizBuildTermGrid();
+    }
 
     int barCount = VizEffectiveBarCount();
-    float barW = (float)std::max(1, g_settings.barWidth) * g_dpiScale;
-    float barGap = (float)std::max(0, g_settings.barGap) * g_dpiScale;
-    float maxSize = (float)std::max(2, g_settings.barMaxSize) * g_dpiScale;
-    float idleSize = (float)std::max(0, g_settings.barIdleSize) * g_dpiScale;
+    float barW = std::max(1.f, VizPx((float)std::max(1, g_settings.barWidth)));
+    float barGap = VizPx((float)std::max(0, g_settings.barGap));
+    float maxSize = std::max(2.f, VizPx((float)std::max(2, g_settings.barMaxSize)));
+    float idleSize = VizPx((float)std::max(0, g_settings.barIdleSize));
     float rTL = g_settings.barRadiusTL * g_dpiScale;
     float rTR = g_settings.barRadiusTR * g_dpiScale;
     float rBR = g_settings.barRadiusBR * g_dpiScale;
@@ -10873,7 +12050,9 @@ void RenderVisualizer() {
     float groupExtent    = maxSize;
 
     float totalWidth, totalHeight;
-    if (g_settings.shape == VizShape::Radial || g_settings.shape == VizShape::Goniometer) {
+    if (g_settings.shape == VizShape::Terminal) {
+        VizTermBox(&totalWidth, &totalHeight);
+    } else if (g_settings.shape == VizShape::Radial || g_settings.shape == VizShape::Goniometer) {
         totalWidth = totalHeight = maxSize * 2.0f;
     } else {
         totalWidth  = horizontal ? groupThickness : groupExtent;
@@ -10913,10 +12092,10 @@ void RenderVisualizer() {
         VizPublishDrawRect(layout);
 
         if (g_backgroundBrush) {
-            float padL = (float)g_settings.bgPaddingL * g_dpiScale;
-            float padR = (float)g_settings.bgPaddingR * g_dpiScale;
-            float padT = (float)g_settings.bgPaddingT * g_dpiScale;
-            float padB = (float)g_settings.bgPaddingB * g_dpiScale;
+            float padL = VizPx((float)g_settings.bgPaddingL);
+            float padR = VizPx((float)g_settings.bgPaddingR);
+            float padT = VizPx((float)g_settings.bgPaddingT);
+            float padB = VizPx((float)g_settings.bgPaddingB);
             float bgWidth  = totalWidth  + padL + padR;
             float bgHeight = totalHeight + padT + padB;
 
@@ -11370,6 +12549,11 @@ void RenderVisualizer() {
             g_barBrush->SetColor(D2D1::ColorF(col.r / 255.f, col.g / 255.f, col.b / 255.f, col.a / 255.f));
             float mx = cx + std::clamp(corr, -1.f, 1.f) * R;
             g_dc->FillRectangle(D2D1::RectF(mx - 1.5f, cyBar - 1.f, mx + 1.5f, cyBar + ch + 1.f), g_barBrush.Get());
+        }
+        else if (g_settings.shape == VizShape::Terminal) {
+            // Direct2D fallback: the grid as runs of text. The Direct3D 11
+            // renderer draws it from a glyph atlas in one call instead.
+            VizDrawTermGridD2D(floorf(blockX + 0.5f), floorf(blockY + 0.5f));
         }
         else {
             // Smooth Mode: bars go out as one sprite batch (see
@@ -11969,6 +13153,328 @@ LRESULT CALLBACK OverlayWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
     return DefWindowProc(hWnd, uMsg, wParam, lParam);
 }
 
+// ---- Right-click menu: live settings ---------------------------------------------------
+//
+// Windhawk mods can read their settings but not write them, so anything
+// changed from this menu is kept as a mod-owned value (Wh_SetStringValue, the
+// same store the dragged position uses) and laid over the Windhawk settings
+// every time they load. The menu's last item clears them all, handing control
+// back to the settings page. Until then the settings page shows the values
+// underneath, which is why the menu says how many quick settings are active.
+
+std::vector<std::pair<std::wstring, std::wstring>> g_menuOverrides;
+
+void VizLoadMenuOverrides() {
+    g_menuOverrides.clear();
+    WCHAR buf[4096] = {};
+    if (!Wh_GetStringValue(L"menuOverrides", buf, ARRAYSIZE(buf))) return;
+    std::wstring s = buf;
+    size_t pos = 0;
+    while (pos < s.size()) {
+        size_t nl = s.find(L'\n', pos);
+        if (nl == std::wstring::npos) nl = s.size();
+        std::wstring line = s.substr(pos, nl - pos);
+        size_t eq = line.find(L'=');
+        if (eq != std::wstring::npos && eq > 0) g_menuOverrides.emplace_back(line.substr(0, eq), line.substr(eq + 1));
+        pos = nl + 1;
+    }
+}
+
+void VizSaveMenuOverrides() {
+    std::wstring s;
+    for (const auto& kv : g_menuOverrides) s += kv.first + L"=" + kv.second + L"\n";
+    Wh_SetStringValue(L"menuOverrides", s.c_str());
+}
+
+void VizSetMenuOverride(const std::wstring& key, const std::wstring& value) {
+    for (auto& kv : g_menuOverrides)
+        if (kv.first == key) {
+            kv.second = value;
+            VizSaveMenuOverrides();
+            return;
+        }
+    g_menuOverrides.emplace_back(key, value);
+    VizSaveMenuOverrides();
+}
+
+// Option tables shared by the menu (labels) and the overrides (values). The
+// values are the same strings the settings YAML uses.
+struct VizMenuOption {
+    const wchar_t* value;
+    const wchar_t* label;
+};
+static const VizMenuOption kShapes[] = {
+    {L"stereo", L"Stereo"},     {L"mountain", L"Mountain"},         {L"mirror", L"Mirror"},
+    {L"wave", L"Wave"},         {L"breathe", L"Breathe"},           {L"dots", L"Dots"},
+    {L"radial", L"Radial"},     {L"oscilloscope", L"Oscilloscope"}, {L"goniometer", L"Goniometer"},
+    {L"terminal", L"Terminal"}};
+static const VizMenuOption kColorModes[] = {
+    {L"solid", L"Solid"},          {L"gradient", L"Gradient"},           {L"reactive_gradient", L"Reactive Gradient"},
+    {L"accent", L"Windows Accent"}, {L"album_art", L"Album Art"},         {L"dynamic_album", L"Dynamic Album"},
+    {L"acrylic", L"Acrylic"},      {L"rainbow", L"Rainbow Cycle"},       {L"tourne", L"Tourne"}};
+static const VizMenuOption kTermStyles[] = {
+    {L"columns", L"Columns"}, {L"waterfall", L"Waterfall"}, {L"meters", L"Meters"}};
+static const VizMenuOption kEngines[] = {{L"precision", L"Precision"}, {L"classic", L"Classic (1.4)"}};
+static const VizMenuOption kLayouts[] = {
+    {L"scale", L"Frequency Scale (Bar Count)"}, {L"iec:3", L"IEC 1/3 octave"},  {L"iec:6", L"IEC 1/6 octave"},
+    {L"iec:12", L"IEC 1/12 octave"},            {L"iec:24", L"IEC 1/24 octave"}, {L"musical:12", L"Musical notes"},
+    {L"musical:24", L"Musical quarter tones"}};
+static const VizMenuOption kWeightings[] = {{L"z", L"Z (flat)"}, {L"a", L"A"}, {L"c", L"C"}};
+static const VizMenuOption kBallistics[] = {
+    {L"snappy", L"Snappy"}, {L"smooth", L"Smooth"},       {L"analyzer", L"Analyzer (20 dB/s)"},
+    {L"vu", L"VU"},         {L"ppm_ebu", L"PPM, EBU"},    {L"ppm_din", L"PPM, DIN"}};
+static const VizMenuOption kWorkloads[] = {
+    {L"hybrid", L"Hybrid (CPU analysis, GPU drawing)"}, {L"gpu", L"GPU"}, {L"cpu", L"CPU"},
+    {L"npu", L"NPU (experimental)"}};
+static const VizMenuOption kRenderers[] = {{L"d3d11", L"Direct3D 11"}, {L"direct2d", L"Direct2D (1.5)"}};
+static const VizMenuOption kFps[] = {{L"0", L"Match display"}, {L"30", L"30"}, {L"60", L"60"},
+                                     {L"120", L"120"},         {L"144", L"144"}, {L"240", L"240"}};
+static const VizMenuOption kReadouts[] = {
+    {L"off", L"Off"},           {L"frequency", L"Peak frequency"}, {L"loudness", L"Loudness"},
+    {L"loudness_full", L"Loudness, true peak, PLR, correlation"}};
+
+// Applied at the end of LoadSettings, before anything derived from settings.
+void VizApplyMenuOverrides() {
+    for (const auto& kv : g_menuOverrides) {
+        const std::wstring& k = kv.first;
+        PCWSTR v = kv.second.c_str();
+        auto is = [&](PCWSTR s) { return wcscmp(v, s) == 0; };
+        if (k == L"shape") {
+            g_settings.shape = is(L"mountain") ? VizShape::Mountain : is(L"mirror") ? VizShape::Mirror
+                             : is(L"wave") ? VizShape::Wave : is(L"breathe") ? VizShape::Breathe
+                             : is(L"dots") ? VizShape::Dots : is(L"radial") ? VizShape::Radial
+                             : is(L"oscilloscope") ? VizShape::Oscilloscope : is(L"goniometer") ? VizShape::Goniometer
+                             : is(L"terminal") ? VizShape::Terminal : VizShape::Stereo;
+        } else if (k == L"colorMode") {
+            g_settings.colorMode = is(L"gradient") ? VizColorMode::Gradient
+                                 : is(L"reactive_gradient") ? VizColorMode::ReactiveGradient
+                                 : is(L"accent") ? VizColorMode::Accent : is(L"album_art") ? VizColorMode::AlbumArt
+                                 : is(L"dynamic_album") ? VizColorMode::DynamicAlbum
+                                 : is(L"acrylic") ? VizColorMode::Acrylic : is(L"rainbow") ? VizColorMode::RainbowCycle
+                                 : is(L"tourne") ? VizColorMode::Tourne : VizColorMode::Solid;
+        } else if (k == L"termStyle") {
+            g_settings.termStyle = is(L"waterfall") ? VizTermStyle::Waterfall
+                                 : is(L"meters") ? VizTermStyle::Meters : VizTermStyle::Columns;
+        } else if (k == L"engine") {
+            g_settings.engine = is(L"classic") ? VizEngineKind::Classic : VizEngineKind::Precision;
+        } else if (k == L"bandLayout") {
+            std::wstring s = v;
+            size_t c = s.find(L':');
+            std::wstring kind = s.substr(0, c);
+            int frac = (c == std::wstring::npos) ? 0 : _wtoi(s.c_str() + c + 1);
+            g_settings.bandLayout = (kind == L"iec") ? VizBandLayout::Iec
+                                  : (kind == L"musical") ? VizBandLayout::Musical : VizBandLayout::Scale;
+            if (frac == 1 || frac == 3 || frac == 6 || frac == 12 || frac == 24) g_settings.octaveFraction = frac;
+        } else if (k == L"weighting") {
+            g_settings.weighting = is(L"a") ? VizWeighting::A : is(L"c") ? VizWeighting::C : VizWeighting::Z;
+        } else if (k == L"ballistics") {
+            g_settings.ballistics = is(L"smooth") ? VizBallisticsPreset::Smooth
+                                  : is(L"analyzer") ? VizBallisticsPreset::Analyzer
+                                  : is(L"vu") ? VizBallisticsPreset::Vu : is(L"ppm_ebu") ? VizBallisticsPreset::PpmEbu
+                                  : is(L"ppm_din") ? VizBallisticsPreset::PpmDin : VizBallisticsPreset::Snappy;
+        } else if (k == L"workload") {
+            g_settings.workload = is(L"gpu") ? VizWorkload::Gpu : is(L"cpu") ? VizWorkload::Cpu
+                                : is(L"npu") ? VizWorkload::Npu : VizWorkload::Hybrid;
+        } else if (k == L"renderer") {
+            g_settings.renderer = is(L"direct2d") ? VizRenderer::Direct2D : VizRenderer::D3D11;
+        } else if (k == L"targetFps") {
+            g_settings.targetFps = std::clamp(_wtoi(v), 0, 1000);
+        } else if (k == L"readout") {
+            g_settings.peakFreqEnabled = !is(L"off");
+            if (!is(L"off"))
+                g_settings.readout = is(L"loudness") ? VizReadout::Loudness
+                                   : is(L"loudness_full") ? VizReadout::LoudnessFull : VizReadout::Frequency;
+        } else if (k == L"audioSource") {
+            g_settings.audioSourceKey = v;
+        } else if (k == L"peakHold") {
+            g_settings.peakHoldEnabled = is(L"1");
+        } else if (k == L"beatFlash") {
+            g_settings.beatFlashEnabled = is(L"1");
+        } else if (k == L"nowPlaying") {
+            g_settings.nowPlayingEnabled = is(L"1");
+        } else if (k == L"progress") {
+            g_settings.progressEnabled = is(L"1");
+        } else if (k == L"mediaControls") {
+            g_settings.mediaControlsEnabled = is(L"1");
+        } else if (k == L"pixelText") {
+            g_settings.textPixel = is(L"1");
+        } else if (k == L"pixelSnap") {
+            g_settings.pixelSnap = is(L"1");
+        } else if (k == L"fineNudge") {
+            g_settings.keyMoveFine = is(L"1");
+        }
+    }
+}
+
+// What the menu shows as checked: the current effective value as a string.
+static std::wstring CurrentValue(const std::wstring& key) {
+    auto pick = [](const VizMenuOption* opts, size_t n, int index) -> std::wstring {
+        return (index >= 0 && (size_t)index < n) ? opts[index].value : L"";
+    };
+    if (key == L"shape") return pick(kShapes, ARRAYSIZE(kShapes), (int)g_settings.shape);
+    if (key == L"colorMode") return pick(kColorModes, ARRAYSIZE(kColorModes), (int)g_settings.colorMode);
+    if (key == L"termStyle") return pick(kTermStyles, ARRAYSIZE(kTermStyles), (int)g_settings.termStyle);
+    if (key == L"engine") return pick(kEngines, ARRAYSIZE(kEngines), (int)g_settings.engine);
+    if (key == L"weighting") return pick(kWeightings, ARRAYSIZE(kWeightings), (int)g_settings.weighting);
+    if (key == L"ballistics") return pick(kBallistics, ARRAYSIZE(kBallistics), (int)g_settings.ballistics);
+    if (key == L"workload") return pick(kWorkloads, ARRAYSIZE(kWorkloads), (int)g_settings.workload);
+    if (key == L"renderer") return pick(kRenderers, ARRAYSIZE(kRenderers), (int)g_settings.renderer);
+    if (key == L"targetFps") return std::to_wstring(g_settings.targetFps);
+    if (key == L"bandLayout") {
+        if (g_settings.bandLayout == VizBandLayout::Scale) return L"scale";
+        return std::wstring(g_settings.bandLayout == VizBandLayout::Iec ? L"iec:" : L"musical:") +
+               std::to_wstring(g_settings.octaveFraction);
+    }
+    if (key == L"readout") {
+        if (!g_settings.peakFreqEnabled) return L"off";
+        return g_settings.readout == VizReadout::Loudness       ? L"loudness"
+               : g_settings.readout == VizReadout::LoudnessFull ? L"loudness_full"
+                                                                : L"frequency";
+    }
+    return L"";
+}
+
+enum : UINT {
+    kMenuToggleBase = 100,  // + index into kToggles
+    kMenuPause = 190,
+    kMenuReset = 191,
+    kMenuDefaultOut = 200,
+    kMenuDefaultIn = 201,
+    kMenuDeviceBase = 300,   // + endpoint index
+    kMenuChoiceBase = 1000,  // + group * 100 + option
+};
+struct VizMenuGroup {
+    const wchar_t* key;
+    const wchar_t* label;
+    const VizMenuOption* opts;
+    size_t n;
+};
+static const VizMenuGroup kGroups[] = {
+    {L"shape", L"Shape", kShapes, ARRAYSIZE(kShapes)},
+    {L"termStyle", L"Terminal Style", kTermStyles, ARRAYSIZE(kTermStyles)},
+    {L"colorMode", L"Color Mode", kColorModes, ARRAYSIZE(kColorModes)},
+    {L"engine", L"Analysis Engine", kEngines, ARRAYSIZE(kEngines)},
+    {L"bandLayout", L"Band Layout", kLayouts, ARRAYSIZE(kLayouts)},
+    {L"weighting", L"Weighting", kWeightings, ARRAYSIZE(kWeightings)},
+    {L"ballistics", L"Ballistics", kBallistics, ARRAYSIZE(kBallistics)},
+    {L"readout", L"Readout", kReadouts, ARRAYSIZE(kReadouts)},
+    {L"workload", L"Workload", kWorkloads, ARRAYSIZE(kWorkloads)},
+    {L"renderer", L"Renderer", kRenderers, ARRAYSIZE(kRenderers)},
+    {L"targetFps", L"Target FPS", kFps, ARRAYSIZE(kFps)},
+};
+struct VizMenuToggle {
+    const wchar_t* key;
+    const wchar_t* label;
+    bool* field;
+};
+
+void VizShowContextMenu(POINT pt) {
+    if (!g_messageWnd) return;
+    const VizMenuToggle toggles[] = {
+        {L"peakHold", L"Peak Hold Caps", &g_settings.peakHoldEnabled},
+        {L"beatFlash", L"Beat Flash", &g_settings.beatFlashEnabled},
+        {L"nowPlaying", L"Now Playing Text", &g_settings.nowPlayingEnabled},
+        {L"progress", L"Track Progress Bar", &g_settings.progressEnabled},
+        {L"mediaControls", L"Media Controls", &g_settings.mediaControlsEnabled},
+        {L"pixelText", L"Pixel-Sharp Text", &g_settings.textPixel},
+        {L"pixelSnap", L"Pixel Snap (sharp edges)", &g_settings.pixelSnap},
+        {L"fineNudge", L"Subpixel Nudges (keyboard)", &g_settings.keyMoveFine},
+    };
+
+    HMENU menu = CreatePopupMenu();
+    if (!menu) return;
+    AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, L"Tourne'Table");
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+
+    // Audio source.
+    ComPtr<IMMDeviceEnumerator> en;
+    CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
+                     (void**)en.GetAddressOf());
+    std::vector<VizAudioEndpoint> eps = VizListAudioEndpoints(en.Get());
+    const std::wstring& src = g_settings.audioSourceKey;
+    HMENU dev = CreatePopupMenu();
+    AppendMenuW(dev, MF_STRING | ((src.empty() || src == L"default_output") ? MF_CHECKED : 0), kMenuDefaultOut,
+                L"Default output (what you hear)");
+    AppendMenuW(dev, MF_STRING | (src == L"default_input" ? MF_CHECKED : 0), kMenuDefaultIn, L"Default input");
+    bool any[2] = {false, false};
+    for (int pass = 0; pass < 2; pass++) {
+        for (size_t i = 0; i < eps.size() && i < 600; i++) {
+            if (eps[i].render != (pass == 0)) continue;
+            if (!any[pass]) {
+                AppendMenuW(dev, MF_SEPARATOR, 0, nullptr);
+                AppendMenuW(dev, MF_STRING | MF_GRAYED, 0,
+                            pass == 0 ? L"Outputs (captured by loopback)" : L"Inputs (mics, line-in, virtual cables)");
+                any[pass] = true;
+            }
+            bool on = src == L"id:" + eps[i].id;
+            AppendMenuW(dev, MF_STRING | (on ? MF_CHECKED : 0), kMenuDeviceBase + (UINT)i, eps[i].name.c_str());
+        }
+    }
+    AppendMenuW(menu, MF_POPUP, (UINT_PTR)dev, L"Audio Source");
+
+    for (size_t gi = 0; gi < ARRAYSIZE(kGroups); gi++) {
+        const VizMenuGroup& grp = kGroups[gi];
+        if (wcscmp(grp.key, L"termStyle") == 0 && g_settings.shape != VizShape::Terminal) continue;
+        std::wstring cur = CurrentValue(grp.key);
+        HMENU sub = CreatePopupMenu();
+        for (size_t oi = 0; oi < grp.n; oi++)
+            AppendMenuW(sub, MF_STRING | (cur == grp.opts[oi].value ? MF_CHECKED : 0),
+                        kMenuChoiceBase + (UINT)(gi * 100 + oi), grp.opts[oi].label);
+        AppendMenuW(menu, MF_POPUP, (UINT_PTR)sub, grp.label);
+    }
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    for (size_t ti = 0; ti < ARRAYSIZE(toggles); ti++)
+        AppendMenuW(menu, MF_STRING | (*toggles[ti].field ? MF_CHECKED : 0), kMenuToggleBase + (UINT)ti,
+                    toggles[ti].label);
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING | (g_userPaused.load() ? MF_CHECKED : 0), kMenuPause, L"Pause Visualizer");
+    std::wstring reset = L"Reset Quick Settings";
+    if (!g_menuOverrides.empty()) reset += L" (" + std::to_wstring(g_menuOverrides.size()) + L" active)";
+    AppendMenuW(menu, MF_STRING | (g_menuOverrides.empty() ? MF_GRAYED : 0), kMenuReset, reset.c_str());
+
+    // A menu only closes on an outside click when its owner is foreground.
+    // The right-click went to the desktop (the hook swallowed it), so borrow
+    // the foreground thread's input state long enough to take foreground.
+    HWND fg = GetForegroundWindow();
+    DWORD fgThread = fg ? GetWindowThreadProcessId(fg, nullptr) : 0;
+    DWORD me = GetCurrentThreadId();
+    bool attached = fgThread && fgThread != me && AttachThreadInput(me, fgThread, TRUE);
+    SetForegroundWindow(g_messageWnd);
+    if (attached) AttachThreadInput(me, fgThread, FALSE);
+
+    UINT cmd = (UINT)TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, pt.x, pt.y, g_messageWnd,
+                                      nullptr);
+    PostMessage(g_messageWnd, WM_NULL, 0, 0);
+    DestroyMenu(menu);  // destroys the submenus with it
+    if (!cmd) return;
+
+    if (cmd == kMenuReset) {
+        g_menuOverrides.clear();
+        VizSaveMenuOverrides();
+    } else if (cmd == kMenuPause) {
+        g_userPaused.store(!g_userPaused.load());
+        if (g_userPaused.load()) PauseForFullscreen();
+        else ResumeFromFullscreen();
+        return;
+    } else if (cmd == kMenuDefaultOut) {
+        VizSetMenuOverride(L"audioSource", L"default_output");
+    } else if (cmd == kMenuDefaultIn) {
+        VizSetMenuOverride(L"audioSource", L"default_input");
+    } else if (cmd >= kMenuDeviceBase && cmd < kMenuDeviceBase + eps.size()) {
+        VizSetMenuOverride(L"audioSource", L"id:" + eps[cmd - kMenuDeviceBase].id);
+    } else if (cmd >= kMenuToggleBase && cmd < kMenuToggleBase + ARRAYSIZE(toggles)) {
+        const VizMenuToggle& t = toggles[cmd - kMenuToggleBase];
+        VizSetMenuOverride(t.key, *t.field ? L"0" : L"1");
+    } else if (cmd >= kMenuChoiceBase) {
+        UINT gi = (cmd - kMenuChoiceBase) / 100, oi = (cmd - kMenuChoiceBase) % 100;
+        if (gi >= ARRAYSIZE(kGroups) || oi >= kGroups[gi].n) return;
+        VizSetMenuOverride(kGroups[gi].key, kGroups[gi].opts[oi].value);
+    } else {
+        return;
+    }
+    ApplySettingsChanged();
+}
+
 LRESULT CALLBACK MessageWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
         case WM_DISPLAYCHANGE:
@@ -12010,7 +13516,8 @@ LRESULT CALLBACK MessageWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             auto* msg = reinterpret_cast<std::wstring*>(lParam);
             if (msg) {
                 if (!g_unloading) {
-                    ReportSettingWarning(L"Hardware", L"Audio Analysis Device", *msg);
+                    if (wParam == 1) ReportSettingWarning(L"Audio", L"Audio Source", *msg);
+                    else ReportSettingWarning(L"Hardware", L"Audio Analysis Device", *msg);
                     FlushSettingsIssues();
                 }
                 delete msg;
@@ -12134,7 +13641,7 @@ LRESULT CALLBACK MessageWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                     }
                 }
 
-                bool shouldPause = false;
+                bool shouldPause = g_userPaused.load(std::memory_order_relaxed);
 
                 if (g_settings.pauseOnFullscreen && IsFullscreenOrGameActive())
                     shouldPause = true;
@@ -12155,6 +13662,10 @@ LRESULT CALLBACK MessageWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 
         case WM_APP_SETTINGS_CHANGED:
             ApplySettingsChanged();
+            return 0;
+
+        case WM_APP_CONTEXT_MENU:
+            if (!g_unloading) VizShowContextMenu(POINT{(LONG)(int)wParam, (LONG)(int)lParam});
             return 0;
 
         case WM_DESTROY:
@@ -12291,6 +13802,7 @@ void CreateMessageWindow() {
 
 void LoadSettings() {
     g_settingsIssues.clear();
+    VizLoadMenuOverrides();
     g_settings.showSettingsErrors = Wh_GetIntSetting(L"validation.showErrors") != 0;
 
     PCWSTR shape = Wh_GetStringSetting(L"appearance.shape");
@@ -12302,6 +13814,7 @@ void LoadSettings() {
                        : (wcscmp(shape, L"dots") == 0)       ? VizShape::Dots
                        : (wcscmp(shape, L"radial") == 0)     ? VizShape::Radial
                        : (wcscmp(shape, L"oscilloscope") == 0) ? VizShape::Oscilloscope
+                       : (wcscmp(shape, L"terminal") == 0)   ? VizShape::Terminal
                                                                : VizShape::Stereo;
     Wh_FreeStringSetting(shape);
 
@@ -12409,6 +13922,21 @@ void LoadSettings() {
                                : (wcscmp(keyMoveFastKey, L"none") == 0) ? (unsigned)VIZ_MOD_NONE
                                                                         : (unsigned)VIZ_MOD_SHIFT;
     Wh_FreeStringSetting(keyMoveFastKey);
+    {
+        PCWSTR v = Wh_GetStringSetting(L"interaction.keyMoveFineKey");
+        g_settings.keyMoveFineKey = (wcscmp(v, L"shift") == 0) ? (unsigned)VIZ_MOD_SHIFT
+                                  : (wcscmp(v, L"ctrl") == 0)  ? (unsigned)VIZ_MOD_CTRL
+                                  : (wcscmp(v, L"alt") == 0)   ? (unsigned)VIZ_MOD_ALT
+                                  : (wcscmp(v, L"win") == 0)   ? (unsigned)VIZ_MOD_WIN
+                                                               : (unsigned)VIZ_MOD_NONE;
+        Wh_FreeStringSetting(v);
+        v = Wh_GetStringSetting(L"interaction.keyMoveFineStep");
+        float f = v ? (float)_wtof(v) : 0.f;
+        g_settings.keyMoveFineStep = (f > 0.f) ? std::clamp(f, 1.0f / 64.0f, 1.0f) : 0.25f;
+        Wh_FreeStringSetting(v);
+        g_settings.keyMoveFine = false;  // a quick setting only
+        g_settings.pixelSnap = Wh_GetIntSetting(L"position.pixelSnap") != 0;
+    }
 
     // A single-key modifier turns everyday shortcuts into visualizer moves, and
     // this hook swallows the keypress outright -- so the app underneath doesn't
@@ -12799,6 +14327,125 @@ void LoadSettings() {
         });
         g_settings.loudnessResetOnTrack = Wh_GetIntSetting(L"analysis.loudnessResetOnTrack") != 0;
 
+        // ---- 2.0: audio source, media widget, Terminal ------------------------------
+        str(L"audio.source", [](PCWSTR v) {
+            g_settings.audioSourceKey = (wcscmp(v, L"default_input") == 0) ? L"default_input"
+                                      : (wcscmp(v, L"named") == 0)         ? L"named"
+                                                                           : L"";
+        });
+        if (g_settings.audioSourceKey == L"named") {
+            PCWSTR raw = Wh_GetStringSetting(L"audio.deviceName");
+            std::wstring name = raw ? raw : L"";
+            Wh_FreeStringSetting(raw);
+            while (!name.empty() && iswspace(name.front())) name.erase(name.begin());
+            while (!name.empty() && iswspace(name.back())) name.pop_back();
+            if (name.empty()) {
+                ReportSettingIssue(L"Audio", L"Device Name", L"",
+                                   L"part of a device's name, as Windows' Sound settings show it",
+                                   L"the default output");
+                g_settings.audioSourceKey.clear();
+            } else {
+                g_settings.audioSourceKey = L"name:" + name;
+            }
+        }
+
+        str(L"appearance.nowPlayingLayout", [](PCWSTR v) {
+            g_settings.npLayout = (wcscmp(v, L"two_lines") == 0) ? VizNpLayout::TwoLines : VizNpLayout::OneLine;
+        });
+        str(L"appearance.nowPlayingPlacement", [](PCWSTR v) {
+            g_settings.npPlacement = (wcscmp(v, L"panel_top") == 0)      ? VizNpPlacement::PanelTop
+                                   : (wcscmp(v, L"panel_bottom") == 0)   ? VizNpPlacement::PanelBottom
+                                                                         : VizNpPlacement::Above;
+        });
+        str(L"appearance.nowPlayingAlign", [](PCWSTR v) {
+            g_settings.npAlign = (wcscmp(v, L"left") == 0)    ? VizTextAlignH::Left
+                               : (wcscmp(v, L"right") == 0)   ? VizTextAlignH::Right
+                                                              : VizTextAlignH::Center;
+        });
+        ReadColorSetting(L"appearance.nowPlayingArtistColor", L"Appearance", L"Now Playing Artist Color", 0xB3, 255,
+                         255, 255, &g_settings.npArtistA, &g_settings.npArtistR, &g_settings.npArtistG,
+                         &g_settings.npArtistB);
+        str(L"appearance.textRendering", [](PCWSTR v) { g_settings.textPixel = wcscmp(v, L"pixel") == 0; });
+
+        g_settings.progressEnabled = Wh_GetIntSetting(L"progress.enabled") != 0;
+        str(L"progress.placement", [](PCWSTR v) {
+            g_settings.progressPlacement = (wcscmp(v, L"above") == 0)          ? VizProgressPlacement::Above
+                                         : (wcscmp(v, L"panel_bottom") == 0)   ? VizProgressPlacement::PanelBottom
+                                                                               : VizProgressPlacement::Below;
+        });
+        g_settings.progressHeight = std::clamp(Wh_GetIntSetting(L"progress.height"), 1, 40);
+        g_settings.progressGap = std::clamp(Wh_GetIntSetting(L"progress.gap"), 0, 200);
+        ReadColorSetting(L"progress.color", L"Track Progress", L"Color", 255, 255, 255, 255, &g_settings.progressA,
+                         &g_settings.progressR, &g_settings.progressG, &g_settings.progressB);
+        ReadColorSetting(L"progress.trackColor", L"Track Progress", L"Track Color", 0x40, 255, 255, 255,
+                         &g_settings.progressTrackA, &g_settings.progressTrackR, &g_settings.progressTrackG,
+                         &g_settings.progressTrackB);
+
+        str(L"media_controls.anchor", [](PCWSTR v) {
+            g_settings.mediaAnchor = (wcscmp(v, L"panel_top_left") == 0)       ? VizMediaAnchor::PanelTopLeft
+                                   : (wcscmp(v, L"panel_top_right") == 0)      ? VizMediaAnchor::PanelTopRight
+                                   : (wcscmp(v, L"panel_bottom_left") == 0)    ? VizMediaAnchor::PanelBottomLeft
+                                   : (wcscmp(v, L"panel_bottom_right") == 0)   ? VizMediaAnchor::PanelBottomRight
+                                                                               : VizMediaAnchor::Screen;
+        });
+        g_settings.mediaAnchorOffsetX = std::clamp(Wh_GetIntSetting(L"media_controls.anchorOffsetX"), -2000, 2000);
+        g_settings.mediaAnchorOffsetY = std::clamp(Wh_GetIntSetting(L"media_controls.anchorOffsetY"), -2000, 2000);
+        str(L"interaction.contextMenu", [](PCWSTR v) {
+            g_settings.contextMenu = (wcscmp(v, L"ctrl_right_click") == 0) ? VizContextMenu::CtrlRightClick
+                                   : (wcscmp(v, L"off") == 0)              ? VizContextMenu::Off
+                                                                           : VizContextMenu::RightClick;
+        });
+
+        str(L"terminal.style", [](PCWSTR v) {
+            g_settings.termStyle = (wcscmp(v, L"waterfall") == 0) ? VizTermStyle::Waterfall
+                                 : (wcscmp(v, L"meters") == 0)    ? VizTermStyle::Meters
+                                                                  : VizTermStyle::Columns;
+        });
+        str(L"terminal.font", [](PCWSTR v) { g_settings.termFont = *v ? v : L"Consolas"; });
+        g_settings.termFontSize = std::clamp(Wh_GetIntSetting(L"terminal.fontSize"), 6, 96);
+        g_settings.termRows = std::clamp(Wh_GetIntSetting(L"terminal.rows"), 2, 128);
+        g_settings.termMeterColumns = std::clamp(Wh_GetIntSetting(L"terminal.meterColumns"), 20, 200);
+        g_settings.termHotThreshold = std::clamp(Wh_GetIntSetting(L"terminal.hotThreshold"), 1, 100);
+        g_settings.termScrollRate = std::clamp(Wh_GetIntSetting(L"terminal.scrollRate"), 1, 120);
+        // One printable ASCII character each; the atlas holds 32-126.
+        auto glyph = [](PCWSTR key, PCWSTR name, wchar_t def) {
+            PCWSTR v = Wh_GetStringSetting(key);
+            wchar_t c = (v && v[0]) ? v[0] : def;
+            if (c < 33 || c > 126) {
+                WCHAR d[2] = {def, 0};
+                ReportSettingIssue(L"Terminal", name, v ? v : L"", L"one printable ASCII character", d);
+                c = def;
+            }
+            Wh_FreeStringSetting(v);
+            return c;
+        };
+        g_settings.termColumnGlyph = glyph(L"terminal.columnGlyph", L"Column Glyph", L'#');
+        g_settings.termPeakGlyph = glyph(L"terminal.peakGlyph", L"Peak Glyph", L'-');
+        str(L"terminal.ramp", [](PCWSTR v) {
+            std::wstring r;
+            for (const wchar_t* p = v; *p; p++)
+                if (*p >= 32 && *p < 127) r.push_back(*p);
+            g_settings.termRamp = r.size() >= 2 ? r : L" .:-=+*#%@";
+        });
+        ReadColorSetting(L"terminal.dimColor", L"Terminal", L"Dim Color", 255, 0x1E, 0x6B, 0x34, &g_settings.termDimA,
+                         &g_settings.termDimR, &g_settings.termDimG, &g_settings.termDimB);
+        ReadColorSetting(L"terminal.lowColor", L"Terminal", L"Color", 255, 0x33, 0xFF, 0x66, &g_settings.termLowA,
+                         &g_settings.termLowR, &g_settings.termLowG, &g_settings.termLowB);
+        ReadColorSetting(L"terminal.highColor", L"Terminal", L"Hot Color", 255, 0xFF, 0x3B, 0x3B, &g_settings.termHighA,
+                         &g_settings.termHighR, &g_settings.termHighG, &g_settings.termHighB);
+        ReadColorSetting(L"terminal.labelColor", L"Terminal", L"Label Color", 255, 0xB8, 0xFF, 0xB8,
+                         &g_settings.termLabelA, &g_settings.termLabelR, &g_settings.termLabelG,
+                         &g_settings.termLabelB);
+
+        // Quick settings from the right-click menu sit on top of all of the
+        // above (and are cleared from the same menu).
+        VizApplyMenuOverrides();
+        if (g_settings.workload == VizWorkload::Gpu && g_settings.shape == VizShape::Terminal) {
+            ReportSettingWarning(L"Hardware", L"Workload",
+                                 L"The Terminal shape is built on the CPU from the bar levels, so with it the "
+                                 L"analysis runs on the CPU (Hybrid).");
+        }
+
         // The IEC and musical layouts decide the bar count. Worked out here at
         // 48 kHz; the range is capped at 21 kHz, below every common device's
         // Nyquist limit, so the count is the same on 44.1 kHz.
@@ -12866,6 +14513,7 @@ HANDLE g_uiThread = nullptr;
 DWORD g_uiThreadId = 0;
 
 DWORD WINAPI UiThreadProc(LPVOID) {
+    SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     // This mod runs as its own dedicated process (see the tool-mod boilerplate
     // at the end of this file). WhTool_ModInit's own calling thread does not
     // survive -- the tool-mod launcher hooks the process's real entry point
@@ -13042,7 +14690,7 @@ void ApplySettingsChanged() {
         if (g_settings.pauseOnFullscreen && IsFullscreenOrGameActive()) {
             PauseForFullscreen();
         }
-    } else if (!g_settings.pauseOnFullscreen) {
+    } else if (!g_settings.pauseOnFullscreen && !g_userPaused.load()) {
         ResumeFromFullscreen();
     }
 
