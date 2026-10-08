@@ -10,6 +10,8 @@
 
 Beta build, in `BETA_BUILD_2.0/`. Same `@id` as the 1.4 beta, so it upgrades that install in place and keeps its settings. The release build is untouched at 1.1.0.
 
+> **Beta fix:** the Direct3D 11 shaders failed to compile on Windows ("unexpected token 'pass'"), so every PC fell back to Direct2D. Windows' own shader compiler (`fxc`) reserves `pass` and doesn't accept a macro with an empty parameter list, and the DXC compiler used for testing accepts both. Both are fixed, and `tests/fxc_lint.py` now checks for anything else in that class before a build goes out.
+
 ### ✦ New: the Precision analysis engine
 
 Up to here the analysis summed the spectrum into 7 fixed bands, and every bar interpolated between those 7 numbers. Bar Count and FFT Size changed how many bars were drawn, not how much the bars knew, which is exactly what the Windhawk reviewer pointed out. Every bar now has its own band with its own edges, measured from the spectrum:

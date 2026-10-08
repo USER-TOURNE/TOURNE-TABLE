@@ -90,6 +90,31 @@ int main(int argc, char** argv) {
         for (size_t i = 0; i < cfg["peaks"].size(); i++) bars[i].y = (float)cfg["peaks"][i];
     if (cfg.count("wave"))
         for (size_t i = 0; i < cfg["wave"].size(); i++) wave[i] = (float)cfg["wave"][i];
+    // Terminal: synthetic atlas, alpha encodes glyph and texel position.
+    std::vector<uint> cells(4096, 32u);
+    std::vector<float4> atlas;
+    if (cfg.count("termCols")) {
+        int cw = (int)num("cellW", 7), chh = (int)num("cellH", 12), ac = 16, ar = 6;
+        c->fTermCols = (uint)num("termCols", 8);
+        c->fTermRows = (uint)num("termRows", 4);
+        c->fTermAtlasCols = ac;
+        c->fTermGeom = float4((float)num("tx", 3), (float)num("ty", 5), (float)cw, (float)chh);
+        c->fTermAtlas = float4((float)(ac * cw), (float)(ar * chh), 0, 0);
+        for (int k = 0; k < 5; k++) c->fTermColors[k] = float4(0.2f * (k + 1), 1.0f - 0.15f * k, 0.5f, 1.0f);
+        atlas.resize((size_t)ac * cw * ar * chh);
+        for (int y = 0; y < ar * chh; y++)
+            for (int x = 0; x < ac * cw; x++) {
+                int g = (y / chh) * ac + (x / cw);
+                float a = (float)(((g * 7 + (x % cw) * 3 + (y % chh) * 5) % 11)) / 10.0f;
+                atlas[(size_t)y * ac * cw + x] = float4(a, a, a, a);
+            }
+        c->gGlyphs.data = &atlas;
+        c->gGlyphs.w = ac * cw;
+        c->gGlyphs.h = ar * chh;
+        if (cfg.count("cells"))
+            for (size_t i = 0; i < cfg["cells"].size(); i++) cells[i] = (uint)cfg["cells"][i];
+    }
+    c->gCells.data = &cells;
     c->gBars.data = &bars;
     c->gGlobals.data = &globals;
     c->gWave.data = &wave;

@@ -8,6 +8,8 @@ StructuredBuffer<float> gWave REG(t2);      // oscilloscope trace, 256 samples, 
 StructuredBuffer<float4> gPoints REG(t3);   // goniometer: side, mid, alpha, -
 Texture2D<float4> gPlate REG(t4);           // baked background panel, premultiplied
 SamplerState gSamp REG(s0);
+StructuredBuffer<uint> gCells REG(t10);     // Terminal: one cell per glyph, char | colour << 8
+Texture2D<float4> gGlyphs REG(t11);         // Terminal: printable ASCII baked white, premultiplied
 
 // Analysis (compute shaders, Workload = GPU).
 StructuredBuffer<float> gTierIn REG(t5);     // 3 x N newest samples, one block per tier
@@ -99,7 +101,7 @@ float4 Premul(float4 c) { return float4(c.x * c.w, c.y * c.w, c.z * c.w, c.w); }
 // rounded corners and the capsules.
 
 struct Prim {
-    uint kind;    // 0 rounded rect, 1 capsule, 2 textured plate, 3 skip
+    uint kind;    // 0 rounded rect, 1 capsule, 2 textured plate, 3 skip, 4 glyph
     float4 a;     // rect: left top right bottom / capsule: ax ay bx by
     float4 radii; // rect: TL TR BR BL / capsule: x = radius
     float4 color; // straight alpha
@@ -283,20 +285,48 @@ Prim CorrPrim(uint j) {
     return RectPrim(x - hw, y0 - 1.0f, x + hw, y1 + 1.0f, float4(hw, hw, hw, hw), col);
 }
 
-Prim BuildPrim(uint pass, uint id) {
-    if (pass == 0u) {
+// One terminal cell: a glyph from the atlas (printable ASCII from 32, laid
+// out fTermAtlasCols to a row, one cell each), in one of five palette
+// colours. Cells are whole pixels and drawn 1:1, so pixel fonts stay sharp.
+Prim TermPrim(uint id) {
+    uint cols = max(fTermCols, 1u);
+    if (id >= cols * fTermRows) return NoPrim();
+    uint cell = gCells[id];
+    uint ch = cell & 127u;
+    if (ch <= 32u) return NoPrim();
+    uint ci = min((cell >> 8u) & 7u, 4u);
+    uint col = id % cols;
+    uint row = id / cols;
+    float cw = fTermGeom.z, chh = fTermGeom.w;
+    float x0 = fTermGeom.x + (float)col * cw;
+    float y0 = fTermGeom.y + (float)row * chh;
+    uint g = ch - 32u;
+    uint ac = max(fTermAtlasCols, 1u);
+    float gx = (float)(g % ac), gy = (float)(g / ac);
+    Prim p;
+    p.kind = 4u;
+    p.a = float4(x0, y0, x0 + cw, y0 + chh);
+    p.radii = float4(gx * cw / fTermAtlas.x, gy * chh / fTermAtlas.y, (gx + 1.0f) * cw / fTermAtlas.x,
+                     (gy + 1.0f) * chh / fTermAtlas.y);
+    p.color = fTermColors[ci];
+    return p;
+}
+
+Prim BuildPrim(uint passId, uint id) {
+    if (passId == 0u) {
         Prim p = RectPrim(fPlateRect.x, fPlateRect.y, fPlateRect.z, fPlateRect.w,
                           float4(0.0f, 0.0f, 0.0f, 0.0f), float4(1.0f, 1.0f, 1.0f, 1.0f));
         if (p.kind == 0u) p.kind = 2u;
         return p;
     }
-    if (pass == 1u) return BarPrim(id);
-    if (pass == 2u) return CapPrim(id);
-    if (pass == 3u) return DotPrim(id);
-    if (pass == 4u) return RadialPrim(id);
-    if (pass == 5u) return ScopePrim(id);
-    if (pass == 6u) return GonioPrim(id);
-    if (pass == 7u) return CorrPrim(id);
+    if (passId == 1u) return BarPrim(id);
+    if (passId == 2u) return CapPrim(id);
+    if (passId == 3u) return DotPrim(id);
+    if (passId == 4u) return RadialPrim(id);
+    if (passId == 5u) return ScopePrim(id);
+    if (passId == 6u) return GonioPrim(id);
+    if (passId == 7u) return CorrPrim(id);
+    if (passId == 8u) return TermPrim(id);
     return NoPrim();
 }
 
@@ -319,7 +349,7 @@ VsOut EmitVertex(Prim p, uint vid) {
         float r = p.radii.x + 1.0f;
         lo = float2(min(p.a.x, p.a.z) - r, min(p.a.y, p.a.w) - r);
         hi = float2(max(p.a.x, p.a.z) + r, max(p.a.y, p.a.w) + r);
-    } else if (p.kind == 2u) {
+    } else if (p.kind == 2u || p.kind == 4u) {
         lo = float2(p.a.x, p.a.y);
         hi = float2(p.a.z, p.a.w);
     } else {
@@ -390,6 +420,13 @@ float4 PSMain(VsOut i) SEM(SV_Target) {
                            (i.pix.y - i.shape.y) / max(1.0f, i.shape.w - i.shape.y));
         return gPlate.SampleLevel(gSamp, uv, 0.0f) * fSceneAlpha;
     }
+    if (i.kind == 4u) {
+        float fx = (i.pix.x - i.shape.x) / max(1.0f, i.shape.z - i.shape.x);
+        float fy = (i.pix.y - i.shape.y) / max(1.0f, i.shape.w - i.shape.y);
+        float2 uv = float2(i.radii.x + (i.radii.z - i.radii.x) * fx, i.radii.y + (i.radii.w - i.radii.y) * fy);
+        float cov = gGlyphs.SampleLevel(gSamp, uv, 0.0f).w;
+        return i.color * (cov * fSceneAlpha);
+    }
     return i.color * (Coverage(i) * fSceneAlpha);
 }
 
@@ -425,7 +462,7 @@ void CsFft(uint3 gid SEM(SV_GroupID), uint3 tid3 SEM(SV_GroupThreadID)) {
         float x1 = gTierIn[base + 2u * k + 1u] * gWindow[2u * k + 1u];
         gsFft[BitRev(k, cLog2Half)] = float2(x0, x1);
     }
-    BARRIER();
+    BARRIER;
     for (uint len = 2u; len <= m; len <<= 1u) {
         uint halfLen = len >> 1u;
         for (uint j = tid; j < m / 2u; j += 256u) {
@@ -442,7 +479,7 @@ void CsFft(uint3 gid SEM(SV_GroupID), uint3 tid3 SEM(SV_GroupThreadID)) {
             gsFft[a] = float2(za.x + vr, za.y + vi);
             gsFft[b] = float2(za.x - vr, za.y - vi);
         }
-        BARRIER();
+        BARRIER;
     }
     uint outBase = tier * (m + 1u);
     for (uint k2 = tid; k2 <= m; k2 += 256u) {
@@ -536,7 +573,7 @@ void CsReduce(uint3 tid3 SEM(SV_GroupThreadID)) {
     }
     gsRed[tid] = float4(mx, zl, zm, zh);
     gsRed2[tid] = float4(bass, rawMax, 0.0f, 0.0f);
-    BARRIER();
+    BARRIER;
     for (uint s = 128u; s > 0u; s >>= 1u) {
         if (tid < s) {
             float4 a = gsRed[tid], c = gsRed[tid + s];
@@ -544,11 +581,11 @@ void CsReduce(uint3 tid3 SEM(SV_GroupThreadID)) {
             float4 a2 = gsRed2[tid], c2 = gsRed2[tid + s];
             gsRed2[tid] = float4(max(a2.x, c2.x), max(a2.y, c2.y), 0.0f, 0.0f);
         }
-        BARRIER();
+        BARRIER;
     }
     float4 red = gsRed[0];
     float4 red2 = gsRed2[0];
-    BARRIER();
+    BARRIER;
 
     // Pass 2: dominant frequency. Each thread keeps its best local maximum.
     float bestDb = -1e9f;
@@ -574,13 +611,13 @@ void CsReduce(uint3 tid3 SEM(SV_GroupThreadID)) {
         }
     }
     gsRed[tid] = float4(bestDb, bestBin, bestTier, 0.0f);
-    BARRIER();
+    BARRIER;
     for (uint s2 = 128u; s2 > 0u; s2 >>= 1u) {
         if (tid < s2) {
             float4 a = gsRed[tid], c = gsRed[tid + s2];
             if (c.x > a.x) gsRed[tid] = c;
         }
-        BARRIER();
+        BARRIER;
     }
 
     if (tid == 0u) {

@@ -101,5 +101,5 @@ struct Texture2D {
 #define NUMTHREADS(x, y, z)
 #define GROUPSHARED
 #define NOINTERP
-#define BARRIER() tt_barrier->arrive_and_wait()
+#define BARRIER tt_barrier->arrive_and_wait()
 #define OUT(T) T&

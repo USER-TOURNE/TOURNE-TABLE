@@ -5,5 +5,5 @@
 #define NUMTHREADS(x, y, z) [numthreads(x, y, z)]
 #define GROUPSHARED groupshared
 #define NOINTERP nointerpolation
-#define BARRIER() GroupMemoryBarrierWithGroupSync()
+#define BARRIER GroupMemoryBarrierWithGroupSync()
 #define OUT(T) out T
