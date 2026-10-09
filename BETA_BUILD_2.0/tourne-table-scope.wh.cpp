@@ -700,6 +700,18 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
     - reflection: 0
       $name: Reflection
       $description: 0-100. Mirrors the bars onto a floor beneath them, fading out over this percentage of Bar Max Size. Horizontal bars anchored to the bottom only, with the bar shapes, LED Meter, Line Spectrum and Particles. Direct3D 11 renderer only
+    - fxGlow: 0
+      $name: Glow
+      $description: 0-100. A soft halo around each bar, dot, line and spark, worked out in the same shader pass that draws them, so it costs next to nothing. Direct3D 11 renderer only
+    - fxGlowRadius: 6
+      $name: Glow Radius
+      $description: 1-32 pixels. How far the halo reaches
+    - fxBloom: 0
+      $name: Bloom
+      $description: 0-100. Light bleeding out of the whole picture, like a camera lens, from a blurred copy at a quarter of the size added back on top. A little GPU work, and only on frames that change. Direct3D 11 renderer only
+    - fxBloomRadius: 16
+      $name: Bloom Radius
+      $description: 4-64 pixels. How far the light spreads
     - orientation: horizontal
       $name: Orientation
       $description: Whether bars run left-to-right or bottom-to-top
@@ -1763,6 +1775,7 @@ struct Settings {
     // Styles (2.1): picked from the Shape list on top of an internal shape.
     VizStyle style = VizStyle::None;
     int reflection = 0;  // %, of Bar Max Size
+    int fxGlow = 0, fxGlowRadius = 6, fxBloom = 0, fxBloomRadius = 16;  // FX (2.1)
 
     // Media widget (2.0).
     VizNpLayout npLayout = VizNpLayout::OneLine;
@@ -11402,6 +11415,10 @@ TT_CBUFFER(FrameCB, b0) {
     float4 fVu;     // VU needle L, R (0..1 of the scale), peak LED L, R (0..1)
     float4 fVuBox;  // one meter's width, height, offset of the second meter x, y
     uint fSpecW, fSpecHead, fSpecTex, fSpecPad;  // bars per row, newest row, rows in the texture
+    // FX (2.1): Glow strength 0..1 and radius px, Bloom strength 0..1 and
+    // radius px; texel size of the quarter-res bloom target and of the scene.
+    float fFxGlow, fFxGlowR, fFxBloom, fFxBloomR;
+    float4 fFxTexel;
 }
 TT_CBUFFER_END
 
@@ -11436,6 +11453,9 @@ SamplerState gSamp REG(s0);
 StructuredBuffer<uint> gCells REG(t10);     // Terminal: glyph cells only, char | colour << 8 | grid index << 16
 Texture2D<float4> gGlyphs REG(t11);         // Terminal: printable ASCII baked white, premultiplied
 Texture2D<float> gSpec REG(t12);            // Spectrogram: bar levels, one row per 1/60 s, ring
+Texture2D<float4> gFxSrc REG(t13);          // FX: the texture a bloom pass reads
+Texture2D<float4> gFxBloom REG(t14);        // FX: the blurred bloom, for the composite
+SamplerState gLin REG(s1);                  // FX: bilinear, clamped
 
 // Analysis (compute shaders, Workload = GPU).
 StructuredBuffer<float> gTierIn REG(t5);     // 3 x N newest samples, one block per tier
@@ -12020,10 +12040,11 @@ Prim SparkPrim(uint j) {
 // fReflDepth in the pixel shader (flag 16 on the kind).
 Prim ReflectPrim(Prim p) {
     float B2 = 2.0f * fReflBase;
-    if (p.kind == 0u) {
+    uint kb = p.kind & 15u;  // the glow flag may be set
+    if (kb == 0u) {
         p.a = float4(p.a.x, B2 - p.a.w, p.a.z, B2 - p.a.y);
         p.radii = float4(p.radii.w, p.radii.z, p.radii.y, p.radii.x);
-    } else if (p.kind == 5u) {
+    } else if (kb == 5u) {
         p.a = float4(p.a.x, B2 - p.a.y, p.a.z, B2 - p.a.w);
         p.radii.x = B2 - p.radii.x;
     } else {
@@ -12065,7 +12086,7 @@ struct VsOut {
     NOINTERP float4 shape SEM(TEXCOORD1);
     NOINTERP float4 radii SEM(TEXCOORD2);
     NOINTERP float4 color SEM(TEXCOORD3);
-    NOINTERP uint kind SEM(TEXCOORD4);  // low 4 bits: Prim kind; 16: reflected
+    NOINTERP uint kind SEM(TEXCOORD4);  // low 4 bits: Prim kind; 16: reflected; 32: glows
 };
 
 // Quad corner `vid` (triangle strip 0..3) of the primitive's bounds. The
@@ -12094,6 +12115,11 @@ VsOut EmitVertex(Prim p, uint vid) {
         lo = float2(p.a.x - 1.0f, p.a.y - 1.0f);
         hi = float2(p.a.z + 1.0f, p.a.w + 1.0f);
     }
+    if ((p.kind & 32u) != 0u) {  // room for the glow
+        float gr = fFxGlowR * 2.0f;
+        lo = float2(lo.x - gr, lo.y - gr);
+        hi = float2(hi.x + gr, hi.y + gr);
+    }
     float cx = ((vid & 1u) != 0u) ? 1.0f : 0.0f;
     float cy = ((vid & 2u) != 0u) ? 1.0f : 0.0f;
     float2 pix = float2(lo.x + (hi.x - lo.x) * cx, lo.y + (hi.y - lo.y) * cy);
@@ -12109,6 +12135,8 @@ VsOut EmitVertex(Prim p, uint vid) {
 
 VsOut VSMain(uint vid SEM(SV_VertexID), uint iid SEM(SV_InstanceID)) {
     Prim p = BuildPrim(pPass, iid);
+    // Glow: passes created with pPad1 = 1, rects and capsules only.
+    if (pPad1 != 0u && fFxGlow > 0.0f && (p.kind == 0u || p.kind == 1u)) p.kind = p.kind | 32u;
     if (pPad0 != 0u) p = ReflectPrim(p);
     return EmitVertex(p, vid);
 }
@@ -12212,6 +12240,25 @@ float Coverage(VsOut i, uint kb) {
     return RectCoverage(i.pix, i.shape, i.radii);
 }
 
+// Glow (FX, 2.1): signed distance to a rounded rect (negative inside), so
+// the glow can fall off with the distance outside the shape.
+float SdRoundRect(float2 pix, float4 rect, float4 radii) {
+    float cx = (rect.x + rect.z) * 0.5f, cy = (rect.y + rect.w) * 0.5f;
+    float hx = (rect.z - rect.x) * 0.5f, hy = (rect.w - rect.y) * 0.5f;
+    float px = pix.x - cx, py = pix.y - cy;
+    float r = (px > 0.0f) ? ((py > 0.0f) ? radii.z : radii.y) : ((py > 0.0f) ? radii.w : radii.x);
+    r = clamp(r, 0.0f, min(hx, hy));
+    float qx = abs(px) - hx + r, qy = abs(py) - hy + r;
+    return length(float2(max(qx, 0.0f), max(qy, 0.0f))) + min(max(qx, qy), 0.0f) - r;
+}
+
+float GlowAt(VsOut i, uint kb, float cov) {
+    float d = (kb == 1u) ? SdCapsule(i.pix, i.shape, i.radii.x) : SdRoundRect(i.pix, i.shape, i.radii);
+    if (d <= 0.0f) return cov;
+    float g = exp(-(d * d) / max(fFxGlowR * fFxGlowR * 0.5f, 0.01f));
+    return cov + (1.0f - cov) * fFxGlow * 0.65f * g;
+}
+
 float4 PSMain(VsOut i) SEM(SV_Target) {
     uint kb = i.kind & 15u;
     float fade = 1.0f;
@@ -12231,8 +12278,63 @@ float4 PSMain(VsOut i) SEM(SV_Target) {
         float cov = gGlyphs.SampleLevel(gSamp, uv, 0.0f).w;
         return i.color * (cov * fSceneAlpha);
     }
-    return i.color * (Coverage(i, kb) * fade * fSceneAlpha);
+    float cov = Coverage(i, kb);
+    if ((i.kind & 32u) != 0u) cov = GlowAt(i, kb, cov);
+    return i.color * (cov * fade * fSceneAlpha);
 }
+
+// ---- Bloom (FX, 2.1) ---------------------------------------------------------------
+// The bars are drawn into a scene texture, which is box-filtered down to a
+// quarter of its size, blurred there in two 9-tap Gaussian passes (five
+// bilinear reads each), and added back over the scene as light. All four
+// passes are one full-surface triangle and run only on frames that draw.
+struct FxOut {
+    float4 pos SEM(SV_Position);
+    float2 uv SEM(TEXCOORD0);
+};
+
+FxOut VSFull(uint vid SEM(SV_VertexID)) {
+    FxOut o;
+    float u = (vid == 1u) ? 2.0f : 0.0f;
+    float v = (vid == 2u) ? 2.0f : 0.0f;
+    o.uv = float2(u, v);
+    o.pos = float4(u * 2.0f - 1.0f, 1.0f - v * 2.0f, 0.0f, 1.0f);
+    return o;
+}
+
+// Scene to quarter size: four bilinear reads cover the 4 x 4 block.
+float4 PSBloomDown(FxOut i) SEM(SV_Target) {
+    float tx = fFxTexel.z, ty = fFxTexel.w;
+    float4 a = gFxSrc.SampleLevel(gLin, float2(i.uv.x - tx, i.uv.y - ty), 0.0f);
+    float4 b = gFxSrc.SampleLevel(gLin, float2(i.uv.x + tx, i.uv.y - ty), 0.0f);
+    float4 c = gFxSrc.SampleLevel(gLin, float2(i.uv.x - tx, i.uv.y + ty), 0.0f);
+    float4 d = gFxSrc.SampleLevel(gLin, float2(i.uv.x + tx, i.uv.y + ty), 0.0f);
+    return (a + b + c + d) * 0.25f;
+}
+
+float4 BloomBlur(float2 uv, float dx, float dy) {
+    // Weights of a 9-tap Gaussian folded into 5 bilinear reads.
+    float4 s = gFxSrc.SampleLevel(gLin, uv, 0.0f) * 0.2270270f;
+    s = s + gFxSrc.SampleLevel(gLin, float2(uv.x + dx * 1.3846154f, uv.y + dy * 1.3846154f), 0.0f) * 0.3162162f;
+    s = s + gFxSrc.SampleLevel(gLin, float2(uv.x - dx * 1.3846154f, uv.y - dy * 1.3846154f), 0.0f) * 0.3162162f;
+    s = s + gFxSrc.SampleLevel(gLin, float2(uv.x + dx * 3.2307692f, uv.y + dy * 3.2307692f), 0.0f) * 0.0702703f;
+    s = s + gFxSrc.SampleLevel(gLin, float2(uv.x - dx * 3.2307692f, uv.y - dy * 3.2307692f), 0.0f) * 0.0702703f;
+    return s;
+}
+
+// The step between taps grows with Bloom Radius (in quarter-size texels).
+float BloomStep() { return max(1.0f, fFxBloomR / 16.0f); }
+float4 PSBloomH(FxOut i) SEM(SV_Target) { return BloomBlur(i.uv, fFxTexel.x * BloomStep(), 0.0f); }
+float4 PSBloomV(FxOut i) SEM(SV_Target) { return BloomBlur(i.uv, 0.0f, fFxTexel.y * BloomStep()); }
+
+// Scene plus its bloom as light, then blended "over" whatever is beneath
+// (the plate). Premultiplied: the bloom adds colour and some coverage.
+float4 PSBloomComposite(FxOut i) SEM(SV_Target) {
+    float4 sc = gFxSrc.SampleLevel(gLin, i.uv, 0.0f);
+    float4 bl = gFxBloom.SampleLevel(gLin, i.uv, 0.0f) * (fFxBloom * 1.5f);
+    return float4(sc.x + bl.x, sc.y + bl.y, sc.z + bl.z, saturate(sc.w + bl.w * (1.0f - sc.w)));
+}
+
 
 // ---- Analysis on the GPU (Workload = GPU) ----------------------------------------
 //
@@ -12553,6 +12655,8 @@ struct FrameCB {
     float vu[4];
     float vuBox[4];
     uint32_t specW, specHead, specTex, specPad;
+    float fxGlow, fxGlowR, fxBloom, fxBloomR;
+    float fxTexel[4];
 };
 struct PassCB {
     uint32_t pass, count, pad0, pad1;
@@ -12569,7 +12673,7 @@ struct CsCB {
     float fmin, fmax, breatheUp, breatheDown;
 };
 #pragma pack(pop)
-static_assert(sizeof(FrameCB) == 32 * 16, "FrameCB must match tt_cb.hlsl");
+static_assert(sizeof(FrameCB) == 34 * 16, "FrameCB must match tt_cb.hlsl");
 static_assert(sizeof(PassCB) == 16, "PassCB must match tt_cb.hlsl");
 static_assert(sizeof(CsCB) == 9 * 16, "CsCB must match tt_cb.hlsl");
 
@@ -12604,6 +12708,16 @@ struct State {
     ComPtr<ID3D11SamplerState> sampler;
     ComPtr<ID3D11BlendState> blend;
     ComPtr<ID3D11BlendState> blendOff;  // the plate: it is the first thing drawn, so it only overwrites
+    // FX (2.1). The bloom shaders compile on first use; its targets follow
+    // the surface size: the scene, and two quarter-size ping-pong buffers.
+    bool fxCompileTried = false, fxCompileOk = false;
+    ComPtr<ID3D11VertexShader> vsFull;
+    ComPtr<ID3D11PixelShader> psFx[4];  // down, blur H, blur V, composite
+    ComPtr<ID3D11SamplerState> samplerLin;
+    ComPtr<ID3D11Texture2D> fxTex[3];  // scene, quarter A, quarter B
+    ComPtr<ID3D11RenderTargetView> fxRtv[3];
+    ComPtr<ID3D11ShaderResourceView> fxSrv[3];
+    UINT fxW = 0, fxH = 0;
     ComPtr<ID3D11RasterizerState> raster;
 
     // What each dynamic buffer holds, so one whose contents haven't changed
@@ -12797,10 +12911,13 @@ bool EnsureDevice() {
         return false;
     if (FAILED(MakeCB(sizeof(FrameCB), true, nullptr, g.frameCB))) return false;
     for (uint32_t p = 0; p < kPassCount; p++) {
-        PassCB pc = {p, 0, 0, 0};
+        // pPad1 = 1: this pass's rects and capsules take the Glow FX.
+        const uint32_t glow = (p == kBars || p == kCaps || p == kDots || p == kRadial || p == kScope || p == kLed ||
+                               p == kSplit || p == kSpark) ? 1u : 0u;
+        PassCB pc = {p, 0, 0, glow};
         if (FAILED(MakeCB(sizeof(PassCB), false, &pc, g.passCB[p]))) return false;
         // The same pass mirrored for Reflection: pPad0 = 1.
-        PassCB pr = {p, 0, 1, 0};
+        PassCB pr = {p, 0, 1, glow};
         if (FAILED(MakeCB(sizeof(PassCB), false, &pr, g.passCBRefl[p]))) return false;
     }
     if (FAILED(MakeStructured(8, VIZ_BARS_MAX, true, false, nullptr, g.barsDyn, &g.barsDynSRV, nullptr)) ||
@@ -12896,6 +13013,12 @@ void ReleaseSurface() {
     g.plateTex.Reset();
     g.plateSRV.Reset();
     g.plateValid = false;
+    for (int k = 0; k < 3; k++) {
+        g.fxTex[k].Reset();
+        g.fxRtv[k].Reset();
+        g.fxSrv[k].Reset();
+    }
+    g.fxW = g.fxH = 0;
     g.w = g.h = 0;
     g.forcePresent = true;
     g.textForce = true;
@@ -12917,6 +13040,9 @@ void ReleaseDevice() {
     g.specTex.Reset(); g.specSRV.Reset(); g.specW = 0;
     g.glyphKey = 0;
     g.sampler.Reset(); g.blend.Reset(); g.blendOff.Reset(); g.raster.Reset();
+    g.vsFull.Reset(); g.samplerLin.Reset();
+    for (auto& ps : g.psFx) ps.Reset();
+    g.fxCompileTried = false;
     g.uploadsValid = g.cellsValid = g.frameCBValid = false;
     if (g.ctx) g.ctx->ClearState();
     g.ctx.Reset();
@@ -13482,6 +13608,66 @@ struct FrameInputs {
     float correlation;
 };
 
+// Bloom: shaders on first use, targets at the surface size. False leaves
+// the frame without bloom.
+bool EnsureFx() {
+    if (!g.fxCompileTried) {
+        g.fxCompileTried = true;
+        g.fxCompileOk = false;
+        HMODULE lib = LoadLibraryExW(L"d3dcompiler_47.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+        auto fn = lib ? (PFN_D3DCompile)(void*)GetProcAddress(lib, "D3DCompile") : nullptr;
+        if (!fn) return false;
+        auto one = [&](const char* entry, const char* target, ComPtr<ID3DBlob>& out) {
+            ComPtr<ID3DBlob> err;
+            HRESULT hr = fn(kShaderSource, sizeof(kShaderSource) - 1, "tourne-table.hlsl", nullptr, nullptr, entry,
+                            target, 1u << 15, 0, &out, &err);
+            if (FAILED(hr) && err) Wh_Log(L"[D3D11] %S failed: %S", entry, (const char*)err->GetBufferPointer());
+            return SUCCEEDED(hr);
+        };
+        ComPtr<ID3DBlob> vsb, psb[4];
+        const char* ps[4] = {"PSBloomDown", "PSBloomH", "PSBloomV", "PSBloomComposite"};
+        if (!one("VSFull", "vs_5_0", vsb)) return false;
+        for (int k = 0; k < 4; k++)
+            if (!one(ps[k], "ps_5_0", psb[k])) return false;
+        if (FAILED(g_d3dDevice->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &g.vsFull)))
+            return false;
+        for (int k = 0; k < 4; k++)
+            if (FAILED(g_d3dDevice->CreatePixelShader(psb[k]->GetBufferPointer(), psb[k]->GetBufferSize(), nullptr,
+                                                      &g.psFx[k])))
+                return false;
+        D3D11_SAMPLER_DESC sd = {};
+        sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+        sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+        sd.MaxLOD = D3D11_FLOAT32_MAX;
+        if (FAILED(g_d3dDevice->CreateSamplerState(&sd, &g.samplerLin))) return false;
+        g.fxCompileOk = true;
+    }
+    if (!g.fxCompileOk) return false;
+    if (g.fxTex[0] && g.fxW == g.w && g.fxH == g.h) return true;
+    for (int k = 0; k < 3; k++) {
+        g.fxTex[k].Reset();
+        g.fxRtv[k].Reset();
+        g.fxSrv[k].Reset();
+        D3D11_TEXTURE2D_DESC td = {};
+        td.Width = k ? std::max(1u, g.w / 4) : g.w;
+        td.Height = k ? std::max(1u, g.h / 4) : g.h;
+        td.MipLevels = td.ArraySize = 1;
+        td.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;  // smooth gradients through the blur
+        td.SampleDesc.Count = 1;
+        td.Usage = D3D11_USAGE_DEFAULT;
+        td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+        if (FAILED(g_d3dDevice->CreateTexture2D(&td, nullptr, &g.fxTex[k])) ||
+            FAILED(g_d3dDevice->CreateRenderTargetView(g.fxTex[k].Get(), nullptr, &g.fxRtv[k])) ||
+            FAILED(g_d3dDevice->CreateShaderResourceView(g.fxTex[k].Get(), nullptr, &g.fxSrv[k]))) {
+            g.fxTex[0].Reset();
+            return false;
+        }
+    }
+    g.fxW = g.w;
+    g.fxH = g.h;
+    return true;
+}
+
 // Returns false if nothing could be drawn this way (the caller then uses the
 // Direct2D path for this frame).
 bool Render(const FrameInputs& in) {
@@ -13501,6 +13687,9 @@ bool Render(const FrameInputs& in) {
     float margin = std::max(4.0f * g_dpiScale, barW);
     if (shape == VizShape::Radial) margin += maxSize * 0.15f;
     if (g_settings.style == VizStyle::Line) margin += 6.f * g_dpiScale;  // the edge glow
+    const float fxGlowR = g_settings.fxGlow > 0 ? g_settings.fxGlowRadius * g_dpiScale : 0.f;
+    const float fxBloomR = g_settings.fxBloom > 0 ? g_settings.fxBloomRadius * g_dpiScale : 0.f;
+    margin += std::max(fxGlowR * 2.f, fxBloomR);  // room for the light to spread
     D2D1_RECT_F content = D2D1::RectF(L.blockX - margin, L.blockY - margin, L.blockX + L.totalWidth + margin,
                                       L.blockY + L.totalHeight + margin);
     D2D1_RECT_F want = content;
@@ -13690,6 +13879,17 @@ bool Render(const FrameInputs& in) {
         f.specRows = (uint32_t)std::clamp((int)maxSize, 1, kVizSpecRows);  // one row per pixel
         f.specHead = (uint32_t)g_vizSpecHead;
     }
+    f.fxGlow = g_settings.fxGlow / 100.f;
+    f.fxGlowR = fxGlowR;
+    f.fxBloom = g_settings.fxBloom / 100.f;
+    f.fxBloomR = fxBloomR;
+    if (f.fxBloom > 0.f) {
+        UINT qw = std::max(1u, g.w / 4), qh = std::max(1u, g.h / 4);
+        f.fxTexel[0] = 1.f / qw;
+        f.fxTexel[1] = 1.f / qh;
+        f.fxTexel[2] = 1.f / g.w;
+        f.fxTexel[3] = 1.f / g.h;
+    }
     const bool refl = VizReflectionActive();
     if (refl) {
         f.reflBase = f.block[1] + maxSize;
@@ -13723,6 +13923,8 @@ bool Render(const FrameInputs& in) {
     Mix(hash, in.dragPause);
     Mix(hash, (uint64_t)style * 1009u + (uint64_t)g_settings.reflection);
     for (int k = 0; k < 4; k++) MixF(hash, f.vu[k], 2048.f);
+    Mix(hash, (uint64_t)g_settings.fxGlow * 1000003u + (uint64_t)g_settings.fxBloom * 1009u +
+                  (uint64_t)g_settings.fxGlowRadius * 31u + (uint64_t)g_settings.fxBloomRadius);
 
     const bool drawBars = !in.dragPause;
     const bool cpuBars = !gpuOk && drawBars;
@@ -13978,6 +14180,14 @@ bool Render(const FrameInputs& in) {
         draw(kPlate, 1);
     }
     g.ctx->OMSetBlendState(g.blend.Get(), nullptr, 0xffffffff);
+    // Bloom: everything after the plate goes into the scene texture first.
+    const bool bloom = drawBars && f.fxBloom > 0.f && EnsureFx();
+    if (bloom) {
+        const float zero[4] = {0, 0, 0, 0};
+        ID3D11RenderTargetView* srt = g.fxRtv[0].Get();
+        g.ctx->OMSetRenderTargets(1, &srt, nullptr);
+        g.ctx->ClearRenderTargetView(srt, zero);
+    }
     // Reflection first, under the bars it mirrors.
     auto drawRefl = [&](Pass p, UINT count) {
         if (!count) return;
@@ -14027,6 +14237,34 @@ bool Render(const FrameInputs& in) {
                 break;
         }
         if (sparks) draw(kSpark, (UINT)g_vizSparkCount);
+    }
+    if (bloom) {
+        // Down to a quarter, blur across, blur down, then the scene plus its
+        // light over the plate.
+        ID3D11ShaderResourceView* none[2] = {};
+        auto pass = [&](int rt, int src, int ps, UINT vw, UINT vh) {
+            g.ctx->PSSetShaderResources(13, 2, none);
+            ID3D11RenderTargetView* t = rt < 0 ? rtv : g.fxRtv[rt].Get();
+            g.ctx->OMSetRenderTargets(1, &t, nullptr);
+            D3D11_VIEWPORT v = {0, 0, (float)vw, (float)vh, 0, 1};
+            g.ctx->RSSetViewports(1, &v);
+            ID3D11ShaderResourceView* srcs[2] = {g.fxSrv[src].Get(), rt < 0 ? g.fxSrv[1].Get() : nullptr};
+            g.ctx->PSSetShaderResources(13, 2, srcs);
+            g.ctx->PSSetShader(g.psFx[ps].Get(), nullptr, 0);
+            g.ctx->Draw(3, 0);
+        };
+        const UINT qw = std::max(1u, g.w / 4), qh = std::max(1u, g.h / 4);
+        g.ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        g.ctx->VSSetShader(g.vsFull.Get(), nullptr, 0);
+        ID3D11SamplerState* lin = g.samplerLin.Get();
+        g.ctx->PSSetSamplers(1, 1, &lin);
+        g.ctx->OMSetBlendState(g.blendOff.Get(), nullptr, 0xffffffff);
+        pass(1, 0, 0, qw, qh);
+        pass(2, 1, 1, qw, qh);
+        pass(1, 2, 2, qw, qh);
+        g.ctx->OMSetBlendState(g.blend.Get(), nullptr, 0xffffffff);
+        pass(-1, 0, 3, g.w, g.h);
+        g.ctx->PSSetShaderResources(13, 2, none);
     }
     ID3D11ShaderResourceView* nullSrv[5] = {};
     g.ctx->VSSetShaderResources(0, 4, nullSrv);
@@ -16575,6 +16813,10 @@ void LoadSettings() {
     VizParseShape(shape, &g_settings.shape, &g_settings.style);
     Wh_FreeStringSetting(shape);
     g_settings.reflection = std::clamp(Wh_GetIntSetting(L"appearance.reflection"), 0, 100);
+    g_settings.fxGlow = std::clamp(Wh_GetIntSetting(L"appearance.fxGlow"), 0, 100);
+    g_settings.fxGlowRadius = std::clamp(Wh_GetIntSetting(L"appearance.fxGlowRadius"), 1, 32);
+    g_settings.fxBloom = std::clamp(Wh_GetIntSetting(L"appearance.fxBloom"), 0, 100);
+    g_settings.fxBloomRadius = std::clamp(Wh_GetIntSetting(L"appearance.fxBloomRadius"), 4, 64);
 
     PCWSTR orientation = Wh_GetStringSetting(L"appearance.orientation");
     g_settings.orientation =

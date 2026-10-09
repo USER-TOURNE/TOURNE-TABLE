@@ -11,6 +11,9 @@ SamplerState gSamp REG(s0);
 StructuredBuffer<uint> gCells REG(t10);     // Terminal: glyph cells only, char | colour << 8 | grid index << 16
 Texture2D<float4> gGlyphs REG(t11);         // Terminal: printable ASCII baked white, premultiplied
 Texture2D<float> gSpec REG(t12);            // Spectrogram: bar levels, one row per 1/60 s, ring
+Texture2D<float4> gFxSrc REG(t13);          // FX: the texture a bloom pass reads
+Texture2D<float4> gFxBloom REG(t14);        // FX: the blurred bloom, for the composite
+SamplerState gLin REG(s1);                  // FX: bilinear, clamped
 
 // Analysis (compute shaders, Workload = GPU).
 StructuredBuffer<float> gTierIn REG(t5);     // 3 x N newest samples, one block per tier
@@ -595,10 +598,11 @@ Prim SparkPrim(uint j) {
 // fReflDepth in the pixel shader (flag 16 on the kind).
 Prim ReflectPrim(Prim p) {
     float B2 = 2.0f * fReflBase;
-    if (p.kind == 0u) {
+    uint kb = p.kind & 15u;  // the glow flag may be set
+    if (kb == 0u) {
         p.a = float4(p.a.x, B2 - p.a.w, p.a.z, B2 - p.a.y);
         p.radii = float4(p.radii.w, p.radii.z, p.radii.y, p.radii.x);
-    } else if (p.kind == 5u) {
+    } else if (kb == 5u) {
         p.a = float4(p.a.x, B2 - p.a.y, p.a.z, B2 - p.a.w);
         p.radii.x = B2 - p.radii.x;
     } else {
@@ -640,7 +644,7 @@ struct VsOut {
     NOINTERP float4 shape SEM(TEXCOORD1);
     NOINTERP float4 radii SEM(TEXCOORD2);
     NOINTERP float4 color SEM(TEXCOORD3);
-    NOINTERP uint kind SEM(TEXCOORD4);  // low 4 bits: Prim kind; 16: reflected
+    NOINTERP uint kind SEM(TEXCOORD4);  // low 4 bits: Prim kind; 16: reflected; 32: glows
 };
 
 // Quad corner `vid` (triangle strip 0..3) of the primitive's bounds. The
@@ -669,6 +673,11 @@ VsOut EmitVertex(Prim p, uint vid) {
         lo = float2(p.a.x - 1.0f, p.a.y - 1.0f);
         hi = float2(p.a.z + 1.0f, p.a.w + 1.0f);
     }
+    if ((p.kind & 32u) != 0u) {  // room for the glow
+        float gr = fFxGlowR * 2.0f;
+        lo = float2(lo.x - gr, lo.y - gr);
+        hi = float2(hi.x + gr, hi.y + gr);
+    }
     float cx = ((vid & 1u) != 0u) ? 1.0f : 0.0f;
     float cy = ((vid & 2u) != 0u) ? 1.0f : 0.0f;
     float2 pix = float2(lo.x + (hi.x - lo.x) * cx, lo.y + (hi.y - lo.y) * cy);
@@ -684,6 +693,8 @@ VsOut EmitVertex(Prim p, uint vid) {
 
 VsOut VSMain(uint vid SEM(SV_VertexID), uint iid SEM(SV_InstanceID)) {
     Prim p = BuildPrim(pPass, iid);
+    // Glow: passes created with pPad1 = 1, rects and capsules only.
+    if (pPad1 != 0u && fFxGlow > 0.0f && (p.kind == 0u || p.kind == 1u)) p.kind = p.kind | 32u;
     if (pPad0 != 0u) p = ReflectPrim(p);
     return EmitVertex(p, vid);
 }
@@ -787,6 +798,25 @@ float Coverage(VsOut i, uint kb) {
     return RectCoverage(i.pix, i.shape, i.radii);
 }
 
+// Glow (FX, 2.1): signed distance to a rounded rect (negative inside), so
+// the glow can fall off with the distance outside the shape.
+float SdRoundRect(float2 pix, float4 rect, float4 radii) {
+    float cx = (rect.x + rect.z) * 0.5f, cy = (rect.y + rect.w) * 0.5f;
+    float hx = (rect.z - rect.x) * 0.5f, hy = (rect.w - rect.y) * 0.5f;
+    float px = pix.x - cx, py = pix.y - cy;
+    float r = (px > 0.0f) ? ((py > 0.0f) ? radii.z : radii.y) : ((py > 0.0f) ? radii.w : radii.x);
+    r = clamp(r, 0.0f, min(hx, hy));
+    float qx = abs(px) - hx + r, qy = abs(py) - hy + r;
+    return length(float2(max(qx, 0.0f), max(qy, 0.0f))) + min(max(qx, qy), 0.0f) - r;
+}
+
+float GlowAt(VsOut i, uint kb, float cov) {
+    float d = (kb == 1u) ? SdCapsule(i.pix, i.shape, i.radii.x) : SdRoundRect(i.pix, i.shape, i.radii);
+    if (d <= 0.0f) return cov;
+    float g = exp(-(d * d) / max(fFxGlowR * fFxGlowR * 0.5f, 0.01f));
+    return cov + (1.0f - cov) * fFxGlow * 0.65f * g;
+}
+
 float4 PSMain(VsOut i) SEM(SV_Target) {
     uint kb = i.kind & 15u;
     float fade = 1.0f;
@@ -806,8 +836,63 @@ float4 PSMain(VsOut i) SEM(SV_Target) {
         float cov = gGlyphs.SampleLevel(gSamp, uv, 0.0f).w;
         return i.color * (cov * fSceneAlpha);
     }
-    return i.color * (Coverage(i, kb) * fade * fSceneAlpha);
+    float cov = Coverage(i, kb);
+    if ((i.kind & 32u) != 0u) cov = GlowAt(i, kb, cov);
+    return i.color * (cov * fade * fSceneAlpha);
 }
+
+// ---- Bloom (FX, 2.1) ---------------------------------------------------------------
+// The bars are drawn into a scene texture, which is box-filtered down to a
+// quarter of its size, blurred there in two 9-tap Gaussian passes (five
+// bilinear reads each), and added back over the scene as light. All four
+// passes are one full-surface triangle and run only on frames that draw.
+struct FxOut {
+    float4 pos SEM(SV_Position);
+    float2 uv SEM(TEXCOORD0);
+};
+
+FxOut VSFull(uint vid SEM(SV_VertexID)) {
+    FxOut o;
+    float u = (vid == 1u) ? 2.0f : 0.0f;
+    float v = (vid == 2u) ? 2.0f : 0.0f;
+    o.uv = float2(u, v);
+    o.pos = float4(u * 2.0f - 1.0f, 1.0f - v * 2.0f, 0.0f, 1.0f);
+    return o;
+}
+
+// Scene to quarter size: four bilinear reads cover the 4 x 4 block.
+float4 PSBloomDown(FxOut i) SEM(SV_Target) {
+    float tx = fFxTexel.z, ty = fFxTexel.w;
+    float4 a = gFxSrc.SampleLevel(gLin, float2(i.uv.x - tx, i.uv.y - ty), 0.0f);
+    float4 b = gFxSrc.SampleLevel(gLin, float2(i.uv.x + tx, i.uv.y - ty), 0.0f);
+    float4 c = gFxSrc.SampleLevel(gLin, float2(i.uv.x - tx, i.uv.y + ty), 0.0f);
+    float4 d = gFxSrc.SampleLevel(gLin, float2(i.uv.x + tx, i.uv.y + ty), 0.0f);
+    return (a + b + c + d) * 0.25f;
+}
+
+float4 BloomBlur(float2 uv, float dx, float dy) {
+    // Weights of a 9-tap Gaussian folded into 5 bilinear reads.
+    float4 s = gFxSrc.SampleLevel(gLin, uv, 0.0f) * 0.2270270f;
+    s = s + gFxSrc.SampleLevel(gLin, float2(uv.x + dx * 1.3846154f, uv.y + dy * 1.3846154f), 0.0f) * 0.3162162f;
+    s = s + gFxSrc.SampleLevel(gLin, float2(uv.x - dx * 1.3846154f, uv.y - dy * 1.3846154f), 0.0f) * 0.3162162f;
+    s = s + gFxSrc.SampleLevel(gLin, float2(uv.x + dx * 3.2307692f, uv.y + dy * 3.2307692f), 0.0f) * 0.0702703f;
+    s = s + gFxSrc.SampleLevel(gLin, float2(uv.x - dx * 3.2307692f, uv.y - dy * 3.2307692f), 0.0f) * 0.0702703f;
+    return s;
+}
+
+// The step between taps grows with Bloom Radius (in quarter-size texels).
+float BloomStep() { return max(1.0f, fFxBloomR / 16.0f); }
+float4 PSBloomH(FxOut i) SEM(SV_Target) { return BloomBlur(i.uv, fFxTexel.x * BloomStep(), 0.0f); }
+float4 PSBloomV(FxOut i) SEM(SV_Target) { return BloomBlur(i.uv, 0.0f, fFxTexel.y * BloomStep()); }
+
+// Scene plus its bloom as light, then blended "over" whatever is beneath
+// (the plate). Premultiplied: the bloom adds colour and some coverage.
+float4 PSBloomComposite(FxOut i) SEM(SV_Target) {
+    float4 sc = gFxSrc.SampleLevel(gLin, i.uv, 0.0f);
+    float4 bl = gFxBloom.SampleLevel(gLin, i.uv, 0.0f) * (fFxBloom * 1.5f);
+    return float4(sc.x + bl.x, sc.y + bl.y, sc.z + bl.z, saturate(sc.w + bl.w * (1.0f - sc.w)));
+}
+
 
 // ---- Analysis on the GPU (Workload = GPU) ----------------------------------------
 //

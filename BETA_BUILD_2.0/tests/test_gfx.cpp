@@ -92,6 +92,8 @@ int main(int argc, char** argv) {
     c->fReflDir = 1.0f;
     c->fReflDepth = (float)num("reflDepth", 1);
     c->fReflAlpha = (float)num("reflAlpha", 0.4);
+    c->fFxGlow = (float)num("glow", 0);
+    c->fFxGlowR = (float)num("glowRad", 6);
     c->fSpecW = (uint)num("specW", 0);
     c->fSpecRows = (uint)num("specRows", 1);
     c->fSpecTex = (uint)num("specTex", 1);
@@ -160,6 +162,7 @@ int main(int argc, char** argv) {
             uint count = (uint)passes[pi + 1];
             for (uint id = 0; id < count; id++) {
                 Ctx::Prim pr = c->BuildPrim(c->pPass, id);
+                if (c->fFxGlow > 0.0f && (pr.kind == 0u || pr.kind == 1u)) pr.kind |= 32u;  // as VSMain
                 if (c->pPad0 != 0u) pr = c->ReflectPrim(pr);
                 Ctx::VsOut v0 = c->EmitVertex(pr, 0), v3 = c->EmitVertex(pr, 3);
                 if (pr.kind == 3u) continue;

@@ -62,6 +62,8 @@ struct FrameCB {
     float vu[4];
     float vuBox[4];
     uint32_t specW, specHead, specTex, specPad;
+    float fxGlow, fxGlowR, fxBloom, fxBloomR;
+    float fxTexel[4];
 };
 struct PassCB {
     uint32_t pass, count, pad0, pad1;
@@ -78,7 +80,7 @@ struct CsCB {
     float fmin, fmax, breatheUp, breatheDown;
 };
 #pragma pack(pop)
-static_assert(sizeof(FrameCB) == 32 * 16, "FrameCB must match tt_cb.hlsl");
+static_assert(sizeof(FrameCB) == 34 * 16, "FrameCB must match tt_cb.hlsl");
 static_assert(sizeof(PassCB) == 16, "PassCB must match tt_cb.hlsl");
 static_assert(sizeof(CsCB) == 9 * 16, "CsCB must match tt_cb.hlsl");
 
@@ -113,6 +115,16 @@ struct State {
     ComPtr<ID3D11SamplerState> sampler;
     ComPtr<ID3D11BlendState> blend;
     ComPtr<ID3D11BlendState> blendOff;  // the plate: it is the first thing drawn, so it only overwrites
+    // FX (2.1). The bloom shaders compile on first use; its targets follow
+    // the surface size: the scene, and two quarter-size ping-pong buffers.
+    bool fxCompileTried = false, fxCompileOk = false;
+    ComPtr<ID3D11VertexShader> vsFull;
+    ComPtr<ID3D11PixelShader> psFx[4];  // down, blur H, blur V, composite
+    ComPtr<ID3D11SamplerState> samplerLin;
+    ComPtr<ID3D11Texture2D> fxTex[3];  // scene, quarter A, quarter B
+    ComPtr<ID3D11RenderTargetView> fxRtv[3];
+    ComPtr<ID3D11ShaderResourceView> fxSrv[3];
+    UINT fxW = 0, fxH = 0;
     ComPtr<ID3D11RasterizerState> raster;
 
     // What each dynamic buffer holds, so one whose contents haven't changed
@@ -306,10 +318,13 @@ bool EnsureDevice() {
         return false;
     if (FAILED(MakeCB(sizeof(FrameCB), true, nullptr, g.frameCB))) return false;
     for (uint32_t p = 0; p < kPassCount; p++) {
-        PassCB pc = {p, 0, 0, 0};
+        // pPad1 = 1: this pass's rects and capsules take the Glow FX.
+        const uint32_t glow = (p == kBars || p == kCaps || p == kDots || p == kRadial || p == kScope || p == kLed ||
+                               p == kSplit || p == kSpark) ? 1u : 0u;
+        PassCB pc = {p, 0, 0, glow};
         if (FAILED(MakeCB(sizeof(PassCB), false, &pc, g.passCB[p]))) return false;
         // The same pass mirrored for Reflection: pPad0 = 1.
-        PassCB pr = {p, 0, 1, 0};
+        PassCB pr = {p, 0, 1, glow};
         if (FAILED(MakeCB(sizeof(PassCB), false, &pr, g.passCBRefl[p]))) return false;
     }
     if (FAILED(MakeStructured(8, VIZ_BARS_MAX, true, false, nullptr, g.barsDyn, &g.barsDynSRV, nullptr)) ||
@@ -405,6 +420,12 @@ void ReleaseSurface() {
     g.plateTex.Reset();
     g.plateSRV.Reset();
     g.plateValid = false;
+    for (int k = 0; k < 3; k++) {
+        g.fxTex[k].Reset();
+        g.fxRtv[k].Reset();
+        g.fxSrv[k].Reset();
+    }
+    g.fxW = g.fxH = 0;
     g.w = g.h = 0;
     g.forcePresent = true;
     g.textForce = true;
@@ -426,6 +447,9 @@ void ReleaseDevice() {
     g.specTex.Reset(); g.specSRV.Reset(); g.specW = 0;
     g.glyphKey = 0;
     g.sampler.Reset(); g.blend.Reset(); g.blendOff.Reset(); g.raster.Reset();
+    g.vsFull.Reset(); g.samplerLin.Reset();
+    for (auto& ps : g.psFx) ps.Reset();
+    g.fxCompileTried = false;
     g.uploadsValid = g.cellsValid = g.frameCBValid = false;
     if (g.ctx) g.ctx->ClearState();
     g.ctx.Reset();
@@ -991,6 +1015,66 @@ struct FrameInputs {
     float correlation;
 };
 
+// Bloom: shaders on first use, targets at the surface size. False leaves
+// the frame without bloom.
+bool EnsureFx() {
+    if (!g.fxCompileTried) {
+        g.fxCompileTried = true;
+        g.fxCompileOk = false;
+        HMODULE lib = LoadLibraryExW(L"d3dcompiler_47.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+        auto fn = lib ? (PFN_D3DCompile)(void*)GetProcAddress(lib, "D3DCompile") : nullptr;
+        if (!fn) return false;
+        auto one = [&](const char* entry, const char* target, ComPtr<ID3DBlob>& out) {
+            ComPtr<ID3DBlob> err;
+            HRESULT hr = fn(kShaderSource, sizeof(kShaderSource) - 1, "tourne-table.hlsl", nullptr, nullptr, entry,
+                            target, 1u << 15, 0, &out, &err);
+            if (FAILED(hr) && err) Wh_Log(L"[D3D11] %S failed: %S", entry, (const char*)err->GetBufferPointer());
+            return SUCCEEDED(hr);
+        };
+        ComPtr<ID3DBlob> vsb, psb[4];
+        const char* ps[4] = {"PSBloomDown", "PSBloomH", "PSBloomV", "PSBloomComposite"};
+        if (!one("VSFull", "vs_5_0", vsb)) return false;
+        for (int k = 0; k < 4; k++)
+            if (!one(ps[k], "ps_5_0", psb[k])) return false;
+        if (FAILED(g_d3dDevice->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &g.vsFull)))
+            return false;
+        for (int k = 0; k < 4; k++)
+            if (FAILED(g_d3dDevice->CreatePixelShader(psb[k]->GetBufferPointer(), psb[k]->GetBufferSize(), nullptr,
+                                                      &g.psFx[k])))
+                return false;
+        D3D11_SAMPLER_DESC sd = {};
+        sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+        sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+        sd.MaxLOD = D3D11_FLOAT32_MAX;
+        if (FAILED(g_d3dDevice->CreateSamplerState(&sd, &g.samplerLin))) return false;
+        g.fxCompileOk = true;
+    }
+    if (!g.fxCompileOk) return false;
+    if (g.fxTex[0] && g.fxW == g.w && g.fxH == g.h) return true;
+    for (int k = 0; k < 3; k++) {
+        g.fxTex[k].Reset();
+        g.fxRtv[k].Reset();
+        g.fxSrv[k].Reset();
+        D3D11_TEXTURE2D_DESC td = {};
+        td.Width = k ? std::max(1u, g.w / 4) : g.w;
+        td.Height = k ? std::max(1u, g.h / 4) : g.h;
+        td.MipLevels = td.ArraySize = 1;
+        td.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;  // smooth gradients through the blur
+        td.SampleDesc.Count = 1;
+        td.Usage = D3D11_USAGE_DEFAULT;
+        td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+        if (FAILED(g_d3dDevice->CreateTexture2D(&td, nullptr, &g.fxTex[k])) ||
+            FAILED(g_d3dDevice->CreateRenderTargetView(g.fxTex[k].Get(), nullptr, &g.fxRtv[k])) ||
+            FAILED(g_d3dDevice->CreateShaderResourceView(g.fxTex[k].Get(), nullptr, &g.fxSrv[k]))) {
+            g.fxTex[0].Reset();
+            return false;
+        }
+    }
+    g.fxW = g.w;
+    g.fxH = g.h;
+    return true;
+}
+
 // Returns false if nothing could be drawn this way (the caller then uses the
 // Direct2D path for this frame).
 bool Render(const FrameInputs& in) {
@@ -1010,6 +1094,9 @@ bool Render(const FrameInputs& in) {
     float margin = std::max(4.0f * g_dpiScale, barW);
     if (shape == VizShape::Radial) margin += maxSize * 0.15f;
     if (g_settings.style == VizStyle::Line) margin += 6.f * g_dpiScale;  // the edge glow
+    const float fxGlowR = g_settings.fxGlow > 0 ? g_settings.fxGlowRadius * g_dpiScale : 0.f;
+    const float fxBloomR = g_settings.fxBloom > 0 ? g_settings.fxBloomRadius * g_dpiScale : 0.f;
+    margin += std::max(fxGlowR * 2.f, fxBloomR);  // room for the light to spread
     D2D1_RECT_F content = D2D1::RectF(L.blockX - margin, L.blockY - margin, L.blockX + L.totalWidth + margin,
                                       L.blockY + L.totalHeight + margin);
     D2D1_RECT_F want = content;
@@ -1199,6 +1286,17 @@ bool Render(const FrameInputs& in) {
         f.specRows = (uint32_t)std::clamp((int)maxSize, 1, kVizSpecRows);  // one row per pixel
         f.specHead = (uint32_t)g_vizSpecHead;
     }
+    f.fxGlow = g_settings.fxGlow / 100.f;
+    f.fxGlowR = fxGlowR;
+    f.fxBloom = g_settings.fxBloom / 100.f;
+    f.fxBloomR = fxBloomR;
+    if (f.fxBloom > 0.f) {
+        UINT qw = std::max(1u, g.w / 4), qh = std::max(1u, g.h / 4);
+        f.fxTexel[0] = 1.f / qw;
+        f.fxTexel[1] = 1.f / qh;
+        f.fxTexel[2] = 1.f / g.w;
+        f.fxTexel[3] = 1.f / g.h;
+    }
     const bool refl = VizReflectionActive();
     if (refl) {
         f.reflBase = f.block[1] + maxSize;
@@ -1232,6 +1330,8 @@ bool Render(const FrameInputs& in) {
     Mix(hash, in.dragPause);
     Mix(hash, (uint64_t)style * 1009u + (uint64_t)g_settings.reflection);
     for (int k = 0; k < 4; k++) MixF(hash, f.vu[k], 2048.f);
+    Mix(hash, (uint64_t)g_settings.fxGlow * 1000003u + (uint64_t)g_settings.fxBloom * 1009u +
+                  (uint64_t)g_settings.fxGlowRadius * 31u + (uint64_t)g_settings.fxBloomRadius);
 
     const bool drawBars = !in.dragPause;
     const bool cpuBars = !gpuOk && drawBars;
@@ -1487,6 +1587,14 @@ bool Render(const FrameInputs& in) {
         draw(kPlate, 1);
     }
     g.ctx->OMSetBlendState(g.blend.Get(), nullptr, 0xffffffff);
+    // Bloom: everything after the plate goes into the scene texture first.
+    const bool bloom = drawBars && f.fxBloom > 0.f && EnsureFx();
+    if (bloom) {
+        const float zero[4] = {0, 0, 0, 0};
+        ID3D11RenderTargetView* srt = g.fxRtv[0].Get();
+        g.ctx->OMSetRenderTargets(1, &srt, nullptr);
+        g.ctx->ClearRenderTargetView(srt, zero);
+    }
     // Reflection first, under the bars it mirrors.
     auto drawRefl = [&](Pass p, UINT count) {
         if (!count) return;
@@ -1536,6 +1644,34 @@ bool Render(const FrameInputs& in) {
                 break;
         }
         if (sparks) draw(kSpark, (UINT)g_vizSparkCount);
+    }
+    if (bloom) {
+        // Down to a quarter, blur across, blur down, then the scene plus its
+        // light over the plate.
+        ID3D11ShaderResourceView* none[2] = {};
+        auto pass = [&](int rt, int src, int ps, UINT vw, UINT vh) {
+            g.ctx->PSSetShaderResources(13, 2, none);
+            ID3D11RenderTargetView* t = rt < 0 ? rtv : g.fxRtv[rt].Get();
+            g.ctx->OMSetRenderTargets(1, &t, nullptr);
+            D3D11_VIEWPORT v = {0, 0, (float)vw, (float)vh, 0, 1};
+            g.ctx->RSSetViewports(1, &v);
+            ID3D11ShaderResourceView* srcs[2] = {g.fxSrv[src].Get(), rt < 0 ? g.fxSrv[1].Get() : nullptr};
+            g.ctx->PSSetShaderResources(13, 2, srcs);
+            g.ctx->PSSetShader(g.psFx[ps].Get(), nullptr, 0);
+            g.ctx->Draw(3, 0);
+        };
+        const UINT qw = std::max(1u, g.w / 4), qh = std::max(1u, g.h / 4);
+        g.ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        g.ctx->VSSetShader(g.vsFull.Get(), nullptr, 0);
+        ID3D11SamplerState* lin = g.samplerLin.Get();
+        g.ctx->PSSetSamplers(1, 1, &lin);
+        g.ctx->OMSetBlendState(g.blendOff.Get(), nullptr, 0xffffffff);
+        pass(1, 0, 0, qw, qh);
+        pass(2, 1, 1, qw, qh);
+        pass(1, 2, 2, qw, qh);
+        g.ctx->OMSetBlendState(g.blend.Get(), nullptr, 0xffffffff);
+        pass(-1, 0, 3, g.w, g.h);
+        g.ctx->PSSetShaderResources(13, 2, none);
     }
     ID3D11ShaderResourceView* nullSrv[5] = {};
     g.ctx->VSSetShaderResources(0, 4, nullSrv);
