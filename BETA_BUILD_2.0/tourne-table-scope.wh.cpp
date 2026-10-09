@@ -175,9 +175,9 @@ Right-click the visualizer for quick settings, applied the moment you pick them:
 - **Shape**, **Terminal Style**, **Color Mode**, **Analysis Engine**, **Band Layout**, **Weighting**, **Ballistics**, **Readout**, **Workload**, **Renderer**, **Target FPS**.
 - Toggles for Peak Hold Caps, Beat Flash, Now Playing, the Track Progress Bar, Media Controls, Pixel-Sharp Text, **Pixel Snap** and **Subpixel Nudges**.
 - **Pause Visualizer**, which blanks it and stops the audio stream until you right-click the same spot again (or the media strip) and untick it.
-- **Reset Quick Settings**.
+- **Copy Quick Settings** and **Reset Quick Settings**.
 
-Windhawk lets a mod read its settings but not write them, so a menu choice is kept as the mod's own saved value and laid over the settings page. The page keeps showing what's underneath, which is why the menu says how many quick settings are active. **Reset Quick Settings** hands everything back to the page.
+Windhawk lets a mod read its settings but not write them, so a menu choice is kept as the mod's own saved value and laid over the settings page. The page keeps showing what's underneath, which is why the menu says how many quick settings are active. **Copy Quick Settings** puts them on the clipboard as `name = value` lines, worded as the menu shows them (for example `Shape = Terminal`, `Peak Hold Caps = On`), so you can make them permanent on the settings page. **Reset Quick Settings** then hands everything back to the page.
 
 The menu only opens where the visualizer is actually showing on the desktop, never through a window that covers it, and a right-click there doesn't open the desktop's own menu. If you'd rather keep a plain right-click for the desktop, set **Right-Click Menu** (Interaction) to **Ctrl + Right-Click**. Right-clicking the media strip opens the same menu.
 
@@ -1353,6 +1353,9 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
     - deepIdle: true
       $name: Deep Idle
       $description: Five seconds after Pause When Silent kicks in, stops the audio stream itself and watches Windows' own peak meter four times a second instead, restarting the moment anything plays. A running capture stream registers an audio power request, which can keep the PC from sleeping; a stopped one doesn't. Turn off only if the visualizer is slow to wake for a very quiet source
+    - perfStats: false
+      $name: Performance Stats
+      $description: Every 30 seconds, writes one line to the Windhawk log (turn on Enable logging) with what the visualizer actually cost - engine wakes and milliseconds, analyses and FFTs, render ticks, frames presented versus skipped, text redraws, compositor commits and buffer uploads, and time spent playing / trickling / in deep idle. All per second, so settings and PCs compare directly. Counting is always on and costs a few atomic adds per frame; this only switches the log line
     - autoHideEnabled: false
       $name: Auto-Hide When Idle
       $description: Fades the whole visualizer out after prolonged silence, instead of just idling
@@ -2036,6 +2039,13 @@ std::atomic<bool> g_drawRectValid{false};
 // Set once the auto-hide fade has reached full transparency and a single blank
 // frame has been presented. While set, the render path exits immediately.
 bool g_autoHideBlanked = false;
+// For other threads (the right-click hook): true while Auto-Hide has the scene
+// at zero alpha, so nothing is visible inside the still-valid draw rect. Set by
+// the render thread every frame, from the same sceneAlpha the renderers use.
+std::atomic<bool> g_vizSceneHidden{false};
+// True while the right-click menu's TrackPopupMenuEx loop runs (message-window
+// thread); the hook passes every click through while it is set.
+std::atomic<bool> g_menuOpen{false};
 
 // Current swap chain dimensions and composition-visual offset. The swap chain
 // covers only the widget's bounding box rather than the whole desktop, so these
@@ -2047,24 +2057,128 @@ std::mutex g_nowPlayingMutex;
 std::wstring g_nowPlayingDisplay;
 std::wstring g_nowPlayingTitle, g_nowPlayingArtist;  // the parts, for the two-line layout
 
+// ---- track timeline: begin (src/tests_features/test_timeline.cpp compiles this block from v2b.cpp)
 // Track timeline from the media session, for the progress bar: start, end and
 // position in 100 ns units, and the tick at which the position was current.
 // Between updates the bar extrapolates while playing, since most players only
 // report the position on a seek or a state change.
+//
+// Writers are WinRT thread-pool callbacks (two can run at once), serialised by
+// g_tlWriteMutex; each write is tagged with the session generation it was read
+// for, so a late event from a session that has since been replaced is dropped.
+// The render thread reads without locking, through the g_tlSeq sequence count
+// (odd while a write is in progress), so it never sees a position paired with
+// another update's tick.
 std::atomic<bool> g_tlValid{false};
 std::atomic<int64_t> g_tlStart{0}, g_tlEnd{0}, g_tlPos{0};
 std::atomic<ULONGLONG> g_tlTick{0};
+std::atomic<bool> g_tlRunning{false};  // extrapolating: the session reported Playing
+std::atomic<uint32_t> g_tlSeq{0};
+std::atomic<uint32_t> g_tlGen{0};
+std::mutex g_tlWriteMutex;
 
-float VizTrackProgress() {
-    if (!g_tlValid.load(std::memory_order_relaxed)) return -1.f;
-    double start = (double)g_tlStart.load(std::memory_order_relaxed);
-    double dur = (double)g_tlEnd.load(std::memory_order_relaxed) - start;
-    if (dur <= 0.0) return -1.f;
-    double pos = (double)g_tlPos.load(std::memory_order_relaxed) - start;
-    if (g_mediaIsPlaying.load(std::memory_order_relaxed))
-        pos += (double)(GetTickCount64() - g_tlTick.load(std::memory_order_relaxed)) * 10000.0;
-    return (float)std::clamp(pos / dur, 0.0, 1.0);
+static void VizTlWriteBegin() {
+    g_tlSeq.store(g_tlSeq.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
+    std::atomic_thread_fence(std::memory_order_release);
 }
+static void VizTlWriteEnd() {
+    g_tlSeq.store(g_tlSeq.load(std::memory_order_relaxed) + 1, std::memory_order_release);
+}
+
+// A new media session is being hooked up: forget the old timeline and return
+// the generation the new session's events must carry.
+uint32_t VizTimelineNewSource() {
+    std::lock_guard<std::mutex> lock(g_tlWriteMutex);
+    uint32_t gen = g_tlGen.load(std::memory_order_relaxed) + 1;
+    VizTlWriteBegin();
+    g_tlGen.store(gen, std::memory_order_relaxed);
+    g_tlValid.store(false, std::memory_order_relaxed);
+    g_tlRunning.store(false, std::memory_order_relaxed);
+    g_tlPos.store(0, std::memory_order_relaxed);
+    g_tlTick.store(GetTickCount64(), std::memory_order_relaxed);
+    VizTlWriteEnd();
+    return gen;
+}
+
+// Playback status. On a Playing <-> Paused change the position so far is
+// folded in and the clock restarts from now, so the bar neither jumps back
+// when pausing nor forward by the length of the pause when resuming (players
+// often leave the timeline itself untouched across a pause).
+void VizTimelineSetPlaying(uint32_t gen, bool playing) {
+    std::lock_guard<std::mutex> lock(g_tlWriteMutex);
+    if (gen != g_tlGen.load(std::memory_order_relaxed)) return;
+    g_mediaIsPlaying.store(playing, std::memory_order_relaxed);
+    bool running = g_tlRunning.load(std::memory_order_relaxed);
+    if (running == playing) return;
+    ULONGLONG now = GetTickCount64();
+    int64_t pos = g_tlPos.load(std::memory_order_relaxed);
+    if (running) pos += (int64_t)(now - g_tlTick.load(std::memory_order_relaxed)) * 10000;
+    VizTlWriteBegin();
+    g_tlPos.store(pos, std::memory_order_relaxed);
+    g_tlTick.store(now, std::memory_order_relaxed);
+    g_tlRunning.store(playing, std::memory_order_relaxed);
+    VizTlWriteEnd();
+}
+
+// A fresh timeline (TimelinePropertiesChanged, or the first read of a
+// session). ageMs is how old the position already is (from LastUpdatedTime);
+// it only counts while playing, since a paused position doesn't move.
+void VizTimelineSet(uint32_t gen, int64_t start, int64_t end, int64_t pos, int64_t ageMs) {
+    std::lock_guard<std::mutex> lock(g_tlWriteMutex);
+    if (gen != g_tlGen.load(std::memory_order_relaxed)) return;
+    if (ageMs < 0 || ageMs > 6LL * 3600 * 1000) ageMs = 0;  // unset or nonsense
+    if (!g_tlRunning.load(std::memory_order_relaxed)) ageMs = 0;
+    VizTlWriteBegin();
+    g_tlStart.store(start, std::memory_order_relaxed);
+    g_tlEnd.store(end, std::memory_order_relaxed);
+    g_tlPos.store(pos, std::memory_order_relaxed);
+    g_tlTick.store(GetTickCount64() - (ULONGLONG)ageMs, std::memory_order_relaxed);
+    g_tlValid.store(end > start, std::memory_order_relaxed);
+    VizTlWriteEnd();
+}
+
+void VizTimelineInvalidate(uint32_t gen) {
+    std::lock_guard<std::mutex> lock(g_tlWriteMutex);
+    if (gen != g_tlGen.load(std::memory_order_relaxed)) return;
+    VizTlWriteBegin();
+    g_tlValid.store(false, std::memory_order_relaxed);
+    VizTlWriteEnd();
+}
+
+// 0..1 along the track, or -1 for no bar. Render thread.
+float VizTrackProgress() {
+    static std::atomic<float> s_last{-1.f};  // if a writer is preempted mid-update
+    bool valid = false, running = false;
+    int64_t start = 0, end = 0, pos = 0;
+    ULONGLONG tick = 0;
+    for (int tries = 0;; tries++) {
+        if (tries == 64) return s_last.load(std::memory_order_relaxed);
+        uint32_t s1 = g_tlSeq.load(std::memory_order_acquire);
+        if (s1 & 1u) continue;
+        valid = g_tlValid.load(std::memory_order_relaxed);
+        start = g_tlStart.load(std::memory_order_relaxed);
+        end = g_tlEnd.load(std::memory_order_relaxed);
+        pos = g_tlPos.load(std::memory_order_relaxed);
+        tick = g_tlTick.load(std::memory_order_relaxed);
+        running = g_tlRunning.load(std::memory_order_relaxed);
+        std::atomic_thread_fence(std::memory_order_acquire);
+        if (g_tlSeq.load(std::memory_order_relaxed) == s1) break;
+    }
+    float result = -1.f;
+    double dur = (double)(end - start);
+    if (valid && dur > 0.0) {
+        double p = (double)(pos - start);
+        if (running) {
+            // Modular difference, so a tick set back past boot by an age still works.
+            int64_t elapsedMs = (int64_t)(GetTickCount64() - tick);
+            if (elapsedMs > 0) p += (double)elapsedMs * 10000.0;
+        }
+        result = (float)std::clamp(p / dur, 0.0, 1.0);
+    }
+    s_last.store(result, std::memory_order_relaxed);
+    return result;
+}
+// ---- track timeline: end
 std::atomic<ULONGLONG> g_nowPlayingChangedTick{0};
 
 static float VIZ_SEEDS[VIZ_BARS_MAX] = {};
@@ -3059,46 +3173,47 @@ static winrt::event_token g_gsmtcSessionToken{};
 [[clang::no_destroy]] static GlobalSystemMediaTransportControlsSessionManager g_gsmtcMgr{ nullptr };
 [[clang::no_destroy]] static GlobalSystemMediaTransportControlsSession        g_gsmtcSession{ nullptr };
 
-void RefreshMediaPlaybackStatus() {
-    if (!g_gsmtcSession) return;
+// g_gsmtcSession, g_gsmtcMgr and the session's event tokens are only touched
+// under this lock: by SetupGsmtcSessionListener (the GSMTC thread at start, a
+// WinRT thread-pool thread on every CurrentSessionChanged) and by shutdown.
+// The session's own event handlers never read them; they get the session as
+// `sender` and the generation it was hooked up with, and a handler still
+// running for a replaced session has its result dropped by the timeline.
+static std::mutex g_gsmtcSessionMutex;
+
+void RefreshMediaPlaybackStatus(GlobalSystemMediaTransportControlsSession const& session, uint32_t gen) {
+    if (!session) return;
     try {
-        auto info = g_gsmtcSession.GetPlaybackInfo();
+        auto info = session.GetPlaybackInfo();
         bool playing = info && info.PlaybackStatus() ==
             GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing;
-        g_mediaIsPlaying.store(playing, std::memory_order_relaxed);
+        VizTimelineSetPlaying(gen, playing);  // also sets g_mediaIsPlaying
     } catch (...) {}
     if (g_mediaWnd) PostMessage(g_mediaWnd, WM_APP_MEDIA_REPAINT, 0, 0);
 }
 
 // Reads the session's timeline for the progress bar. LastUpdatedTime says how
 // old the position already is; a player that leaves it unset gets age 0.
-void RefreshMediaTimeline() {
-    if (!g_gsmtcSession) {
-        g_tlValid.store(false, std::memory_order_relaxed);
-        return;
-    }
+void RefreshMediaTimeline(GlobalSystemMediaTransportControlsSession const& session, uint32_t gen) {
+    if (!session) return;
     try {
-        auto tl = g_gsmtcSession.GetTimelineProperties();
+        auto tl = session.GetTimelineProperties();
         if (!tl) {
-            g_tlValid.store(false, std::memory_order_relaxed);
+            VizTimelineInvalidate(gen);
             return;
         }
         int64_t start = tl.StartTime().count(), end = tl.EndTime().count(), pos = tl.Position().count();
         int64_t ageMs = std::chrono::duration_cast<std::chrono::milliseconds>(winrt::clock::now() -
                                                                               tl.LastUpdatedTime())
                             .count();
-        if (ageMs < 0 || ageMs > 6LL * 3600 * 1000) ageMs = 0;
-        g_tlStart.store(start, std::memory_order_relaxed);
-        g_tlEnd.store(end, std::memory_order_relaxed);
-        g_tlPos.store(pos, std::memory_order_relaxed);
-        g_tlTick.store(GetTickCount64() - (ULONGLONG)ageMs, std::memory_order_relaxed);
-        g_tlValid.store(end > start, std::memory_order_relaxed);
+        VizTimelineSet(gen, start, end, pos, ageMs);
     } catch (...) {
-        g_tlValid.store(false, std::memory_order_relaxed);
+        VizTimelineInvalidate(gen);
     }
 }
 
 void SetupGsmtcSessionListener() {
+    std::lock_guard<std::mutex> lock(g_gsmtcSessionMutex);
     if (!g_gsmtcMgr) return;
     try {
         if (g_gsmtcSession) {
@@ -3107,27 +3222,31 @@ void SetupGsmtcSessionListener() {
             try { g_gsmtcSession.TimelinePropertiesChanged(g_gsmtcTimelineToken); } catch (...) {}
             g_gsmtcSession = nullptr;
         }
-        g_gsmtcSession = g_gsmtcMgr.GetCurrentSession();
-        if (!g_gsmtcSession) {
-            g_tlValid.store(false, std::memory_order_relaxed);
-            return;
-        }
-        g_gsmtcMediaPropsToken = g_gsmtcSession.MediaPropertiesChanged(
+        // From here on, events from the old session are ignored.
+        const uint32_t gen = VizTimelineNewSource();
+        GlobalSystemMediaTransportControlsSession session = g_gsmtcMgr.GetCurrentSession();
+        g_gsmtcSession = session;
+        if (!session) return;
+        g_gsmtcMediaPropsToken = session.MediaPropertiesChanged(
             [](auto const&, auto const&) {
                 if (g_settings.colorMode == VizColorMode::AlbumArt ||
                     g_settings.colorMode == VizColorMode::DynamicAlbum ||
                     g_settings.nowPlayingEnabled)
                     FetchAlbumArtColorAsync();
             });
-        g_gsmtcPlaybackToken = g_gsmtcSession.PlaybackInfoChanged(
-            [](auto const&, auto const&) {
-                RefreshMediaPlaybackStatus();
-                RefreshMediaTimeline();  // pausing freezes the bar where it is
+        // Pausing / resuming folds the position in (VizTimelineSetPlaying);
+        // the timeline itself is only re-read when the player changes it.
+        g_gsmtcPlaybackToken = session.PlaybackInfoChanged(
+            [gen](GlobalSystemMediaTransportControlsSession const& sender, auto const&) {
+                RefreshMediaPlaybackStatus(sender, gen);
             });
-        g_gsmtcTimelineToken = g_gsmtcSession.TimelinePropertiesChanged(
-            [](auto const&, auto const&) { RefreshMediaTimeline(); });
-        RefreshMediaPlaybackStatus();
-        RefreshMediaTimeline();
+        g_gsmtcTimelineToken = session.TimelinePropertiesChanged(
+            [gen](GlobalSystemMediaTransportControlsSession const& sender, auto const&) {
+                RefreshMediaTimeline(sender, gen);
+            });
+        // Status first, so the first timeline read knows whether its age counts.
+        RefreshMediaPlaybackStatus(session, gen);
+        RefreshMediaTimeline(session, gen);
     } catch (...) {}
 }
 
@@ -3162,18 +3281,19 @@ void InitGsmtcListener() {
             WaitForSingleObject(g_gsmtcStopEvent, INFINITE);
 
         try {
+            if (g_gsmtcMgr) g_gsmtcMgr.CurrentSessionChanged(g_gsmtcSessionToken);
+        } catch (...) {}
+        {
+            std::lock_guard<std::mutex> lock(g_gsmtcSessionMutex);
             if (g_gsmtcSession) {
-                g_gsmtcSession.MediaPropertiesChanged(g_gsmtcMediaPropsToken);
-                g_gsmtcSession.PlaybackInfoChanged(g_gsmtcPlaybackToken);
-                g_gsmtcSession.TimelinePropertiesChanged(g_gsmtcTimelineToken);
-            }
-            if (g_gsmtcMgr) {
-                g_gsmtcMgr.CurrentSessionChanged(g_gsmtcSessionToken);
+                try { g_gsmtcSession.MediaPropertiesChanged(g_gsmtcMediaPropsToken); } catch (...) {}
+                try { g_gsmtcSession.PlaybackInfoChanged(g_gsmtcPlaybackToken); } catch (...) {}
+                try { g_gsmtcSession.TimelinePropertiesChanged(g_gsmtcTimelineToken); } catch (...) {}
             }
             g_gsmtcSession = nullptr;
             g_gsmtcMgr     = nullptr;
-            winrt::uninit_apartment();
-        } catch (...) {}
+        }
+        try { winrt::uninit_apartment(); } catch (...) {}
     });
 }
 
@@ -3685,8 +3805,10 @@ LRESULT CALLBACK MediaWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
             return 0;
 
         // Right-click on the strip opens the same quick-settings menu as the
-        // visualizer (handy when the visualizer is paused from it).
+        // visualizer (handy when the visualizer is paused from it), with the
+        // same Ctrl requirement when Right-Click Menu is Ctrl + Right-Click.
         case WM_RBUTTONUP:
+            if (g_settings.contextMenu == VizContextMenu::CtrlRightClick && !(wParam & MK_CONTROL)) break;
             if (g_messageWnd && g_settings.contextMenu != VizContextMenu::Off) {
                 POINT pt;
                 GetCursorPos(&pt);
@@ -3871,6 +3993,32 @@ inline int Log2i(int n) {
     return l;
 }
 inline float DbFromPower(double p) { return (float)(10.0 * log10(p > 1e-30 ? p : 1e-30)); }
+
+// The same, without a libm call: 10 log10(p) = 10 log10(2) log2(p), with
+// log2(p) = e + log2(m) from the float's exponent and a mantissa m folded
+// into [sqrt(1/2), sqrt(2)), and log2(m) = (2 / ln 2) atanh(t), t = (m-1)/(m+1),
+// |t| <= 0.1716, summed to t^9. The first term left out is
+// (2/ln2) t^11/11 < 1.0e-9, so the error is float rounding only: under
+// 1e-5 dB over the whole range (test_dsp checks 1e-4 dB against log10).
+// Used for the per-band levels, which run once per band per FFT; the bars
+// are drawn from these at 0.1 dB granularity at best.
+inline float FastDbFromPower(double pd) {
+    float p = (float)(pd > 1e-30 ? pd : 1e-30);
+    uint32_t bits;
+    memcpy(&bits, &p, 4);
+    int e = (int)((bits >> 23) & 255) - 127;
+    bits = (bits & 0x007FFFFFu) | 0x3F800000u;  // m in [1, 2)
+    float m;
+    memcpy(&m, &bits, 4);
+    if (m > 1.41421356f) {
+        m *= 0.5f;
+        e++;
+    }
+    float t = (m - 1.f) / (m + 1.f), t2 = t * t;
+    float poly = t * (1.f + t2 * (1.f / 3.f + t2 * (1.f / 5.f + t2 * (1.f / 7.f + t2 * (1.f / 9.f)))));
+    // 10 log10(2) = 3.0102999566; 2 / ln 2 x that = 8.6858896381.
+    return 3.0102999566f * (float)e + 8.6858896381f * poly;
+}
 
 // Newest-first audio history. Push is one store; Latest copies the newest n
 // samples, oldest first, into a linear buffer for windowing.
@@ -4321,6 +4469,7 @@ public:
         // Calibration constants (see the class comment).
         const double rmsCal = 10.0 * log10(2.0 / (n * ws.sumSq)) + 10.0 * log10(2.0);
         const double peakCal = 20.0 * log10(2.0 / ws.sum);
+        peakCal_ = peakCal;
         // Hop per tier before its FFT is worth redoing: the top tier every
         // frame, the decimated ones once N/16 new samples have arrived.
         hop_[0] = 1;
@@ -4425,6 +4574,7 @@ public:
         if (!configured_) return false;
         const int n = cfg_.fftSize;
         bool any = false;
+        lastFfts_ = 0;
         for (int t = 0; t < 3; t++) {
             if (!tierUsed_[t]) continue;
             if (!force && fresh_[t] < hop_[t]) continue;
@@ -4437,6 +4587,7 @@ public:
             for (int k = 0; k <= n / 2; k++) p[k] = re_[k] * re_[k] + im_[k] * im_[k];
             valid_[t] = true;
             any = true;
+            lastFfts_++;
         }
         if (!any) return false;
         const bool peakDet = cfg_.detector == Detector::Peak;
@@ -4447,7 +4598,7 @@ public:
             if (peakDet) {
                 float mx = 0.f;
                 for (int k = m.k0; k <= m.k1; k++) mx = std::max(mx, p[k]);
-                v = (double)DbFromPower(mx) + m.peakOffsetDb;  // 10log10(|X|^2) = 20log10|X|
+                v = (double)FastDbFromPower(mx) + m.peakOffsetDb;  // 10log10(|X|^2) = 20log10|X|
             } else {
                 double s;
                 if (m.k0 == m.k1) {
@@ -4456,7 +4607,7 @@ public:
                     s = p[m.k0] * m.w0 + p[m.k1] * m.w1;
                     for (int k = m.k0 + 1; k < m.k1; k++) s += p[k];
                 }
-                v = (double)DbFromPower(s) + m.offsetDb;
+                v = (double)FastDbFromPower(s) + m.offsetDb;
             }
             levelsDb_[i] = (float)v;
         }
@@ -4465,12 +4616,21 @@ public:
     bool Analyze(bool force) {
         return Analyze(force, [](const float*, int, float*, float*) { return false; });
     }
+    int LastFftCount() const { return lastFfts_; }  // transforms the last Analyze ran
 
     // Loudest bin between fmin and fmax, refined by a parabola through the
     // log magnitudes of the bin and its neighbours (accurate to a fraction of
     // a bin for a steady tone). Uses the finest tier that covers each range.
+    //
+    // The search runs on power, not dB: the dB figure is a monotonic function
+    // of the bin power plus one constant (PeakCal, the same for every tier),
+    // so the loudest local maximum is the same one. 1.x/2.0 took a log10 and
+    // re-summed the whole window (PeakCal()) for every bin of every tier, about
+    // 6 million additions per frame at FFT 2048; now the logs are taken only
+    // for a new best bin and its two neighbours.
     double DominantHz(double minLevelDbfs) const {
         double bestDb = -1e9, bestHz = 0.0;
+        float bestP = -1.f;
         const int n = cfg_.fftSize;
         for (int t = 0; t < 3; t++) {
             if (!valid_[t]) continue;
@@ -4483,12 +4643,12 @@ public:
             int k1 = std::min(n / 2 - 2, (int)floor(hi / df));
             const float* p = power_[t].data();
             for (int k = k0; k <= k1; k++) {
-                double db = DbFromPower(p[k]) + PeakCal();
-                if (db > bestDb && p[k] >= p[k - 1] && p[k] >= p[k + 1]) {
+                if (p[k] > bestP && p[k] >= p[k - 1] && p[k] >= p[k + 1]) {
+                    bestP = p[k];
                     double a = DbFromPower(p[k - 1]), b = DbFromPower(p[k]), c = DbFromPower(p[k + 1]);
                     double den = a - 2 * b + c;
                     double delta = (fabs(den) > 1e-9) ? 0.5 * (a - c) / den : 0.0;
-                    bestDb = db;
+                    bestDb = b + peakCal_;
                     bestHz = (k + std::clamp(delta, -0.5, 0.5)) * df;
                 }
             }
@@ -4505,11 +4665,7 @@ public:
     bool TierUsed(int t) const { return tierUsed_[t]; }
     const Ring& TierRing(int t) const { return ring_[t]; }
     const float* Window() const { return window_.data(); }
-    double PeakCal() const {
-        double s = 0;
-        for (float w : window_) s += w;
-        return 20.0 * log10(2.0 / s);
-    }
+    double PeakCal() const { return peakCal_; }
     // For the GPU workload: the newest window of each tier, unwindowed, and
     // whether the tier has moved on enough to be re-transformed.
     bool TakeTierBlock(int t, float* out, bool force) {
@@ -4523,6 +4679,7 @@ public:
 private:
     Config cfg_;
     bool configured_ = false;
+    double peakCal_ = 0.0;
     std::vector<Band> bands_;
     std::vector<BandMap> maps_;
     std::vector<float> window_, re_, im_, scratch_, levelsDb_;
@@ -4534,6 +4691,7 @@ private:
     bool valid_[3] = {false, false, false};
     bool tierUsed_[3] = {true, false, false};
     RealFft fft_;
+    int lastFfts_ = 0;
 };
 
 // ---- Display mapping and ballistics ----------------------------------------------------
@@ -4596,18 +4754,30 @@ struct DisplayMap {
     }
 };
 
+// The coefficients depend only on dt and the preset, so they are worked out
+// once per frame (two exp() calls) instead of once per band; applying them is
+// the same arithmetic as before, so the result is bit-identical.
+struct BallisticsCoef {
+    double attack = 0.0, release = 0.0;  // 1 - e^(-dt / tau)
+    float fall = 0.f;                    // linear release, in display units this frame
+    bool linear = false;
+};
+inline BallisticsCoef BallisticsCoefs(double dt, const Ballistics& b, float rangeDb) {
+    BallisticsCoef c;
+    c.attack = 1.0 - exp(-dt * 1000.0 / std::max(0.1, b.attackMs));
+    c.linear = b.release == ReleaseKind::Linear;
+    if (c.linear) c.fall = (float)(b.releaseDbPerSec * dt / std::max(1.f, rangeDb));
+    else c.release = 1.0 - exp(-dt * 1000.0 / std::max(0.1, b.releaseMs));
+    return c;
+}
 // One state per band.
+inline float BallisticsApply(float y, float x, const BallisticsCoef& c) {
+    if (x > y) return (float)(y + (x - y) * c.attack);
+    if (c.linear) return std::max(x, y - c.fall);
+    return (float)(y + (x - y) * c.release);
+}
 inline float BallisticsStep(float y, float x, double dt, const Ballistics& b, float rangeDb) {
-    if (x > y) {
-        double a = 1.0 - exp(-dt * 1000.0 / std::max(0.1, b.attackMs));
-        return (float)(y + (x - y) * a);
-    }
-    if (b.release == ReleaseKind::Linear) {
-        float fall = (float)(b.releaseDbPerSec * dt / std::max(1.f, rangeDb));
-        return std::max(x, y - fall);
-    }
-    double a = 1.0 - exp(-dt * 1000.0 / std::max(0.1, b.releaseMs));
-    return (float)(y + (x - y) * a);
+    return BallisticsApply(y, x, BallisticsCoefs(dt, b, rangeDb));
 }
 
 // Peak hold per bar: hangs for holdMs, then falls with gravity (accelerating,
@@ -4692,6 +4862,25 @@ inline void KWeightingFilters(double fs, Biquad& shelf, Biquad& hp) {
 // True peak: 4x oversampling through a 64-tap polyphase interpolator
 // (Kaiser-windowed sinc, cut off at the original Nyquist), the maximum
 // absolute value over every original and interpolated sample, in dBTP.
+//
+// Two savings, neither of which changes a reading:
+//   * SetTruePeak(false) leaves the interpolator out entirely (the readout
+//     only shows true peak in its full form);
+//   * a window that provably can't raise the peak isn't interpolated. Phase
+//     p's output is a_p = sum_j h_p[j] x[j] over the kTpTaps newest samples,
+//     so |a_p| <= sum_j |h_p[j]| |x[j]| <= S max_j |x[j]|, S = max_p sum_j
+//     |h_p[j]|. Computed in float, a 16-term dot product is off by at most
+//     gamma_16 = 16u / (1 - 16u) < 2^-19 of that bound (u = 2^-24), plus
+//     underflow terms that only matter below 1e-30. tpBound_ is S (1 + 2^-12)
+//     rounded up, which covers both that and the rounding of |x| tpBound_.
+//     So if every sample in the window had |x| tpBound_ <= truePeak_ when it
+//     arrived, every float a_p the loop would compute is <= truePeak_ then,
+//     and truePeak_ only grows until Reset(): max(truePeak_, |a_p|) would
+//     leave it unchanged, and skipping the evaluation is exact. hot_[c] counts
+//     the pushes for which a sample that failed that test is still inside
+//     channel c's window. On music near its own peak this saves little; on
+//     anything quieter than the peak so far (most of a track, fades, silence)
+//     nearly all of it.
 class LoudnessMeter {
 public:
     static constexpr int kMaxCh = 8;
@@ -4726,6 +4915,13 @@ public:
             // Phase p uses taps i = p + L j.
             tp_[i % L][i / L] = (float)h;
         }
+        double S = 0.0;
+        for (int p = 0; p < L; p++) {
+            double sp = 0.0;
+            for (int j = 0; j < kTpTaps; j++) sp += fabs((double)tp_[p][j]);
+            S = std::max(S, sp);
+        }
+        tpBound_ = std::nextafter((float)(S * (1.0 + 1.0 / 4096.0)), 1e30f);
         Reset();
     }
     void Reset() {
@@ -4733,6 +4929,7 @@ public:
             shelf_[c].Reset();
             hp_[c].Reset();
             for (int j = 0; j < kTpTaps; j++) tpHist_[c][j] = 0.f;
+            hot_[c] = 0;
         }
         tpPos_ = 0;
         subAcc_ = 0.0;
@@ -4747,6 +4944,19 @@ public:
         truePeak_ = 0.f;
         blocks_ = 0;
     }
+    // Off: no true peak at all (TruePeakDb reads -200). Switching clears the
+    // true-peak state, so a meter turned back on starts a clean measurement.
+    void SetTruePeak(bool on) {
+        if (on == tpOn_) return;
+        tpOn_ = on;
+        for (int c = 0; c < kMaxCh; c++) {
+            for (int j = 0; j < kTpTaps; j++) tpHist_[c][j] = 0.f;
+            hot_[c] = 0;
+        }
+        truePeak_ = 0.f;
+    }
+    bool TruePeakOn() const { return tpOn_; }
+
     // Interleaved frames.
     void Process(const float* x, int frames, int stride) {
         for (int f = 0; f < frames; f++) {
@@ -4755,22 +4965,8 @@ public:
             for (int c = 0; c < ch_; c++) {
                 double v = hp_[c].Run(shelf_[c].Run(s[c]));
                 e += w_[c] * v * v;
-                // True peak: shift in the original sample, evaluate 4 phases.
-                tpHist_[c][tpPos_] = s[c];
             }
-            for (int c = 0; c < ch_; c++) {
-                truePeak_ = std::max(truePeak_, fabsf(s[c]));
-                for (int p = 0; p < 4; p++) {
-                    float acc = 0.f;
-                    int idx = tpPos_;
-                    for (int j = 0; j < kTpTaps; j++) {
-                        acc += tp_[p][j] * tpHist_[c][idx];
-                        idx = (idx == 0) ? kTpTaps - 1 : idx - 1;
-                    }
-                    truePeak_ = std::max(truePeak_, fabsf(acc));
-                }
-            }
-            tpPos_ = (tpPos_ + 1 == kTpTaps) ? 0 : tpPos_ + 1;
+            if (tpOn_) TruePeakFrame(s);
             subAcc_ += e;
             if (++subCount_ >= subLen_) EndSubBlock();
         }
@@ -4800,10 +4996,35 @@ public:
     }
     double TruePeakDb() const { return 20.0 * log10(std::max(1e-10f, truePeak_)); }
     long long Blocks() const { return blocks_; }
+    long long TpEvaluations() const { return tpEvals_; }  // channel-frames interpolated (tests, bench)
 
 private:
     static constexpr int kHist = 800;  // -70 .. +10 LUFS in 0.1 LU bins
     static constexpr double kHistMin = -70.0;
+
+    // True peak for one frame: shift the original samples in, evaluate the 4
+    // phases where they could matter (see the class comment).
+    void TruePeakFrame(const float* s) {
+        for (int c = 0; c < ch_; c++) tpHist_[c][tpPos_] = s[c];
+        for (int c = 0; c < ch_; c++) {
+            float ax = fabsf(s[c]);
+            truePeak_ = std::max(truePeak_, ax);
+            if (ax * tpBound_ > truePeak_ || (ax != 0.f && truePeak_ < 1e-30f)) hot_[c] = kTpTaps;
+            if (hot_[c] == 0) continue;
+            hot_[c]--;
+            tpEvals_++;
+            for (int p = 0; p < 4; p++) {
+                float acc = 0.f;
+                int idx = tpPos_;
+                for (int j = 0; j < kTpTaps; j++) {
+                    acc += tp_[p][j] * tpHist_[c][idx];
+                    idx = (idx == 0) ? kTpTaps - 1 : idx - 1;
+                }
+                truePeak_ = std::max(truePeak_, fabsf(acc));
+            }
+        }
+        tpPos_ = (tpPos_ + 1 == kTpTaps) ? 0 : tpPos_ + 1;
+    }
 
     double Window(int subs) const {
         if (subFilled_ < subs) return -HUGE_VAL;
@@ -4840,6 +5061,10 @@ private:
     float tpHist_[kMaxCh][kTpTaps] = {};
     int tpPos_ = 0;
     float truePeak_ = 0.f;
+    float tpBound_ = 2.f;          // S (1 + 2^-12), see the class comment
+    int hot_[kMaxCh] = {};
+    bool tpOn_ = true;
+    long long tpEvals_ = 0;
     double subAcc_ = 0.0;
     int subCount_ = 0;
     double sub_[30] = {};
@@ -4859,6 +5084,16 @@ public:
         Reset();
     }
     void Reset() { lr_ = ll_ = rr_ = 0.0; }
+    // n frames of exact silence in one step: each Push(0, 0) scales the
+    // three sums by (1 - k), so n of them scale by (1 - k)^n (equal to the
+    // loop up to double rounding; the ratio Value() reads is unchanged).
+    void PushSilence(int n) {
+        if (n <= 0) return;
+        double d = pow(1.0 - k_, n);
+        lr_ *= d;
+        ll_ *= d;
+        rr_ *= d;
+    }
     void Push(float l, float r) {
         lr_ += (l * (double)r - lr_) * k_;
         ll_ += (l * (double)l - ll_) * k_;
@@ -5776,6 +6011,84 @@ inline void Shutdown() {
 
 }  // namespace ttnpu
 
+// ---- Performance Stats (2.0) -----------------------------------------------------------
+//
+// Cheap counters for the claims this mod makes about its own cost, so they can
+// be checked on any PC rather than taken on trust. Every counter is one relaxed
+// atomic add; the timers are two QueryPerformanceCounter reads. With
+// Performance -> Performance Stats on, the engine thread writes one line to the
+// Windhawk log every 30 seconds:
+//
+//   [Perf] 30.0 s: engine 144.0 wakes/s, 0.11 ms avg | analyses 100.0/s, FFTs 117.3/s |
+//          ticks 144.0/s, render 0.06 ms avg | presents 98.2/s, skipped 45.8/s, text 0.3/s |
+//          commits 0.0/s, maps 98.2/s | idle: playing 100% trickle 0% deep 0%
+//
+// The figures are per second of wall time, so they compare directly across
+// settings, renderers and machines.
+
+enum VizPerfCounter : int {
+    kPerfEngineWakes,   // engine loop iterations
+    kPerfAnalyses,      // frames that ran the spectrum analysis
+    kPerfFfts,          // FFTs computed (all tiers)
+    kPerfRenderTicks,   // render ticks handled on the UI thread
+    kPerfPresents,      // panel surface presents (Direct3D 11) or frames drawn (Direct2D)
+    kPerfSkipped,       // frames skipped because nothing changed
+    kPerfTextPresents,  // text surface presents
+    kPerfCommits,       // DirectComposition commits from the render path
+    kPerfMaps,          // dynamic buffer uploads (Map / Unmap pairs)
+    kPerfIdlePlaying,   // engine wakes spent in each idle state
+    kPerfIdleTrickle,
+    kPerfIdleDeep,
+    kPerfCount
+};
+std::atomic<uint32_t> g_perfCount[kPerfCount];
+std::atomic<uint64_t> g_perfEngineTicks{0}, g_perfRenderTicks{0};  // QPC ticks
+std::atomic<bool> g_perfStatsEnabled{false};
+
+inline void VizPerf(VizPerfCounter c, uint32_t n = 1) { g_perfCount[c].fetch_add(n, std::memory_order_relaxed); }
+
+// Adds the time between construction and destruction to an accumulator.
+struct VizPerfScope {
+    std::atomic<uint64_t>& acc;
+    LARGE_INTEGER t0;
+    explicit VizPerfScope(std::atomic<uint64_t>& a) : acc(a) { QueryPerformanceCounter(&t0); }
+    ~VizPerfScope() {
+        LARGE_INTEGER t1;
+        QueryPerformanceCounter(&t1);
+        acc.fetch_add((uint64_t)(t1.QuadPart - t0.QuadPart), std::memory_order_relaxed);
+    }
+};
+
+// Called by the engine thread once per loop. Logs and resets every 30 s.
+void VizPerfMaybeLog() {
+    static LARGE_INTEGER s_start = {}, s_freq = {};
+    if (!s_freq.QuadPart) QueryPerformanceFrequency(&s_freq);
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+    if (!s_start.QuadPart) {
+        s_start = now;
+        return;
+    }
+    double secs = (double)(now.QuadPart - s_start.QuadPart) / (double)s_freq.QuadPart;
+    if (secs < 30.0) return;
+    s_start = now;
+    uint32_t c[kPerfCount];
+    for (int i = 0; i < kPerfCount; i++) c[i] = g_perfCount[i].exchange(0, std::memory_order_relaxed);
+    uint64_t eng = g_perfEngineTicks.exchange(0, std::memory_order_relaxed);
+    uint64_t ren = g_perfRenderTicks.exchange(0, std::memory_order_relaxed);
+    if (!g_perfStatsEnabled.load(std::memory_order_relaxed)) return;
+    auto rate = [&](int i) { return c[i] / secs; };
+    auto avgMs = [&](uint64_t t, uint32_t n) { return n ? (double)t * 1000.0 / (double)s_freq.QuadPart / n : 0.0; };
+    double idleTotal = (double)std::max<uint32_t>(1, c[kPerfIdlePlaying] + c[kPerfIdleTrickle] + c[kPerfIdleDeep]);
+    Wh_Log(L"[Perf] %.1f s: engine %.1f wakes/s, %.3f ms avg | analyses %.1f/s, FFTs %.1f/s | ticks %.1f/s, "
+           L"render %.3f ms avg | presents %.1f/s, skipped %.1f/s, text %.1f/s | commits %.1f/s, maps %.1f/s | "
+           L"idle: playing %.0f%% trickle %.0f%% deep %.0f%%",
+           secs, rate(kPerfEngineWakes), avgMs(eng, c[kPerfEngineWakes]), rate(kPerfAnalyses), rate(kPerfFfts),
+           rate(kPerfRenderTicks), avgMs(ren, c[kPerfRenderTicks]), rate(kPerfPresents), rate(kPerfSkipped),
+           rate(kPerfTextPresents), rate(kPerfCommits), rate(kPerfMaps), 100.0 * c[kPerfIdlePlaying] / idleTotal,
+           100.0 * c[kPerfIdleTrickle] / idleTotal, 100.0 * c[kPerfIdleDeep] / idleTotal);
+}
+
 // ---- Audio source ---------------------------------------------------------------------
 //
 // Up to 2.0 the mod always listened to the default playback device. Anyone who
@@ -6004,15 +6317,35 @@ class VizEndpointNotificationClient : public IMMNotificationClient {
 //
 // Idle has three steps now:
 //   playing       one wake per frame, as above.
-//   trickle       Pause When Silent reached: wake on audio or every 250 ms,
-//                 and the renderer's skip-unchanged-frames test means nothing
-//                 is presented, so DWM has nothing to compose.
-//   deep idle     5 s after that: the loopback stream itself is stopped and
-//                 the endpoint's peak meter is read 4 times a second instead.
-//                 A running capture stream registers an audio power request,
-//                 which can hold the PC out of sleep; a stopped one doesn't.
+//   trickle       Pause When Silent reached. Loopback: the audio event wakes
+//                 the thread, which only drains the packet unless it is
+//                 louder than the audible level (then it analyses and draws
+//                 at once, so waking up costs no latency); otherwise one
+//                 analysis + render tick every 250 ms. An app holding a silent
+//                 stream open signals the event 100 times a second, and those
+//                 wakes now cost a drain each instead of a full frame. An
+//                 input device signals every device period whatever it hears,
+//                 so for one the thread just polls every 250 ms.
+//   deep idle     5 s after that, loopback only and only with a working peak
+//                 meter: the stream is stopped and the endpoint's peak meter
+//                 is read 4 times a second instead. A running capture stream
+//                 registers an audio power request, which can hold the PC out
+//                 of sleep; a stopped one doesn't. A meter reading above the
+//                 audible level (the same -70 dBFS the engine uses, Input Gain
+//                 included) only restarts the stream and goes back to trickle
+//                 for a 1 s look; the engine's own test then decides whether
+//                 it is playing. An input device stays in trickle: once its
+//                 stream is stopped, its peak meter can read 0 for good.
 
 enum class VizIdleState { Playing, Trickle, Deep };
+
+// The one "is anything playing" level, -70 dBFS on the mono mix after Input
+// Gain. The engine needs this and a bar above 2% to call audio audible; deep
+// idle wakes on the endpoint meter crossing it. The meter reads the loudest
+// channel before Input Gain, and |mono mix| <= the loudest channel, so meter
+// x gain is never below what the engine sees: nothing the engine would call
+// audible can sleep through deep idle.
+constexpr float kVizAudibleLin = 0.000316f;
 
 // IAudioMeterInformation (endpointvolume.h), declared here because the mingw
 // headers only forward-declare it. Methods in vtable order, from the Windows
@@ -6075,6 +6408,8 @@ struct VizEngineConfig {
     VizChannel channel = VizChannel::Mix;
     bool wantDominant = false;
     bool wantLoudness = false;
+    bool wantTruePeak = false;     // Loudness (full) readout: the 4x oversampler
+    bool wantCorrelation = false;  // Loudness (full) readout or the Goniometer
     bool wantGonio = false;
     bool beat = false;
     bool loudnessResetOnTrack = true;
@@ -6125,38 +6460,27 @@ std::atomic<int> g_idleState{(int)VizIdleState::Playing};
 // device by loopback, as 1.5 always did with the default one, or an input
 // device as a plain recording stream. Same buffer and outputs as before: the
 // channel mask for loudness weighting, and the device itself for the
-// deep-idle peak meter. *fellBack says the chosen device wasn't there.
-bool VizInitAudioClient(IMMDeviceEnumerator* pEnum, ComPtr<IMMDevice>& pDevOut,
-                        ComPtr<IAudioClient>& pClient, ComPtr<IAudioCaptureClient>& pCapture,
-                        UINT32& sampleRate, UINT32& channels, bool& isFloat, DWORD& channelMask,
-                        HANDLE hEvent, bool* loopbackOut, bool* fellBack) {
-    pClient.Reset();
-    pCapture.Reset();
-    pDevOut.Reset();
-
-    bool loopback = true;
-    ComPtr<IMMDevice> pDev = VizResolveAudioDevice(pEnum, VizAudioSourceKey(), &loopback, fellBack);
-    if (!pDev) return false;
-    *loopbackOut = loopback;
-
+// deep-idle peak meter. *fellBack says the chosen device wasn't there, or was
+// there but couldn't be opened (*openFailed: typically a DAW holding it in
+// exclusive mode); either way the default output stands in for it.
+static bool VizOpenAudioClientOn(IMMDevice* pDev, bool loopback, ComPtr<IAudioClient>& pClient,
+                                 ComPtr<IAudioCaptureClient>& pCapture, UINT32& sampleRate, UINT32& channels,
+                                 bool& isFloat, DWORD& channelMask, HANDLE hEvent) {
     ComPtr<IAudioClient> pC;
-    if (FAILED(pDev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
-                              (void**)pC.GetAddressOf())))
+    if (FAILED(pDev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, (void**)pC.GetAddressOf())))
         return false;
 
     WAVEFORMATEX* pwfx = nullptr;
     pC->GetMixFormat(&pwfx);
     if (!pwfx) return false;
 
-    sampleRate = pwfx->nSamplesPerSec;
-    channels = pwfx->nChannels;
-    isFloat = (pwfx->wFormatTag == WAVE_FORMAT_IEEE_FLOAT) ||
+    UINT32 sr = pwfx->nSamplesPerSec, ch = pwfx->nChannels;
+    bool fl = (pwfx->wFormatTag == WAVE_FORMAT_IEEE_FLOAT) ||
               (pwfx->wFormatTag == WAVE_FORMAT_EXTENSIBLE &&
-               reinterpret_cast<WAVEFORMATEXTENSIBLE*>(pwfx)->SubFormat ==
-                   KSDATAFORMAT_SUBTYPE_IEEE_FLOAT);
-    channelMask = (pwfx->wFormatTag == WAVE_FORMAT_EXTENSIBLE)
-                      ? reinterpret_cast<WAVEFORMATEXTENSIBLE*>(pwfx)->dwChannelMask
-                      : 0;
+               reinterpret_cast<WAVEFORMATEXTENSIBLE*>(pwfx)->SubFormat == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT);
+    DWORD mask = (pwfx->wFormatTag == WAVE_FORMAT_EXTENSIBLE)
+                     ? reinterpret_cast<WAVEFORMATEXTENSIBLE*>(pwfx)->dwChannelMask
+                     : 0;
 
     // 500 ms, in 100 ns units.
     HRESULT hr = pC->Initialize(AUDCLNT_SHAREMODE_SHARED,
@@ -6168,15 +6492,72 @@ bool VizInitAudioClient(IMMDeviceEnumerator* pEnum, ComPtr<IMMDevice>& pDevOut,
     if (hEvent) pC->SetEventHandle(hEvent);
 
     ComPtr<IAudioCaptureClient> pCap;
-    if (FAILED(pC->GetService(__uuidof(IAudioCaptureClient), (void**)pCap.GetAddressOf())))
-        return false;
+    if (FAILED(pC->GetService(__uuidof(IAudioCaptureClient), (void**)pCap.GetAddressOf()))) return false;
 
     if (FAILED(pC->Start())) return false;
 
+    sampleRate = sr;
+    channels = ch;
+    isFloat = fl;
+    channelMask = mask;
     pClient = pC;
     pCapture = pCap;
-    pDevOut = pDev;
     return true;
+}
+
+bool VizInitAudioClient(IMMDeviceEnumerator* pEnum, ComPtr<IMMDevice>& pDevOut,
+                        ComPtr<IAudioClient>& pClient, ComPtr<IAudioCaptureClient>& pCapture,
+                        UINT32& sampleRate, UINT32& channels, bool& isFloat, DWORD& channelMask,
+                        HANDLE hEvent, bool* loopbackOut, bool* fellBack, bool* openFailed) {
+    pClient.Reset();
+    pCapture.Reset();
+    pDevOut.Reset();
+    *openFailed = false;
+
+    bool loopback = true;
+    std::wstring key = VizAudioSourceKey();
+    ComPtr<IMMDevice> pDev = VizResolveAudioDevice(pEnum, key, &loopback, fellBack);
+    if (!pDev) return false;
+    if (VizOpenAudioClientOn(pDev.Get(), loopback, pClient, pCapture, sampleRate, channels, isFloat, channelMask,
+                             hEvent)) {
+        *loopbackOut = loopback;
+        pDevOut = pDev;
+        return true;
+    }
+    // The chosen device is there but won't open. This used to retry the
+    // same device every 500 ms for as long as it stayed busy, showing
+    // nothing; now the default output stands in (once per attempt), and the
+    // caller says so and checks back on the chosen one now and then.
+    if (*fellBack || key.empty() || key == L"default_output") return false;
+    ComPtr<IMMDevice> def;
+    if (FAILED(pEnum->GetDefaultAudioEndpoint(eRender, eConsole, &def)) || !def) return false;
+    if (!VizOpenAudioClientOn(def.Get(), true, pClient, pCapture, sampleRate, channels, isFloat, channelMask,
+                              hEvent))
+        return false;
+    Wh_Log(L"[Audio] %s would not open; using the default output instead", VizDeviceName(pDev.Get()).c_str());
+    *fellBack = true;
+    *openFailed = true;
+    *loopbackOut = true;
+    pDevOut = def;
+    return true;
+}
+
+// Whether the chosen source can be opened now, without disturbing the stream
+// that is standing in for it: a shared-mode Initialize on a client that is
+// released straight away (it is never started, so nothing is captured).
+static bool VizProbeAudioSource(IMMDeviceEnumerator* pEnum) {
+    bool loopback = true, fellBack = false;
+    ComPtr<IMMDevice> d = VizResolveAudioDevice(pEnum, VizAudioSourceKey(), &loopback, &fellBack);
+    if (!d || fellBack) return false;
+    ComPtr<IAudioClient> c;
+    if (FAILED(d->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, (void**)c.GetAddressOf()))) return false;
+    WAVEFORMATEX* pwfx = nullptr;
+    c->GetMixFormat(&pwfx);
+    if (!pwfx) return false;
+    HRESULT hr = c->Initialize(AUDCLNT_SHAREMODE_SHARED, loopback ? AUDCLNT_STREAMFLAGS_LOOPBACK : 0u, 5000000, 0,
+                               pwfx, nullptr);
+    CoTaskMemFree(pwfx);
+    return SUCCEEDED(hr);
 }
 
 class VizEngine {
@@ -6208,14 +6589,30 @@ public:
     HANDLE AudioEvent() const { return audioEvent_; }
     bool IsOpen() const { return (bool)client_; }
     bool IsStopped() const { return stopped_; }
+    // Loopback (an output device) or a recording stream (an input device),
+    // as opened. The idle ladder treats the two differently.
+    bool IsLoopback() const { return loopback_; }
+    // A peak meter that answered its last read. Deep idle needs one.
+    bool MeterOk() const { return meter_ && meterOk_; }
 
-    // Opens the stream if it isn't, or reopens it after a device change. Rate
-    // limited the way 1.5 was, so a device that keeps failing can't spin.
+    // Opens the stream if it isn't, or reopens it after a device change. A
+    // source that won't open is retried after 0.5 s, then 1, 2, 4 ... up to
+    // 30 s, and straight away again after any device change. While the
+    // default output is standing in for a chosen device that wouldn't open,
+    // the chosen one is probed every 30 s and taken back when it's free.
     void EnsureOpen() {
         bool changed = g_deviceChanged.exchange(false, std::memory_order_relaxed);
-        if (client_ && !changed) return;
         ULONGLONG now = GetTickCount64();
-        if (now - lastReinit_ < 500) {
+        if (changed) retryMs_ = kRetryMinMs;
+        if (client_ && !changed) {
+            if (!openFallback_ || now - lastProbe_ < kProbeMs) return;
+            lastProbe_ = now;
+            if (!VizProbeAudioSource(enum_.Get())) return;
+            Wh_Log(L"[Audio] the chosen source opens again; switching back to it");
+            retryMs_ = kRetryMinMs;
+            lastReinit_ = 0;
+        }
+        if (now - lastReinit_ < retryMs_) {
             if (changed) g_deviceChanged.store(true, std::memory_order_relaxed);
             return;
         }
@@ -6225,17 +6622,23 @@ public:
         UINT32 sr = 48000, ch = 2;
         bool fl = true;
         DWORD mask = 0;
-        bool loopback = true, fellBack = false;
+        bool loopback = true, fellBack = false, openFailed = false;
         std::wstring source = VizAudioSourceKey();
         if (VizInitAudioClient(enum_.Get(), device_, client_, capture_, sr, ch, fl, mask, audioEvent_, &loopback,
-                               &fellBack)) {
+                               &fellBack, &openFailed)) {
             sampleRate_ = sr;
             channels_ = ch;
             isFloat_ = fl;
             channelMask_ = mask;
+            loopback_ = loopback;
             stopped_ = false;
+            retryMs_ = kRetryMinMs;
+            openFallback_ = openFailed;
+            lastProbe_ = now;
             meter_.Reset();
             device_->Activate(kIID_IAudioMeterInformation, CLSCTX_ALL, nullptr, (void**)meter_.GetAddressOf());
+            float probe = 0.f;
+            meterOk_ = meter_ && SUCCEEDED(meter_->GetPeakValue(&probe));
             ResetAnalysis();
             configuredGen_ = 0;  // sample rate may have changed: rebuild the precision engine
             g_audioOpen.store(true);
@@ -6246,13 +6649,23 @@ public:
             // not one per reconnect attempt.
             if (fellBack && source != warnedSource_) {
                 warnedSource_ = source;
-                VizPostAudioNotice(L"The chosen audio source (" + VizAudioSourceLabel(source) +
-                                   L") isn't connected or enabled, so the visualizer is listening to the "
-                                   L"default output until it comes back.");
+                if (openFailed)
+                    VizPostAudioNotice(L"The chosen audio source (" + VizAudioSourceLabel(source) +
+                                       L") is connected but couldn't be opened (another app may be using it in "
+                                       L"exclusive mode), so the visualizer is listening to the default output "
+                                       L"until it can.");
+                else
+                    VizPostAudioNotice(L"The chosen audio source (" + VizAudioSourceLabel(source) +
+                                       L") isn't connected or enabled, so the visualizer is listening to the "
+                                       L"default output until it comes back.");
             } else if (!fellBack) {
                 warnedSource_.clear();
             }
             g_audioOnFallback.store(fellBack, std::memory_order_relaxed);
+        } else {
+            ULONGLONG was = retryMs_;
+            retryMs_ = std::min<ULONGLONG>(retryMs_ * 2, kRetryMaxMs);
+            if (retryMs_ != was) Wh_Log(L"[Audio] no audio source could be opened; next try in %llu ms", retryMs_);
         }
     }
 
@@ -6261,6 +6674,7 @@ public:
         capture_.Reset();
         client_.Reset();
         meter_.Reset();
+        meterOk_ = false;
         device_.Reset();
         stopped_ = false;
         ResetAnalysis();
@@ -6269,8 +6683,10 @@ public:
     }
 
     // Deep idle: stop the stream, keep the client (restarting it is instant).
+    // Loopback only: an input device's meter may read nothing once our
+    // stream is stopped, which would strand it in deep idle.
     void StopStream() {
-        if (client_ && !stopped_) {
+        if (client_ && !stopped_ && loopback_) {
             client_->Stop();
             stopped_ = true;
             Wh_Log(L"[Idle] deep idle: loopback stopped, watching the peak meter");
@@ -6281,34 +6697,66 @@ public:
             client_->Start();
             stopped_ = false;
             lastPacketQpc_ = 0;
-            Wh_Log(L"[Idle] audio back: loopback restarted");
+            Wh_Log(L"[Idle] loopback restarted");
         }
     }
-    // The endpoint's own peak meter, 0..1. Reading it costs one COM call and
-    // needs no stream of ours to be running.
-    float MeterPeak() {
-        float p = 0.f;
-        if (meter_ && SUCCEEDED(meter_->GetPeakValue(&p))) return p;
-        return 1.f;  // no meter: never trust silence, so deep idle can't strand us
+    // The endpoint's own peak meter, 0..1 (the loudest channel, before Input
+    // Gain). Reading it costs one COM call and needs no stream of ours to be
+    // running. False when there is no meter or the read failed; the caller
+    // then must not trust silence (and MeterOk() turns false, so deep idle
+    // isn't entered again on this stream).
+    bool ReadMeter(float* peak) {
+        *peak = 0.f;
+        if (!meter_) return false;
+        HRESULT hr = meter_->GetPeakValue(peak);
+        meterOk_ = SUCCEEDED(hr);
+        return meterOk_;
     }
 
     // ---- Per frame ------------------------------------------------------------------
-    // Drains the loopback buffer, runs the analysis the settings ask for, and
+    // Drains whatever has arrived into the analysis inputs (rings, meters)
+    // without analysing it. Cheap: what trickle does on each audio event.
+    // Returns true when the audio since the last Frame() got loud enough to
+    // be worth looking at now: above the audible level and 6 dB above what
+    // the last frame saw, so a steady noise floor above -70 dBFS (a hum on a
+    // virtual cable, an app's dither) doesn't turn every event into a frame,
+    // while music starting still does at once.
+    bool Pump() {
+        SyncConfig();
+        if (client_ && !stopped_) pendingGot_ += Drain();
+        float trigger = std::max(kVizAudibleLin, 2.f * lastFramePeak_);
+        return pendingGot_ > 0 && blockPeak_ > trigger;
+    }
+
+    // Drains the stream, runs the analysis the settings ask for, and
     // publishes everything the renderer reads. dt is the time since the last
     // call, which the ballistics and the classic silence decay are scaled by.
-    void Frame(double dt) {
-        SyncConfig();
+    // Returns false when nothing the renderer reads has changed (settled
+    // digital silence), so an idle caller can skip the render tick.
+    bool Frame(double dt) {
+        Pump();
         dt = std::clamp(dt, 0.0005, 0.25);
-        int got = client_ && !stopped_ ? Drain() : 0;
-        PublishScope();
-        if (cfg_.precision) PrecisionFrame(dt, got);
-        else ClassicFrame(dt, got);
-        if (cfg_.wantLoudness || cfg_.wantGonio) PublishMeters();
-        if (cfg_.wantGonio && got > 0) PublishGonio();
+        int got = pendingGot_;
+        bool changed = PublishScope();
+        if (cfg_.precision) changed |= PrecisionFrame(dt, got);
+        else {
+            ClassicFrame(dt, got);
+            changed = true;
+        }
+        if (cfg_.wantLoudness || cfg_.wantGonio) changed |= PublishMeters();
+        if (cfg_.wantGonio && got > 0) {
+            PublishGonio();
+            changed = true;
+        }
+        lastFramePeak_ = blockPeak_;
+        blockPeak_ = 0.f;
+        pendingGot_ = 0;
+        return changed;
     }
 
 private:
     static constexpr int RING_CAP = VIZ_FFT_SIZE_MAX * 4;
+    static constexpr ULONGLONG kRetryMinMs = 500, kRetryMaxMs = 30000, kProbeMs = 30000;
 
     void ResetAnalysis() {
         std::fill(ring_.begin(), ring_.end(), 0.f);
@@ -6320,6 +6768,10 @@ private:
         VizBandFrame empty;
         PublishBandFrame(empty);
         lastPacketQpc_ = 0;
+        blockPeak_ = lastFramePeak_ = 0.f;
+        pendingGot_ = 0;
+        zeroRun_ = 0;
+        silentFinal_ = settled_ = gpuSilentFlushed_ = false;
     }
 
     // Picks up a settings change. The precision engine also has to be rebuilt
@@ -6378,7 +6830,19 @@ private:
                 w[c] = 1.41f;
         }
         loudness_.Configure((int)sampleRate_, (int)std::min<UINT32>(channels_, ttdsp::LoudnessMeter::kMaxCh), w);
+        loudness_.SetTruePeak(cfg_.wantTruePeak);
         correlation_.Configure((int)sampleRate_, 300.0);
+        // Digital silence (see PrecisionFrame): zeros enough to fill the
+        // deepest tier's whole ring (2 N at fs / 16) plus every decimator's
+        // history, after which every input the analysis can see is zero.
+        {
+            int deepest = 0;
+            if (cfg_.precision) deepest = spec_.TierUsed(2) ? 2 : spec_.TierUsed(1) ? 1 : 0;
+            silentNeeded_ = ((long long)2 * std::max(256, spec_.Cfg().fftSize) << (2 * deepest)) + 1024;
+            zeroRun_ = 0;
+            silentFinal_ = settled_ = gpuSilentFlushed_ = false;
+        }
+        lastMeters_.valid = false;  // publish the meters on the next frame whatever they read
         lastTrackTick_ = g_nowPlayingChangedTick.load(std::memory_order_relaxed);
     }
 
@@ -6398,8 +6862,7 @@ private:
         float inputGainLin = (g_settings.inputGainDb == 0.0f) ? 1.0f : powf(10.f, g_settings.inputGainDb / 20.f);
         UINT32 ch = std::max<UINT32>(1, channels_);
         float monoScale = inputGainLin / (float)ch;
-        int total = 0;
-        blockPeak_ = 0.f;
+        int total = 0;  // blockPeak_ accumulates until Frame() takes it
 
         while (packetSize > 0) {
             BYTE* pData = nullptr;
@@ -6434,39 +6897,57 @@ private:
     // precision engine's chosen channel, loudness, correlation, goniometer.
     // A silent packet (pData null) is real silence of known length: it is fed
     // to the precision engine and the meters as zeros, so they decay on time,
-    // while the classic ring, as in 1.5, is left alone.
+    // while the classic ring, as in 1.5, is left alone. Each consumer only
+    // gets work done for it when it is in use: the interleaved copy for
+    // loudness, L/R correlation for the full loudness readout or the
+    // Goniometer, the stereo history for the Goniometer.
     void ConvertPacket(const BYTE* pData, UINT32 frames, UINT32 ch, float gain, float monoScale) {
         const bool prec = cfg_.precision;
         const bool loud = cfg_.wantLoudness;
-        const bool stereoWork = loud || cfg_.wantGonio;
+        const bool corr = cfg_.wantCorrelation;
+        const bool gonio = cfg_.wantGonio;
         if (prec) mono_.resize(frames);
-        if (stereoWork) {
-            inter_.resize((size_t)frames * ch);
-            stereo_.resize((size_t)frames * 2);
+        if (loud) inter_.resize((size_t)frames * ch);
+        if (gonio) stereo_.resize((size_t)frames * 2);
+        if (!pData) {
+            if (prec) {
+                // Once the analysis holds nothing but zeros, more zeros change
+                // none of its state, so they needn't be pushed.
+                if (zeroRun_ < silentNeeded_) {
+                    std::fill(mono_.begin(), mono_.end(), 0.f);
+                    spec_.Push(mono_.data(), (int)frames);
+                }
+                zeroRun_ += frames;
+            }
+            if (loud) {
+                std::fill(inter_.begin(), inter_.end(), 0.f);
+                loudness_.Process(inter_.data(), (int)frames, (int)ch);
+            }
+            if (corr) correlation_.PushSilence((int)frames);
+            if (gonio) {
+                std::fill(stereo_.begin(), stereo_.end(), 0.f);
+                AppendGonio(frames);
+            }
+            return;
         }
         const float* f32 = reinterpret_cast<const float*>(pData);
         const INT16* i16 = reinterpret_cast<const INT16*>(pData);
+        int lastNonZero = -1;
         for (UINT32 f = 0; f < frames; f++) {
             float l = 0.f, r = 0.f, sum = 0.f;
-            if (pData) {
-                for (UINT32 c = 0; c < ch; c++) {
-                    float v = isFloat_ ? f32[f * ch + c] : i16[f * ch + c] / 32768.f;
-                    sum += v;
-                    if (stereoWork) inter_[(size_t)f * ch + c] = v * gain;
-                    if (c == 0) l = v;
-                    if (c == 1) r = v;
-                }
-                if (ch == 1) r = l;
-                float mono = sum * monoScale;
-                ring_[ringHead_] = mono;
-                ringHead_ = (ringHead_ + 1) % RING_CAP;
-                if (ringCount_ < RING_CAP) ringCount_++;
-                blockPeak_ = std::max(blockPeak_, fabsf(mono));
-                lastAudioTick_ = GetTickCount64();
-                scopeFlatPublished_ = false;
-            } else if (stereoWork) {
-                for (UINT32 c = 0; c < ch; c++) inter_[(size_t)f * ch + c] = 0.f;
+            for (UINT32 c = 0; c < ch; c++) {
+                float v = isFloat_ ? f32[f * ch + c] : i16[f * ch + c] / 32768.f;
+                sum += v;
+                if (loud) inter_[(size_t)f * ch + c] = v * gain;
+                if (c == 0) l = v;
+                if (c == 1) r = v;
             }
+            if (ch == 1) r = l;
+            float mono = sum * monoScale;
+            ring_[ringHead_] = mono;
+            ringHead_ = (ringHead_ + 1) % RING_CAP;
+            if (ringCount_ < RING_CAP) ringCount_++;
+            blockPeak_ = std::max(blockPeak_, fabsf(mono));
             l *= gain;
             r *= gain;
             if (prec) {
@@ -6476,40 +6957,54 @@ private:
                     case VizChannel::Right: v = r; break;
                     case VizChannel::Mid: v = 0.5f * (l + r); break;
                     case VizChannel::Side: v = 0.5f * (l - r); break;
-                    default: v = sum * monoScale; break;
+                    default: v = mono; break;
                 }
                 mono_[f] = v;
+                if (v != 0.f) lastNonZero = (int)f;
             }
-            if (stereoWork) {
+            if (corr) correlation_.Push(l, r);
+            if (gonio) {
                 stereo_[2 * f] = l;
                 stereo_[2 * f + 1] = r;
-                correlation_.Push(l, r);
             }
         }
-        if (prec) spec_.Push(mono_.data(), (int)frames);
+        // One clock read per packet (1.5 read it per sample).
+        if (frames > 0) {
+            lastAudioTick_ = GetTickCount64();
+            scopeFlatPublished_ = false;
+        }
+        if (prec) {
+            if (lastNonZero >= 0) {
+                if (zeroRun_ >= silentNeeded_) wakeFromSilence_ = true;
+                zeroRun_ = (long long)frames - 1 - lastNonZero;
+            } else {
+                zeroRun_ += frames;
+            }
+            spec_.Push(mono_.data(), (int)frames);
+        }
         if (loud) loudness_.Process(inter_.data(), (int)frames, (int)ch);
-        if (cfg_.wantGonio) {
-            // Keep the newest 2048 stereo frames.
-            const size_t keep = 2048;
-            for (UINT32 f = 0; f < frames; f++) {
-                gonioPending_.push_back(stereo_[2 * f]);
-                gonioPending_.push_back(stereo_[2 * f + 1]);
-            }
-            if (gonioPending_.size() > keep * 2)
-                gonioPending_.erase(gonioPending_.begin(), gonioPending_.end() - keep * 2);
-        }
+        if (gonio) AppendGonio(frames);
+    }
+
+    void AppendGonio(UINT32 frames) {
+        // Keep the newest 2048 stereo frames.
+        const size_t keep = 2048;
+        gonioPending_.insert(gonioPending_.end(), stereo_.begin(), stereo_.begin() + (size_t)frames * 2);
+        if (gonioPending_.size() > keep * 2)
+            gonioPending_.erase(gonioPending_.begin(), gonioPending_.end() - keep * 2);
     }
 
     // ---- Oscilloscope trace (1.5, unchanged apart from where it lives) ---------------
-    void PublishScope() {
-        if (g_settings.shape != VizShape::Oscilloscope) return;
+    // Returns whether a new trace was published.
+    bool PublishScope() {
+        if (g_settings.shape != VizShape::Oscilloscope) return false;
         static constexpr double SCOPE_HOLD_MS = 60.0;
         static constexpr double SCOPE_FADE_MS = 140.0;
         double sinceAudioMs = (double)(GetTickCount64() - lastAudioTick_);
         float staleFade = 1.0f;
         if (sinceAudioMs > SCOPE_HOLD_MS)
             staleFade = std::max(0.0f, 1.0f - (float)((sinceAudioMs - SCOPE_HOLD_MS) / SCOPE_FADE_MS));
-        if (staleFade <= 0.0f && scopeFlatPublished_) return;
+        if (staleFade <= 0.0f && scopeFlatPublished_) return false;
 
         auto ringAt = [&](int i) -> float {
             int m = i % RING_CAP;
@@ -6544,6 +7039,7 @@ private:
         }
         PublishWaveform(waveSnap);
         scopeFlatPublished_ = (staleFade <= 0.0f);
+        return true;
     }
 
     // ---- Classic engine (1.4 / 1.5 numbers, unchanged) -----------------------------------
@@ -6673,7 +7169,17 @@ private:
     }
 
     // ---- Precision engine --------------------------------------------------------------
-    void PrecisionFrame(double dt, int got) {
+    // Digital silence. Once every sample the analysis can see is an exact
+    // zero (zeroRun_ >= silentNeeded_), one last forced analysis gives the
+    // levels of pure zeros, and after that there is nothing for an FFT to
+    // find: no FFTs run until a non-zero sample arrives. The bars keep their
+    // ballistics until they are within 1e-4 of the floor (a tenth of a pixel
+    // on a 1000 px bar), are then put exactly on it and published once, and
+    // from there a frame does nothing at all and reports no change. The first
+    // non-zero sample forces every tier to be analysed on the next frame, so
+    // the bass tiers don't wait out a hop after the silence.
+    // Returns whether anything the renderer reads was published.
+    bool PrecisionFrame(double dt, int got) {
         LARGE_INTEGER q;
         QueryPerformanceCounter(&q);
         // Stream starved (nothing at all, not even silent packets, for more
@@ -6683,26 +7189,39 @@ private:
             double since = lastPacketQpc_ ? (double)(q.QuadPart - lastPacketQpc_) / (double)VizQpcFreq() : 1.0;
             if (since > 0.040) {
                 int n = std::min((int)(dt * sampleRate_), cfg_.spec.fftSize);
-                zeros_.assign((size_t)std::max(0, n), 0.f);
-                if (n > 0) spec_.Push(zeros_.data(), n);
+                if (n > 0) {
+                    if (zeroRun_ < silentNeeded_) {
+                        zeros_.assign((size_t)n, 0.f);
+                        spec_.Push(zeros_.data(), n);
+                    }
+                    zeroRun_ += n;
+                }
             }
         }
+        const bool silent = zeroRun_ >= silentNeeded_;
+        const bool force = wakeFromSilence_;
+        wakeFromSilence_ = false;
+        if (!silent) silentFinal_ = settled_ = gpuSilentFlushed_ = false;
 
         if (cfg_.workload == VizWorkload::Gpu) {
-            // The GPU does the analysis. Here: hand over fresh blocks, and
-            // judge silence from the samples themselves.
-            {
+            // The GPU does the analysis. Here: hand over fresh blocks (in
+            // silence, the all-zero ones once and then nothing), and judge
+            // silence from the samples themselves.
+            if (!silent || !gpuSilentFlushed_) {
+                bool take = force || silent;
                 std::lock_guard<std::mutex> lock(g_gpuFeed.m);
                 int n = g_gpuFeed.n;
                 if (n > 0 && g_gpuFeed.blocks.size() >= (size_t)3 * n) {
                     for (int t = 0; t < 3; t++)
-                        if (spec_.TakeTierBlock(t, &g_gpuFeed.blocks[(size_t)t * n], false)) g_gpuFeed.dirty |= 1u << t;
+                        if (spec_.TakeTierBlock(t, &g_gpuFeed.blocks[(size_t)t * n], take)) g_gpuFeed.dirty |= 1u << t;
+                    if (silent) gpuSilentFlushed_ = true;
                 }
             }
-            if (got > 0 && blockPeak_ > 0.000316f)  // -70 dBFS
+            if (got > 0 && blockPeak_ > kVizAudibleLin)
                 g_lastAudibleTickMs.store(GetTickCount64(), std::memory_order_relaxed);
-            return;
+            return true;  // the renderer runs the ballistics, so it always has work
         }
+        if (silent && settled_) return false;
 
         auto npu = [this](const float* windowed, int n, float* re, float* im) -> bool {
             if (cfg_.workload != VizWorkload::Npu) return false;
@@ -6716,32 +7235,51 @@ private:
             re[n / 2] = im[n / 2] = 0.f;  // the NPU model leaves out the Nyquist bin
             return true;
         };
-        bool fresh = spec_.Analyze(false, npu);
+        bool fresh = false;
+        if (!silentFinal_) {
+            fresh = spec_.Analyze(force || silent, npu);
+            if (silent) silentFinal_ = true;
+            if (fresh) {
+                VizPerf(kPerfAnalyses);
+                VizPerf(kPerfFfts, (uint32_t)spec_.LastFftCount());
+            }
+        }
 
         const int nb = std::min(spec_.NumBands(), VIZ_BARS_MAX);
         const float* db = spec_.LevelsDb();
         const float range = std::max(1.f, cfg_.disp.ceilDb - cfg_.disp.floorDb);
         ttdsp::DisplayMap disp = cfg_.disp;
         disp.gainDb = cfg_.sensDb + agcDb_;
-        float maxX = 0.f, rawMax = -300.f, bass = 0.f;
+        // Attack / release coefficients once per frame, not once per band.
+        const ttdsp::BallisticsCoef bc = ttdsp::BallisticsCoefs(dt, cfg_.ball, range);
+        float maxX = 0.f, rawMax = -300.f, bass = 0.f, maxLevel = 0.f;
         VizBandFrame& out = frame_;
         out.count = nb;
         out.zone[0] = out.zone[1] = out.zone[2] = 0.f;
         out.zoneCount[0] = out.zoneCount[1] = out.zoneCount[2] = 0.f;
         for (int b = 0; b < nb; b++) {
             float x = disp.ToNorm(db[b]);
-            bandLevel_[b] = ttdsp::BallisticsStep(bandLevel_[b], x, dt, cfg_.ball, range);
+            bandLevel_[b] = ttdsp::BallisticsApply(bandLevel_[b], x, bc);
             out.level[b] = bandLevel_[b];
             out.zone[bandZone_[b]] += bandLevel_[b];
             out.zoneCount[bandZone_[b]] += 1.f;
             maxX = std::max(maxX, x);
+            maxLevel = std::max(maxLevel, bandLevel_[b]);
             rawMax = std::max(rawMax, db[b]);
             if (bandBass_[b]) bass = std::max(bass, x);
+        }
+        if (silent && silentFinal_ && maxLevel < 1e-4f) {
+            for (int b = 0; b < nb; b++) bandLevel_[b] = out.level[b] = 0.f;
+            out.zone[0] = out.zone[1] = out.zone[2] = 0.f;
+            bassSlow_ = 0.f;
+            settled_ = true;
+            PublishBandFrame(out);
+            return true;
         }
 
         // Silence, judged on both the samples and the drawn level, so neither
         // a quiet hiss nor a display range set very low can hold the mod awake.
-        bool audible = got > 0 && blockPeak_ > 0.000316f && maxX > 0.02f;
+        bool audible = got > 0 && blockPeak_ > kVizAudibleLin && maxX > 0.02f;
         if (audible) g_lastAudibleTickMs.store(GetTickCount64(), std::memory_order_relaxed);
 
         // Auto Gain: lift the loudest band toward 85% of the range. Boost
@@ -6770,9 +7308,11 @@ private:
             if (hz > 0.0) g_dominantFreqHz.store((float)hz, std::memory_order_relaxed);
         }
         PublishBandFrame(out);
+        return true;
     }
 
-    void PublishMeters() {
+    // Returns whether any reading changed since the last publish.
+    bool PublishMeters() {
         // A new track starts a new integrated measurement.
         ULONGLONG tick = g_nowPlayingChangedTick.load(std::memory_order_relaxed);
         if (cfg_.loudnessResetOnTrack && tick != lastTrackTick_) {
@@ -6786,8 +7326,14 @@ private:
         v.truePeak = loudness_.TruePeakDb();
         v.correlation = correlation_.Value();
         v.valid = true;
+        bool changed = !(v.momentary == lastMeters_.momentary && v.shortTerm == lastMeters_.shortTerm &&
+                         v.integrated == lastMeters_.integrated && v.truePeak == lastMeters_.truePeak &&
+                         v.correlation == lastMeters_.correlation && lastMeters_.valid);
+        lastMeters_ = v;
+        if (!changed) return false;
         std::lock_guard<std::mutex> lock(g_meterMutex);
         g_meters = v;
+        return true;
     }
 
     void PublishGonio() {
@@ -6822,7 +7368,14 @@ private:
     ULONGLONG lastReinit_ = 0;
     std::wstring warnedSource_;  // the source last reported missing
     LONGLONG lastPacketQpc_ = 0;
-    float blockPeak_ = 0.f;
+    float blockPeak_ = 0.f;      // mono-mix peak since the last Frame(), after Input Gain
+    float lastFramePeak_ = 0.f;  // the same, for the frame before
+    int pendingGot_ = 0;         // frames drained (by Pump) since the last Frame()
+    bool loopback_ = true;
+    bool meterOk_ = false;
+    ULONGLONG retryMs_ = kRetryMinMs;
+    bool openFallback_ = false;  // the default output stands in for a source that wouldn't open
+    ULONGLONG lastProbe_ = 0;
 
     // Shared by both engines: the classic mono ring also feeds the scope.
     std::vector<float> ring_;
@@ -6847,11 +7400,14 @@ private:
     float agcDb_ = 0.f, loudEnvDb_ = -200.f, bassSlow_ = 0.f;
     VizBandFrame frame_;
     std::vector<float> mono_, zeros_, npuRe_, npuIm_;
+    long long zeroRun_ = 0, silentNeeded_ = 1LL << 62;  // digital silence, see PrecisionFrame
+    bool silentFinal_ = false, settled_ = false, gpuSilentFlushed_ = false, wakeFromSilence_ = false;
 
     // Meters
     std::vector<float> inter_, stereo_, gonioPending_;
     ttdsp::LoudnessMeter loudness_;
     ttdsp::Correlation correlation_;
+    VizMeterValues lastMeters_;
     ULONGLONG lastTrackTick_ = 0;
 };
 
@@ -7197,7 +7753,31 @@ void VizPublishEngineConfig() {
     bool readout = g_settings.peakFreqEnabled;
     c.wantDominant = readout && (g_settings.readout == VizReadout::Frequency || g_settings.readout == VizReadout::Both);
     c.wantLoudness = readout && g_settings.readout != VizReadout::Frequency;
+    // True peak and correlation are only shown by the full loudness readout
+    // (correlation also under the Goniometer), so only then are they measured.
+    c.wantTruePeak = readout && g_settings.readout == VizReadout::LoudnessFull;
     c.wantGonio = g_settings.shape == VizShape::Goniometer;
+    c.wantCorrelation = c.wantTruePeak || c.wantGonio;
+
+    // Oscilloscope and Goniometer draw no bars, but the bands still feed the
+    // colour zones (low < 300 Hz < mid < 2.5 kHz < high, used as ratios), the
+    // beat (< 150 Hz) and, for the Frequency readout, the peak search. 24
+    // bands cover all of that instead of up to 2048: on the user's own scale,
+    // so each zone keeps its share of the bands and the colours mix as before
+    // (IEC and musical layouts, which are logarithmic, become Log; 24 log
+    // bands are 0.4 octave each, 7 of them under 150 Hz for the beat). The
+    // bass tiers are dropped too unless the Frequency readout is on: without
+    // them its resolution in the bass falls to one top-tier bin (fs / FFT
+    // size, 23 Hz at 2048) and it can't report below about 2 bins (47 Hz),
+    // which is why they stay when it's shown. GPU analysis keeps the full
+    // layout (its band buffers follow the bar layout).
+    if (c.precision && c.workload != VizWorkload::Gpu &&
+        (g_settings.shape == VizShape::Oscilloscope || g_settings.shape == VizShape::Goniometer)) {
+        if (s.layout != ttdsp::BandLayout::Scale) s.scale = ttdsp::FreqScale::Log;
+        s.layout = ttdsp::BandLayout::Scale;
+        s.bars = 24;
+        if (!c.wantDominant) s.maxTier = 0;
+    }
     c.beat = g_settings.beatFlashEnabled;
     c.loudnessResetOnTrack = g_settings.loudnessResetOnTrack;
     {
@@ -7746,6 +8326,10 @@ struct VizTermGrid {
 };
 VizTermGrid g_termGrid;
 std::vector<float> g_termHistory;  // waterfall: rows x cols levels, row 0 newest
+// Bumped by VizBuildTermGrid whenever the grid's size or any cell changes
+// (Waterfall scrolls included), so the renderer can tell a changed grid from an
+// unchanged one without hashing 65,536 cells every tick.
+uint32_t g_termGridSerial = 0;
 float g_termScrollAcc = 0.f;
 
 // Cell size for the terminal font, in whole pixels so glyphs land 1:1.
@@ -7834,7 +8418,56 @@ void VizTermMeterLevels(float out[4]) {
     for (int i = 0; i < 4; i++) out[i] = std::clamp(out[i], 0.f, 1.f);
 }
 
+// ---- waterfall scroll: begin (src/tests_features/test_waterfall.cpp compiles this block from v2b.cpp)
+// Scrolls the waterfall history (rows x cols, row 0 newest) down by `steps`
+// rows and writes the current levels (`newest`, clamped at 0) into row 0. The
+// rows a multi-row step opens up between the new row 0 and the previous newest
+// row are moments the frame skipped over: they are filled by interpolating
+// between the two, so a long frame or a fast Scroll Rate leaves neither stale
+// lines nor blank stripes. A step of the whole height or more leaves no older
+// row to keep, so every row starts again from the current levels.
+void VizTermScrollHistory(float* hist, int rows, int cols, int steps, const float* newest) {
+    if (!hist || rows <= 0 || cols <= 0) return;
+    const size_t rowLen = (size_t)cols;
+    if (steps >= rows) {
+        for (int c = 0; c < cols; c++) hist[c] = std::max(0.f, newest[c]);
+        for (int r = 1; r < rows; r++) memcpy(hist + (size_t)r * rowLen, hist, sizeof(float) * rowLen);
+        return;
+    }
+    if (steps > 0) {
+        memmove(hist + (size_t)steps * rowLen, hist, sizeof(float) * (size_t)(rows - steps) * rowLen);
+        const float* prev = hist + (size_t)steps * rowLen;  // the previous newest row
+        for (int r = 1; r < steps; r++) {
+            const float t = (float)r / (float)steps;
+            float* row = hist + (size_t)r * rowLen;
+            for (int c = 0; c < cols; c++) {
+                float now = std::max(0.f, newest[c]);
+                row[c] = now + (prev[c] - now) * t;
+            }
+        }
+    }
+    for (int c = 0; c < cols; c++) hist[c] = std::max(0.f, newest[c]);
+}
+// ---- waterfall scroll: end
+
+void VizBuildTermGridCells();
 void VizBuildTermGrid() {
+    // The previous grid, kept to compare against: a straight memcmp of at most
+    // 256 KB, several times cheaper than hashing it, and the copy is only
+    // taken when something changed.
+    static std::vector<uint32_t> s_prev;
+    static int s_cols = -1, s_rows = -1;
+    VizBuildTermGridCells();
+    const VizTermGrid& g = g_termGrid;
+    if (g.cols != s_cols || g.rows != s_rows || g.cells != s_prev) {
+        g_termGridSerial++;
+        s_cols = g.cols;
+        s_rows = g.rows;
+        s_prev = g.cells;
+    }
+}
+
+void VizBuildTermGridCells() {
     VizTermGrid& g = g_termGrid;
     VizTermGridSize(&g.cols, &g.rows);
     g.cells.assign((size_t)g.cols * g.rows, TermCell(L' ', 0));
@@ -7876,11 +8509,7 @@ void VizBuildTermGrid() {
         g_termScrollAcc += g_frameDt * (float)std::clamp(g_settings.termScrollRate, 1, 120);
         int steps = std::min((int)g_termScrollAcc, g.rows);
         g_termScrollAcc -= (float)(int)g_termScrollAcc;
-        if (steps > 0) {
-            memmove(&g_termHistory[(size_t)steps * g.cols], &g_termHistory[0],
-                    sizeof(float) * (size_t)(g.rows - steps) * g.cols);
-        }
-        for (int c = 0; c < g.cols; c++) g_termHistory[c] = std::max(0.f, g_vizPeak[c]);
+        VizTermScrollHistory(g_termHistory.data(), g.rows, g.cols, steps, g_vizPeak);
         for (int r = 0; r < g.rows; r++) {
             for (int c = 0; c < g.cols; c++) {
                 float v = g_termHistory[(size_t)r * g.cols + c];
@@ -8078,17 +8707,29 @@ bool ComputeVizLayout(VizLayout* out) {
             textTop = std::max(textTop, fontPx * lines + 8.0f * g_dpiScale + npOffY);
             textAnchorSide = std::max(textAnchorSide, 100.0f * g_dpiScale);
         } else {
-            // Inside the panel: only an offset can take it past the edge.
+            // Inside the panel, in the padding band (VizDrawTextOverlays): Panel
+            // Bottom starts at the bars' bottom edge and Panel Top at the panel's
+            // top edge, both npHeight tall. Padding smaller than the text (or
+            // the background off, padding 0) lets it hang past the panel's
+            // bottom: reserve that overflow, plus the offset room as before.
+            float npHeight = fontPx * ((g_settings.npLayout == VizNpLayout::TwoLines) ? 2.7f : 1.6f);
+            float overflow = (g_settings.npPlacement == VizNpPlacement::PanelBottom)
+                                 ? npHeight - padB
+                                 : npHeight - padT - totalHeight - padB;
             textTop = std::max(textTop, npOffY);
+            textBottom = std::max(textBottom, std::max(0.f, overflow) + npOffY);
         }
         textBottom = std::max(textBottom, npOffY);
         extraSide  = std::max(extraSide, npOffX);
     }
-    if (g_settings.progressEnabled && g_settings.progressPlacement != VizProgressPlacement::PanelBottom) {
+    if (g_settings.progressEnabled) {
         float need = (float)(std::max(1, g_settings.progressHeight) + g_settings.progressGap) * g_dpiScale +
                      2.0f * g_dpiScale;
         if (g_settings.progressPlacement == VizProgressPlacement::Above) textTop += need;
-        else textBottom = std::max(textBottom, need);
+        else if (g_settings.progressPlacement == VizProgressPlacement::Below) textBottom = std::max(textBottom, need);
+        // Panel Bottom: drawn at the bars' bottom edge + gap (VizProgressRect),
+        // so whatever of gap + height the bottom padding doesn't cover.
+        else textBottom = std::max(textBottom, std::max(0.f, need - padB));
     }
     if (g_settings.peakFreqEnabled) {
         float pfOffX = reserveFor(std::abs(EffectivePeakFreqOffsetX()) + pfPanel);
@@ -8684,6 +9325,17 @@ bool g_menuButtonDown = false;          // hook thread only
 // with its modifier held keeps priority.
 bool VizMenuHook(WPARAM wParam, const MSLLHOOKSTRUCT* info) {
     if (g_settings.contextMenu == VizContextMenu::Off) return false;
+    // Our menu is up: everything goes through, so a click elsewhere (either
+    // button) dismisses it the normal way. Only the release of a press this
+    // hook already swallowed is swallowed too, so the desktop never gets an
+    // unpaired button-up.
+    if (g_menuOpen.load(std::memory_order_acquire)) {
+        if (wParam == WM_RBUTTONUP && g_menuButtonDown) {
+            g_menuButtonDown = false;
+            return true;
+        }
+        return false;
+    }
     if (wParam == WM_RBUTTONDOWN) {
         g_menuButtonDown = false;
         if (g_settings.dragEnabled && g_settings.dragButton == VizDragButton::Right && DragModifierHeld())
@@ -8692,6 +9344,11 @@ bool VizMenuHook(WPARAM wParam, const MSLLHOOKSTRUCT* info) {
             return false;
         // Hidden for a fullscreen app or a covering window: nothing to click.
         if (g_fullscreenPaused.load(std::memory_order_relaxed) && !g_userPaused.load(std::memory_order_relaxed))
+            return false;
+        // Faded out by Auto-Hide: the draw rect is still valid, but there is
+        // nothing visible there, so the click belongs to the desktop. (Pause
+        // Visualizer still catches it: that is how it gets unticked.)
+        if (g_vizSceneHidden.load(std::memory_order_relaxed) && !g_userPaused.load(std::memory_order_relaxed))
             return false;
         if (!PointInVisualizerBounds(info->pt) || !VizDesktopUnderPoint(info->pt)) return false;
         g_menuButtonDown = true;
@@ -9617,7 +10274,7 @@ StructuredBuffer<float> gWave REG(t2);      // oscilloscope trace, 256 samples, 
 StructuredBuffer<float4> gPoints REG(t3);   // goniometer: side, mid, alpha, -
 Texture2D<float4> gPlate REG(t4);           // baked background panel, premultiplied
 SamplerState gSamp REG(s0);
-StructuredBuffer<uint> gCells REG(t10);     // Terminal: one cell per glyph, char | colour << 8
+StructuredBuffer<uint> gCells REG(t10);     // Terminal: glyph cells only, char | colour << 8 | grid index << 16
 Texture2D<float4> gGlyphs REG(t11);         // Terminal: printable ASCII baked white, premultiplied
 
 // Analysis (compute shaders, Workload = GPU).
@@ -9897,15 +10554,17 @@ Prim CorrPrim(uint j) {
 // One terminal cell: a glyph from the atlas (printable ASCII from 32, laid
 // out fTermAtlasCols to a row, one cell each), in one of five palette
 // colours. Cells are whole pixels and drawn 1:1, so pixel fonts stay sharp.
+// Only cells with a glyph are uploaded, each as char | colour << 8 |
+// grid index << 16, so the instance count is the number of glyphs.
 Prim TermPrim(uint id) {
     uint cols = max(fTermCols, 1u);
-    if (id >= cols * fTermRows) return NoPrim();
     uint cell = gCells[id];
     uint ch = cell & 127u;
-    if (ch <= 32u) return NoPrim();
+    uint idx = cell >> 16u;
+    if (ch <= 32u || idx >= cols * fTermRows) return NoPrim();
     uint ci = min((cell >> 8u) & 7u, 4u);
-    uint col = id % cols;
-    uint row = id / cols;
+    uint col = idx % cols;
+    uint row = idx / cols;
     float cw = fTermGeom.z, chh = fTermGeom.w;
     float x0 = fTermGeom.x + (float)col * cw;
     float y0 = fTermGeom.y + (float)row * chh;
@@ -10399,7 +11058,22 @@ struct State {
     ComPtr<ID3D11ShaderResourceView> barsDynSRV, globalsDynSRV, waveSRV, pointsSRV;
     ComPtr<ID3D11SamplerState> sampler;
     ComPtr<ID3D11BlendState> blend;
+    ComPtr<ID3D11BlendState> blendOff;  // the plate: it is the first thing drawn, so it only overwrites
     ComPtr<ID3D11RasterizerState> raster;
+
+    // What each dynamic buffer holds, so one whose contents haven't changed
+    // isn't mapped again (WRITE_DISCARD is a driver call and a buffer rename
+    // every time). Cleared whenever the buffers are (re)created.
+    bool uploadsValid = false;
+    uint64_t barsKey = 0, globalsKey = 0, waveKey = 0;
+    uint32_t pointsSerial = 0;
+    int pointsCount = 0;
+    bool cellsValid = false;
+    uint32_t cellsSerial = 0;
+    uint64_t cellsShape = 0;
+    UINT termCount = 0;  // non-blank cells uploaded (the Terminal draw's instance count)
+    bool frameCBValid = false;
+    FrameCB frameCBLast = {};
 
     // Panel surface.
     ComPtr<IDXGISwapChain1> sc;
@@ -10410,6 +11084,12 @@ struct State {
     int offX = 0, offY = 0;  // in layout-local pixels
     bool opaque = false;
     bool visualAttached = false;
+    // DirectComposition properties as last committed, so a still panel
+    // costs no Commit (each one is a batch sent to DWM).
+    bool dcValid = false;
+    float dcOffX = 0.f, dcOffY = 0.f;
+    bool dcClipOn = false;
+    float dcClip[8] = {};  // left, top, right, bottom, radii TL TR BR BL
 
     // Baked background, the size of the panel surface.
     ComPtr<ID3D11Texture2D> plateTex;
@@ -10435,6 +11115,7 @@ struct State {
     bool forcePresent = true;
     uint64_t textKey = 0;
     bool textForce = true;
+    bool textDetached = false;  // the text surface is off its visual (nothing to show)
     bool blankPresented = false;
 
     // Terminal shape: the cell grid and the baked glyph atlas, created on
@@ -10459,7 +11140,12 @@ State g;
 inline void Mix(uint64_t& h, uint64_t v) {
     h ^= v + 0x9E3779B97F4A7C15ull + (h << 6) + (h >> 2);
 }
-inline void MixF(uint64_t& h, float v, float q) { Mix(h, (uint64_t)(int64_t)llroundf(v * q)); }
+// Quantised: v to the nearest 1/q. Rounded with a plain conversion rather than
+// llroundf, a library call: about a third off hashing 256 bars and caps.
+inline void MixF(uint64_t& h, float v, float q) {
+    float r = v * q;
+    Mix(h, (uint64_t)(int64_t)(r + (r >= 0.f ? 0.5f : -0.5f)));
+}
 
 // ---- Setup -------------------------------------------------------------------------------
 bool Compile() {
@@ -10586,6 +11272,14 @@ bool EnsureDevice() {
     bd.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
     bd.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
     if (FAILED(g_d3dDevice->CreateBlendState(&bd, &g.blend))) return false;
+    // The plate is drawn first, over a cleared target: premultiplied "over"
+    // onto zero is the source itself, so blending only adds a read of the
+    // whole target. Without it the plate just writes.
+    bd.RenderTarget[0].BlendEnable = FALSE;
+    if (FAILED(g_d3dDevice->CreateBlendState(&bd, &g.blendOff))) return false;
+    g.uploadsValid = false;
+    g.cellsValid = false;
+    g.frameCBValid = false;
 
     D3D11_RASTERIZER_DESC rd = {};
     rd.FillMode = D3D11_FILL_SOLID;
@@ -10611,14 +11305,36 @@ void ReleaseGpuAnalysis() {
     g.statsUAV.Reset();
 }
 
+// The text surface (g_compositionVisual: the Direct2D swap chain, the size of
+// the whole widget box) sits over the panel. Empty, DWM would still read and
+// blend it in every frame it composes there, so while there is no text it is
+// taken off its visual, and put back right after the first frame drawn on it.
+void ShowTextSurface(bool show) {
+    if (show != g.textDetached) return;  // already so
+    if (!g_compositionVisual || !g_compositionDevice || (show && !g_swapChain)) {
+        g.textDetached = false;
+        return;
+    }
+    if (FAILED(g_compositionVisual->SetContent(show ? (IUnknown*)g_swapChain.Get() : nullptr))) return;
+    g_compositionDevice->Commit();
+    VizPerf(kPerfCommits);
+    g.textDetached = !show;
+}
+
 // The panel surface and its visual. Called before the composition device goes.
 void ReleaseSurface() {
+    ShowTextSurface(true);  // the Direct2D path draws everything on the text surface
     if (!g.sc && !g.visual && !g.plateTex) return;  // nothing to release (called every Direct2D frame)
     if (g.visual && g.visualAttached && g_rootVisual) {
         g_rootVisual->RemoveVisual(g.visual.Get());
-        if (g_compositionDevice) g_compositionDevice->Commit();
+        if (g_compositionDevice) {
+            g_compositionDevice->Commit();
+            VizPerf(kPerfCommits);
+        }
     }
     g.visualAttached = false;
+    g.dcValid = false;
+    g.dcClipOn = false;
     g.rtv.Reset();
     g.sc.Reset();
     g.clip.Reset();
@@ -10644,7 +11360,8 @@ void ReleaseDevice() {
     g.barsDynSRV.Reset(); g.globalsDynSRV.Reset(); g.waveSRV.Reset(); g.pointsSRV.Reset();
     g.cellsDyn.Reset(); g.cellsSRV.Reset(); g.glyphTex.Reset(); g.glyphSRV.Reset();
     g.glyphKey = 0;
-    g.sampler.Reset(); g.blend.Reset(); g.raster.Reset();
+    g.sampler.Reset(); g.blend.Reset(); g.blendOff.Reset(); g.raster.Reset();
+    g.uploadsValid = g.cellsValid = g.frameCBValid = false;
     if (g.ctx) g.ctx->ClearState();
     g.ctx.Reset();
     g.deviceReady = false;
@@ -10681,7 +11398,9 @@ bool EnsureSurface(int offX, int offY, UINT w, UINT h, bool opaque, const D2D1_R
     w = std::max(1u, w);
     h = std::max(1u, h);
     bool recreate = !g.sc || opaque != g.opaque;
+    bool dirty = false;  // something DirectComposition needs to be told
     if (recreate) {
+        dirty = true;
         g.rtv.Reset();
         g.sc.Reset();
         DXGI_SWAP_CHAIN_DESC1 scd = {};
@@ -10706,6 +11425,7 @@ bool EnsureSurface(int offX, int offY, UINT w, UINT h, bool opaque, const D2D1_R
         if (FAILED(g.sc->ResizeBuffers(0, w, h, DXGI_FORMAT_UNKNOWN, 0))) return false;
         g.w = w;
         g.h = h;
+        dirty = true;
     }
     if (!g.rtv) {
         ComPtr<ID3D11Texture2D> back;
@@ -10718,31 +11438,55 @@ bool EnsureSurface(int offX, int offY, UINT w, UINT h, bool opaque, const D2D1_R
         // Below the text surface, so readouts placed over the bars stay on top.
         if (FAILED(g_rootVisual->AddVisual(g.visual.Get(), FALSE, g_compositionVisual.Get()))) return false;
         g.visualAttached = true;
+        dirty = true;
     }
-    g.visual->SetOffsetX(layoutOriginX + (float)offX);
-    g.visual->SetOffsetY(layoutOriginY + (float)offY);
+    // Offset and clip are set, and committed, only when they change: a
+    // Commit sends a batch to DWM even when every value in it is the same,
+    // and this runs on every render tick, including the ones the
+    // skip-unchanged-frames test then doesn't draw.
+    const float ox = layoutOriginX + (float)offX, oy = layoutOriginY + (float)offY;
+    if (dirty || !g.dcValid || ox != g.dcOffX || oy != g.dcOffY) {
+        g.visual->SetOffsetX(ox);
+        g.visual->SetOffsetY(oy);
+        g.dcOffX = ox;
+        g.dcOffY = oy;
+        dirty = true;
+    }
+    const float clipNow[8] = {clipRect.left, clipRect.top, clipRect.right, clipRect.bottom,
+                              clipRadii[0],  clipRadii[1], clipRadii[2],   clipRadii[3]};
     if (opaque) {
         if (!g.clip && FAILED(g_compositionDevice->CreateRectangleClip(&g.clip))) return false;
-        g.clip->SetLeft(clipRect.left);
-        g.clip->SetTop(clipRect.top);
-        g.clip->SetRight(clipRect.right);
-        g.clip->SetBottom(clipRect.bottom);
-        g.clip->SetTopLeftRadiusX(clipRadii[0]);
-        g.clip->SetTopLeftRadiusY(clipRadii[0]);
-        g.clip->SetTopRightRadiusX(clipRadii[1]);
-        g.clip->SetTopRightRadiusY(clipRadii[1]);
-        g.clip->SetBottomRightRadiusX(clipRadii[2]);
-        g.clip->SetBottomRightRadiusY(clipRadii[2]);
-        g.clip->SetBottomLeftRadiusX(clipRadii[3]);
-        g.clip->SetBottomLeftRadiusY(clipRadii[3]);
-        g.visual->SetClip(g.clip.Get());
-    } else {
+        if (dirty || !g.dcValid || !g.dcClipOn || memcmp(clipNow, g.dcClip, sizeof(clipNow)) != 0) {
+            g.clip->SetLeft(clipRect.left);
+            g.clip->SetTop(clipRect.top);
+            g.clip->SetRight(clipRect.right);
+            g.clip->SetBottom(clipRect.bottom);
+            g.clip->SetTopLeftRadiusX(clipRadii[0]);
+            g.clip->SetTopLeftRadiusY(clipRadii[0]);
+            g.clip->SetTopRightRadiusX(clipRadii[1]);
+            g.clip->SetTopRightRadiusY(clipRadii[1]);
+            g.clip->SetBottomRightRadiusX(clipRadii[2]);
+            g.clip->SetBottomRightRadiusY(clipRadii[2]);
+            g.clip->SetBottomLeftRadiusX(clipRadii[3]);
+            g.clip->SetBottomLeftRadiusY(clipRadii[3]);
+            g.visual->SetClip(g.clip.Get());
+            memcpy(g.dcClip, clipNow, sizeof(clipNow));
+            g.dcClipOn = true;
+            dirty = true;
+        }
+    } else if (dirty || !g.dcValid || g.dcClipOn) {
         g.visual->SetClip((IDCompositionClip*)nullptr);
+        g.dcClipOn = false;
+        dirty = true;
     }
     if (offX != g.offX || offY != g.offY) g.forcePresent = true;
     g.offX = offX;
     g.offY = offY;
-    g_compositionDevice->Commit();
+    if (dirty) {
+        g_compositionDevice->Commit();
+        VizPerf(kPerfCommits);
+        g.dcValid = true;
+    }
     return true;
 }
 
@@ -11099,9 +11843,11 @@ int BuildGonioPoints(float* out4, int maxPoints) {
 constexpr UINT kAtlasCols = 16, kAtlasRows = 6;
 
 bool EnsureTermResources() {
-    if (!g.cellsDyn &&
-        FAILED(MakeStructured(4, VIZ_TERM_MAX_CELLS, true, false, nullptr, g.cellsDyn, &g.cellsSRV, nullptr)))
-        return false;
+    if (!g.cellsDyn) {
+        if (FAILED(MakeStructured(4, VIZ_TERM_MAX_CELLS, true, false, nullptr, g.cellsDyn, &g.cellsSRV, nullptr)))
+            return false;
+        g.cellsValid = false;
+    }
     if (!VizTermEnsureFormat() || !g_d2dDevice) return false;
     uint64_t key = 1469598103934665603ull;
     for (wchar_t c : g_termFormatFont) Mix(key, (uint64_t)c);
@@ -11228,6 +11974,9 @@ bool Render(const FrameInputs& in) {
         if (!g.blankPresented) {
             PresentBlank();
             g.blankPresented = true;
+            VizPerf(kPerfPresents);
+        } else {
+            VizPerf(kPerfSkipped);
         }
         return true;
     }
@@ -11301,7 +12050,9 @@ bool Render(const FrameInputs& in) {
     setCol(f.peakColor, RGBA{g_settings.peakHoldA, g_settings.peakHoldR, g_settings.peakHoldG, g_settings.peakHoldB});
     setCol(f.beatColor, RGBA{g_settings.beatFlashA, g_settings.beatFlashR, g_settings.beatFlashG, g_settings.beatFlashB});
     f.beatIntensity = g_settings.beatFlashIntensity / 100.0f;
-    f.rainbowBase = in.rainbowBase;
+    // Only Rainbow Cycle reads the hue clock; leaving it at 0 otherwise keeps
+    // the frame constants unchanged (and un-uploaded) from frame to frame.
+    f.rainbowBase = g_settings.colorMode == VizColorMode::RainbowCycle ? in.rainbowBase : 0.f;
     f.sceneAlpha = in.sceneAlpha;
     f.capThickness = std::max(1.5f, 2.0f * g_dpiScale);
     f.dotStep = barW + barGap;
@@ -11321,7 +12072,7 @@ bool Render(const FrameInputs& in) {
     f.gonioDot = std::max(0.75f, barW * 0.2f);
     f.corrH = std::max(2.0f, 3.0f * g_dpiScale);
     f.corrY = f.center[1] + maxSize * 0.92f - f.corrH;
-    f.corr = in.correlation;
+    f.corr = shape == VizShape::Goniometer ? in.correlation : 0.f;
     // Scope colour: the Colour Mode rules for a single line, as in 1.5.
     {
         RGBA col = in.c1;
@@ -11352,7 +12103,10 @@ bool Render(const FrameInputs& in) {
     f.plateRect[2] = (float)g.w;
     f.plateRect[3] = (float)g.h;
 
-    // ---- Uploads (CPU paths) --------------------------------------------------------
+    // ---- Did anything change? ---------------------------------------------------------
+    // Hashed from the CPU-side inputs first; the dynamic buffers are mapped
+    // only when the frame will actually be drawn, and then only the ones
+    // whose contents changed since their last upload.
     const float rangePx = std::max(0.f, maxSize - idleSize);
     float pulse = g_beatPulse.load(std::memory_order_relaxed);
     uint64_t hash = 1469598103934665603ull;
@@ -11373,25 +12127,31 @@ bool Render(const FrameInputs& in) {
     if (g_settings.beatFlashEnabled) MixF(hash, pulse, 128.f);
     Mix(hash, in.dragPause);
 
-    D3D11_MAPPED_SUBRESOURCE ms;
     const bool drawBars = !in.dragPause;
-    if (!gpuOk && drawBars) {
-        if (SUCCEEDED(g.ctx->Map(g.barsDyn.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
-            float* p = (float*)ms.pData;
-            for (int i = 0; i < bars; i++) {
-                float lv = std::max(0.f, g_vizPeak[i]), pk = g_vizPeakHold[i];
-                p[2 * i] = lv;
-                p[2 * i + 1] = pk;
-                MixF(hash, lv * rangePx, 4.f);
-                if (g_settings.peakHoldEnabled) MixF(hash, pk * rangePx, 4.f);
-            }
-            g.ctx->Unmap(g.barsDyn.Get(), 0);
+    const bool cpuBars = !gpuOk && drawBars;
+    // Bars: what is drawn, to a quarter pixel. The same key decides whether
+    // barsDyn needs new contents: a change smaller than that can't be seen.
+    uint64_t barsKey = 0, globalsKey = 0;
+    // Globals hold only what the shader reads: the beat pulse when Beat Flash
+    // is on, the zone energies when the multiband colour is (both are gated
+    // by fFlags there). Anything else would change, and re-upload, every frame.
+    const float glPulse = g_settings.beatFlashEnabled ? pulse : 0.f;
+    const bool glZones = g_settings.oscilloscopeMultibandEnabled;
+    const float glZ[3] = {glZones ? in.zones[0] : 0.f, glZones ? in.zones[1] : 0.f, glZones ? in.zones[2] : 0.f};
+    if (cpuBars) {
+        barsKey = 1469598103934665603ull;
+        Mix(barsKey, (uint64_t)bars);
+        const bool caps = g_settings.peakHoldEnabled;
+        for (int i = 0; i < bars; i++) {
+            MixF(barsKey, std::max(0.f, g_vizPeak[i]) * rangePx, 4.f);
+            if (caps) MixF(barsKey, g_vizPeakHold[i] * rangePx, 4.f);
         }
-        if (SUCCEEDED(g.ctx->Map(g.globalsDyn.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
-            float gl[16] = {pulse, 0, 0, 0, in.zones[0], in.zones[1], in.zones[2], 0};
-            memcpy(ms.pData, gl, sizeof(gl));
-            g.ctx->Unmap(g.globalsDyn.Get(), 0);
-        }
+        Mix(hash, barsKey);
+        globalsKey = 1469598103934665603ull;
+        uint32_t bits[4];
+        memcpy(&bits[0], &glPulse, 4);
+        memcpy(&bits[1], glZ, 12);
+        for (uint32_t b : bits) Mix(globalsKey, b);
         if (g_settings.oscilloscopeMultibandEnabled)
             for (int z = 0; z < 3; z++) MixF(hash, in.zones[z], 64.f);
     } else if (gpuOk) {
@@ -11399,53 +12159,128 @@ bool Render(const FrameInputs& in) {
         // last frames moved, two frames late.
         Mix(hash, g.lastMaxDeltaPx >= 0.25f ? (uint64_t)g.frameNo : 0ull);
     }
+    uint64_t waveKey = 0;
     if (shape == VizShape::Oscilloscope && drawBars) {
-        if (SUCCEEDED(g.ctx->Map(g.waveDyn.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
-            memcpy(ms.pData, in.scopeDisp, sizeof(float) * VIZ_WAVE_SAMPLES);
-            g.ctx->Unmap(g.waveDyn.Get(), 0);
-        }
-        for (int i = 0; i < VIZ_WAVE_SAMPLES; i++) MixF(hash, in.scopeDisp[i] * f.ampScale, 4.f);
+        waveKey = 1469598103934665603ull;
+        for (int i = 0; i < VIZ_WAVE_SAMPLES; i++) MixF(waveKey, in.scopeDisp[i] * f.ampScale, 4.f);
+        Mix(hash, waveKey);
     }
+    // Terminal: VizBuildTermGrid bumps g_termGridSerial only when a cell
+    // actually changed, so one number stands for all 65,536 of them.
+    const uint64_t cellsShape = ((uint64_t)(uint32_t)g_termGrid.cols << 32) | (uint32_t)g_termGrid.rows;
     if (termReady) {
-        size_t n = std::min(g_termGrid.cells.size(), (size_t)VIZ_TERM_MAX_CELLS);
-        if (SUCCEEDED(g.ctx->Map(g.cellsDyn.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
-            memcpy(ms.pData, g_termGrid.cells.data(), n * sizeof(uint32_t));
-            g.ctx->Unmap(g.cellsDyn.Get(), 0);
-        }
         Mix(hash, g.glyphKey);
-        Mix(hash, (uint64_t)g_termGrid.cols * 65536u + (uint64_t)g_termGrid.rows);
-        for (size_t i = 0; i < n; i++) Mix(hash, g_termGrid.cells[i]);
+        Mix(hash, cellsShape);
+        Mix(hash, (uint64_t)g_termGridSerial);
         for (int c = 0; c < 5; c++)
             for (int k = 0; k < 4; k++) MixF(hash, f.termColors[c][k], 255.f);
     }
-    int points = 0;
-    if (shape == VizShape::Goniometer && drawBars) {
-        if (SUCCEEDED(g.ctx->Map(g.pointsDyn.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
-            points = BuildGonioPoints((float*)ms.pData, kMaxPoints);
-            g.ctx->Unmap(g.pointsDyn.Get(), 0);
-        }
-        Mix(hash, g.gonioSerial);
+    const bool gonio = shape == VizShape::Goniometer && drawBars;
+    const uint32_t gonioSerial = g_gonioSerial.load(std::memory_order_acquire);
+    if (gonio) {
+        Mix(hash, gonioSerial);
         MixF(hash, in.correlation, 256.f);
     }
 
-    if (!g.forcePresent && hash == g.lastHash) return true;  // nothing changed: no draw, no present
+    if (!g.forcePresent && hash == g.lastHash) {  // nothing changed: no upload, no draw, no present
+        VizPerf(kPerfSkipped);
+        return true;
+    }
     g.lastHash = hash;
     g.forcePresent = false;
 
-    if (SUCCEEDED(g.ctx->Map(g.frameCB.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
-        memcpy(ms.pData, &f, sizeof(f));
-        g.ctx->Unmap(g.frameCB.Get(), 0);
+    // ---- Uploads (CPU paths), only what changed ---------------------------------------
+    D3D11_MAPPED_SUBRESOURCE ms;
+    if (cpuBars) {
+        if (!g.uploadsValid || barsKey != g.barsKey) {
+            if (SUCCEEDED(g.ctx->Map(g.barsDyn.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
+                float* p = (float*)ms.pData;
+                for (int i = 0; i < bars; i++) {
+                    p[2 * i] = std::max(0.f, g_vizPeak[i]);
+                    p[2 * i + 1] = g_vizPeakHold[i];
+                }
+                g.ctx->Unmap(g.barsDyn.Get(), 0);
+                VizPerf(kPerfMaps);
+                g.barsKey = barsKey;
+            }
+        }
+        if (!g.uploadsValid || globalsKey != g.globalsKey) {
+            if (SUCCEEDED(g.ctx->Map(g.globalsDyn.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
+                float gl[16] = {glPulse, 0, 0, 0, glZ[0], glZ[1], glZ[2], 0};
+                memcpy(ms.pData, gl, sizeof(gl));
+                g.ctx->Unmap(g.globalsDyn.Get(), 0);
+                VizPerf(kPerfMaps);
+                g.globalsKey = globalsKey;
+            }
+        }
+    }
+    if (waveKey && (!g.uploadsValid || waveKey != g.waveKey)) {
+        if (SUCCEEDED(g.ctx->Map(g.waveDyn.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
+            memcpy(ms.pData, in.scopeDisp, sizeof(float) * VIZ_WAVE_SAMPLES);
+            g.ctx->Unmap(g.waveDyn.Get(), 0);
+            VizPerf(kPerfMaps);
+            g.waveKey = waveKey;
+        }
+    }
+    if (termReady && (!g.cellsValid || g.cellsSerial != g_termGridSerial || g.cellsShape != cellsShape)) {
+        // Only the cells with a glyph, each as char | colour << 8 | index << 16:
+        // blanks cost neither upload nor a vertex-shader instance.
+        const size_t n = std::min(g_termGrid.cells.size(), (size_t)VIZ_TERM_MAX_CELLS);
+        if (SUCCEEDED(g.ctx->Map(g.cellsDyn.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
+            uint32_t* out = (uint32_t*)ms.pData;
+            const uint32_t* src = g_termGrid.cells.data();
+            UINT k = 0;
+            for (size_t i = 0; i < n; i++) {  // branch-free: k <= i, always in bounds
+                uint32_t cell = src[i];
+                out[k] = (cell & 0xFFFFu) | ((uint32_t)i << 16);
+                k += ((cell & 127u) > 32u) ? 1u : 0u;
+            }
+            g.ctx->Unmap(g.cellsDyn.Get(), 0);
+            VizPerf(kPerfMaps);
+            g.termCount = k;
+            g.cellsSerial = g_termGridSerial;
+            g.cellsShape = cellsShape;
+            g.cellsValid = true;
+        }
+    }
+    int points = g.pointsCount;
+    if (gonio && (!g.uploadsValid || gonioSerial != g.pointsSerial)) {
+        // The persistence history only moves when the engine publishes a new
+        // block, so the points only need rebuilding then.
+        if (SUCCEEDED(g.ctx->Map(g.pointsDyn.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
+            points = BuildGonioPoints((float*)ms.pData, kMaxPoints);
+            g.ctx->Unmap(g.pointsDyn.Get(), 0);
+            VizPerf(kPerfMaps);
+            g.pointsCount = points;
+            g.pointsSerial = gonioSerial;
+        }
+    }
+    g.uploadsValid = true;
+
+    if (!g.frameCBValid || memcmp(&f, &g.frameCBLast, sizeof(f)) != 0) {
+        if (SUCCEEDED(g.ctx->Map(g.frameCB.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
+            memcpy(ms.pData, &f, sizeof(f));
+            g.ctx->Unmap(g.frameCB.Get(), 0);
+            VizPerf(kPerfMaps);
+            memcpy(&g.frameCBLast, &f, sizeof(f));  // bytes, padding included, for the memcmp above
+            g.frameCBValid = true;
+        }
     }
 
     // ---- Draw -----------------------------------------------------------------------
+    // The plate is the size of the surface and drawn first, 1:1, without
+    // blending, so it writes every pixel (transparent outside the panel):
+    // a clear before it would only be overwritten.
+    const bool drawPlate = in.hasPanel && g.plateValid;
     ID3D11RenderTargetView* rtv = g.rtv.Get();
     g.ctx->OMSetRenderTargets(1, &rtv, nullptr);
-    const float zero[4] = {0, 0, 0, 0};
-    g.ctx->ClearRenderTargetView(rtv, zero);
+    if (!drawPlate) {
+        const float zero[4] = {0, 0, 0, 0};
+        g.ctx->ClearRenderTargetView(rtv, zero);
+    }
     D3D11_VIEWPORT vp = {0, 0, (float)g.w, (float)g.h, 0, 1};
     g.ctx->RSSetViewports(1, &vp);
     g.ctx->RSSetState(g.raster.Get());
-    g.ctx->OMSetBlendState(g.blend.Get(), nullptr, 0xffffffff);
     g.ctx->OMSetDepthStencilState(nullptr, 0);
     g.ctx->IASetInputLayout(nullptr);
     g.ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
@@ -11474,13 +12309,17 @@ bool Render(const FrameInputs& in) {
         g.ctx->VSSetConstantBuffers(1, 1, &pcb);
         g.ctx->DrawInstanced(4, count, 0, 0);
     };
-    if (in.hasPanel && g.plateValid) draw(kPlate, 1);
+    if (drawPlate) {
+        g.ctx->OMSetBlendState(g.blendOff.Get(), nullptr, 0xffffffff);
+        draw(kPlate, 1);
+    }
+    g.ctx->OMSetBlendState(g.blend.Get(), nullptr, 0xffffffff);
     if (drawBars) {
         switch (shape) {
             case VizShape::Dots: draw(kDots, (UINT)bars * f.dotSlots); break;
             case VizShape::Radial: draw(kRadial, (UINT)bars); break;
             case VizShape::Terminal:
-                if (termReady) draw(kTerm, (UINT)(g_termGrid.cols * g_termGrid.rows));
+                if (termReady) draw(kTerm, g.termCount);
                 break;
             case VizShape::Oscilloscope: draw(kScope, VIZ_WAVE_SAMPLES - 1); break;
             case VizShape::Goniometer:
@@ -11503,6 +12342,7 @@ bool Render(const FrameInputs& in) {
 
     HRESULT hr = g.sc->Present(0, 0);
     VizCheckDeviceLost(S_OK, hr);
+    VizPerf(kPerfPresents);
     return true;
 }
 
@@ -11639,8 +12479,86 @@ static void AppendLufs(std::wstring& s, const wchar_t* label, double v) {
     s += b;
 }
 
+// The readout as shown. Rebuilt ten times a second, as a hardware meter
+// refreshes its display: momentary loudness only moves every 100 ms anyway
+// (its blocks are 100 ms), while the dominant frequency and the correlation
+// change on every analysis, which used to redraw and re-present the whole
+// text surface on nearly every frame. The frequency also holds within one
+// display step (1 Hz below 1 kHz, 0.1 kHz above) so a tone sitting between
+// two values doesn't flicker; what is shown is never more than one step
+// and 100 ms away from the live value.
+struct VizReadoutCache {
+    std::wstring text;
+    bool wide = false;
+    bool valid = false;
+    int mode = -1;
+    ULONGLONG at = 0;
+    float hzShown = 0.f;
+};
+VizReadoutCache g_readoutCache;
+constexpr ULONGLONG kVizReadoutMs = 100;
+
+static void VizFormatReadout(VizReadoutCache& rc) {
+    float hz = g_dominantFreqHz.load(std::memory_order_relaxed);
+    if (hz <= 0.f) {
+        rc.hzShown = 0.f;
+    } else {
+        float step = (rc.hzShown >= 1000.f) ? 100.f : 1.f;  // one step of the shown format
+        if (rc.hzShown <= 0.f || (hz >= 1000.f) != (rc.hzShown >= 1000.f) || fabsf(hz - rc.hzShown) >= step)
+            rc.hzShown = hz;
+    }
+    wchar_t freq[32] = L"";
+    if (rc.hzShown > 0.f) {
+        if (rc.hzShown >= 1000.f) swprintf_s(freq, L"%.1f kHz", rc.hzShown / 1000.f);
+        else swprintf_s(freq, L"%.0f Hz", rc.hzShown);
+    }
+    VizReadout r = g_settings.readout;
+    std::wstring& s = rc.text;
+    s.clear();
+    if (r == VizReadout::Frequency) {
+        s = freq;
+        rc.wide = false;
+        return;
+    }
+    VizMeterValues m;
+    {
+        std::lock_guard<std::mutex> lock(g_meterMutex);
+        m = g_meters;
+    }
+    if (r == VizReadout::Both && freq[0]) s = freq;
+    AppendLufs(s, L"M", m.momentary);
+    AppendLufs(s, L"S", m.shortTerm);
+    AppendLufs(s, L"I", m.integrated);
+    s += L" LUFS";
+    if (r == VizReadout::LoudnessFull) {
+        wchar_t b[96];
+        double plr = (std::isfinite(m.truePeak) && std::isfinite(m.integrated) && m.integrated > -70.0)
+                         ? m.truePeak - m.integrated
+                         : NAN;
+        if (std::isfinite(m.truePeak) && m.truePeak > -100.0)
+            swprintf_s(b, L"  TP %.1f dBTP", m.truePeak);
+        else
+            swprintf_s(b, L"  TP --");
+        s += b;
+        if (std::isfinite(plr)) swprintf_s(b, L"  PLR %.1f", plr);
+        else swprintf_s(b, L"  PLR --");
+        s += b;
+        swprintf_s(b, L"  r %+.2f", m.correlation);
+        s += b;
+    }
+    rc.wide = true;
+}
+
 void VizBuildTextFrame(VizTextFrame& t) {
-    t = VizTextFrame();
+    // Cleared rather than replaced, so a frame kept from tick to tick (the
+    // Direct3D 11 path) reuses its strings' storage instead of reallocating.
+    t.np.clear();
+    t.npTitle.clear();
+    t.npArtist.clear();
+    t.npAlpha = 0.f;
+    t.progress = -1.f;
+    t.pf.clear();
+    t.pfWide = false;
     if (g_settings.nowPlayingEnabled && g_dwriteTextFormat && g_nowPlayingBrush) {
         ULONGLONG changedAt = g_nowPlayingChangedTick.load(std::memory_order_relaxed);
         ULONGLONG npElapsed = GetTickCount64() - changedAt;
@@ -11659,48 +12577,18 @@ void VizBuildTextFrame(VizTextFrame& t) {
     }
     if (g_settings.progressEnabled && g_progressBrush) t.progress = VizTrackProgress();
     if (g_settings.peakFreqEnabled && g_dwriteTextFormat && g_nowPlayingBrush) {
-        std::wstring freq;
-        float hz = g_dominantFreqHz.load(std::memory_order_relaxed);
-        if (hz > 0.f) {
-            wchar_t b[32];
-            if (hz >= 1000.f) swprintf_s(b, L"%.1f kHz", hz / 1000.f);
-            else swprintf_s(b, L"%.0f Hz", hz);
-            freq = b;
+        VizReadoutCache& rc = g_readoutCache;
+        ULONGLONG now = GetTickCount64();
+        if (!rc.valid || rc.mode != (int)g_settings.readout || now - rc.at >= kVizReadoutMs) {
+            VizFormatReadout(rc);
+            rc.valid = true;
+            rc.mode = (int)g_settings.readout;
+            rc.at = now;
         }
-        VizReadout r = g_settings.readout;
-        if (r == VizReadout::Frequency) {
-            t.pf = freq;
-        } else {
-            VizMeterValues m;
-            {
-                std::lock_guard<std::mutex> lock(g_meterMutex);
-                m = g_meters;
-            }
-            std::wstring s;
-            if (r == VizReadout::Both && !freq.empty()) s = freq;
-            AppendLufs(s, L"M", m.momentary);
-            AppendLufs(s, L"S", m.shortTerm);
-            AppendLufs(s, L"I", m.integrated);
-            s += L" LUFS";
-            if (r == VizReadout::LoudnessFull) {
-                wchar_t b[96];
-                double plr = (std::isfinite(m.truePeak) && std::isfinite(m.integrated) && m.integrated > -70.0)
-                                 ? m.truePeak - m.integrated
-                                 : NAN;
-                if (std::isfinite(m.truePeak) && m.truePeak > -100.0)
-                    swprintf_s(b, L"  TP %.1f dBTP", m.truePeak);
-                else
-                    swprintf_s(b, L"  TP --");
-                s += b;
-                if (std::isfinite(plr)) swprintf_s(b, L"  PLR %.1f", plr);
-                else swprintf_s(b, L"  PLR --");
-                s += b;
-                swprintf_s(b, L"  r %+.2f", m.correlation);
-                s += b;
-            }
-            t.pf = s;
-            t.pfWide = true;
-        }
+        t.pf = rc.text;
+        t.pfWide = rc.wide;
+    } else {
+        g_readoutCache.valid = false;
     }
 }
 
@@ -11798,8 +12686,18 @@ void VizDrawTextOverlays(const VizTextFrame& t, const VizLayout& layout, bool sm
         float npOffY = EffectiveNowPlayingOffsetY();
         D2D1_RECT_F npRect;
         if (g_settings.npPlacement == VizNpPlacement::Above) {
-            npRect = D2D1::RectF(blockX - layout.textAnchorSide, blockY - npHeight - npMargin,
-                                 blockX + totalWidth + layout.textAnchorSide, blockY - npMargin);
+            float npBottom = blockY - npMargin;
+            // A progress bar placed Above sits over the panel; Now Playing
+            // then goes above it rather than through it. The layout already
+            // reserves room for both (ComputeVizLayout adds the bar's height
+            // to the space above). Settings-based, so the label doesn't jump
+            // when a track's timeline appears or goes.
+            D2D1_RECT_F pr;
+            if (g_settings.progressEnabled && g_progressBrush &&
+                g_settings.progressPlacement == VizProgressPlacement::Above && VizProgressRect(layout, &pr))
+                npBottom = std::min(npBottom, pr.top - npMargin);
+            npRect = D2D1::RectF(blockX - layout.textAnchorSide, npBottom - npHeight,
+                                 blockX + totalWidth + layout.textAnchorSide, npBottom);
         } else {
             // Inside the panel: in the band of padding above (or below) the
             // bars, as wide as the bars, so Left / Right line up with them.
@@ -11889,8 +12787,13 @@ void VizDrawTextOverlays(const VizTextFrame& t, const VizLayout& layout, bool sm
 // ---- Direct3D 11 frame ------------------------------------------------------------------
 // Returns false to fall back to the Direct2D path for this frame.
 bool RenderVisualizerD3D(float sceneAlpha) {
+    VizPerfScope perfScope(g_perfRenderTicks);
+    VizPerf(kPerfRenderTicks);
     VizLayout layout;
-    if (!ComputeVizLayout(&layout)) return false;
+    if (!ComputeVizLayout(&layout)) {
+        ttgfx::ShowTextSurface(true);  // the Direct2D path draws this frame, on the text surface
+        return false;
+    }
     VizPublishDrawRect(layout);
     const bool dragPause = g_dragRenderPauseActive.load(std::memory_order_relaxed);
 
@@ -11916,16 +12819,29 @@ bool RenderVisualizerD3D(float sceneAlpha) {
         in.rainbowBase = VizClockPhase(VizClockSeconds(), (double)g_settings.rainbowSpeed, 360.0);
         memcpy(in.scopeDisp, g_scopeDisp, sizeof(in.scopeDisp));
         VizZoneEnergies(in.zones);
-        {
+        if (g_settings.shape == VizShape::Goniometer) {  // only the correlation bar reads it
             std::lock_guard<std::mutex> lock(g_meterMutex);
             in.correlation = (float)g_meters.correlation;
         }
     }
-    if (!ttgfx::Render(in)) return false;
+    if (!ttgfx::Render(in)) {
+        ttgfx::ShowTextSurface(true);
+        return false;
+    }
 
     // Text surface: redrawn only when what it shows changes.
-    VizTextFrame tf;
-    if (sceneAlpha > 0.001f && !dragPause) VizBuildTextFrame(tf);
+    static VizTextFrame tf;  // kept, so its strings keep their storage
+    if (sceneAlpha > 0.001f && !dragPause) {
+        VizBuildTextFrame(tf);
+    } else {
+        tf.np.clear();
+        tf.npTitle.clear();
+        tf.npArtist.clear();
+        tf.npAlpha = 0.f;
+        tf.progress = -1.f;
+        tf.pf.clear();
+        tf.pfWide = false;
+    }
     uint64_t key = 1469598103934665603ull;
     for (wchar_t c : tf.np) ttgfx::Mix(key, (uint64_t)c);
     ttgfx::MixF(key, tf.npAlpha, 255.f);
@@ -11944,6 +12860,12 @@ bool RenderVisualizerD3D(float sceneAlpha) {
     if (!ttgfx::g.textForce && key == ttgfx::g.textKey) return true;
     ttgfx::g.textKey = key;
     ttgfx::g.textForce = false;
+    // Nothing to show: take the surface off rather than present a clear one.
+    const bool textEmpty = tf.pf.empty() && tf.progress < 0.f && (tf.np.empty() || tf.npAlpha <= 0.01f);
+    if (textEmpty) {
+        ttgfx::ShowTextSurface(false);
+        return true;
+    }
     g_dc->BeginDraw();
     g_dc->Clear(D2D1::ColorF(0, 0, 0, 0));
     bool fade = sceneAlpha < 0.999f;
@@ -11956,6 +12878,8 @@ bool RenderVisualizerD3D(float sceneAlpha) {
     HRESULT hrEnd = g_dc->EndDraw();
     HRESULT hrPresent = g_swapChain->Present(0, 0);
     VizCheckDeviceLost(hrEnd, hrPresent);
+    VizPerf(kPerfTextPresents);
+    ttgfx::ShowTextSurface(true);  // after the present, so it comes back with this frame on it
     return true;
 }
 
@@ -12004,6 +12928,8 @@ void RenderVisualizer() {
             sceneAlpha = (fadeElapsed >= kFadeMs) ? 0.f : 1.0f - (float)fadeElapsed / (float)kFadeMs;
         }
     }
+
+    g_vizSceneHidden.store(sceneAlpha <= 0.001f, std::memory_order_relaxed);
 
     // Direct3D 11 renderer (2.0). Falls through to the Direct2D path below if
     // it isn't selected, or can't run on this device.
@@ -12808,6 +13734,10 @@ void VizThreadEcoQoS(bool eco) {
     static SetThreadInformationFn fn =
         (SetThreadInformationFn)(void*)GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "SetThreadInformation");
     if (!fn) return;
+    // E2 (to be decided with [Perf] / HWiNFO numbers, not yet): while playing
+    // this still opts out of throttling (HighQoS). The alternative is
+    // {1, eco ? 0x1u : 0x0u, eco ? 0x1u : 0x0u}, "let the system manage",
+    // which keeps the thread off forced P-core / boost scheduling.
     PowerThrottlingState st = {1, 0x1 /* EXECUTION_SPEED */, eco ? 0x1u : 0x0u};
     fn(GetCurrentThread(), 3 /* ThreadPowerThrottling */, &st, sizeof(st));
 }
@@ -12821,7 +13751,7 @@ void RenderThreadProc() {
     engine.ThreadInit();
 
     ULONGLONG lastSuccessfulPostTick = 0;
-    int ecoState = -1;  // -1 unknown, 0 full speed, 1 EcoQoS
+    int ecoState = -1;  // -1 unknown, 0 system-managed, 1 EcoQoS
     auto setEco = [&](bool eco) {
         if (ecoState == (eco ? 1 : 0)) return;
         ecoState = eco ? 1 : 0;
@@ -12869,15 +13799,27 @@ void RenderThreadProc() {
             lastSuccessfulPostTick = now;
         }
     };
-    auto engineFrame = [&]() {
+    auto engineFrame = [&]() -> bool {
         LARGE_INTEGER q;
         QueryPerformanceCounter(&q);
         double dt = lastEngineQpc ? (double)(q.QuadPart - lastEngineQpc) / (double)qpcFreq.QuadPart : 1.0 / 60.0;
         lastEngineQpc = q.QuadPart;
-        engine.Frame(dt);
+        VizPerfScope perfScope(g_perfEngineTicks);
+        return engine.Frame(dt);
     };
 
+    // Idle ladder state (see "Idle has three steps" in the audio engine).
+    ULONGLONG trickleDue = 0;        // next 250 ms trickle frame
+    ULONGLONG deepHoldUntil = 0;     // after a meter wake: stay in trickle until then
+    bool meterProbe = false;         // a meter wake whose 1 s look hasn't ended yet
+    float meterProbePeak = 0.f;      // the reading that caused it, after Input Gain
+    float meterWake = kVizAudibleLin;
+    ULONGLONG meterWakeRaisedUntil = 0;
+
     while (g_renderThreadRunning.load(std::memory_order_relaxed)) {
+        VizPerfMaybeLog();
+        VizPerf(kPerfEngineWakes);
+        VizPerf((VizPerfCounter)(kPerfIdlePlaying + std::clamp(g_idleState.load(std::memory_order_relaxed), 0, 2)));
         HWND overlayWnd = g_overlayWnd.load(std::memory_order_relaxed);
         bool paused = g_fullscreenPaused.load(std::memory_order_relaxed);
         bool wanted = g_captureWanted.load(std::memory_order_relaxed);
@@ -12921,39 +13863,90 @@ void RenderThreadProc() {
             setEco(true);
             lastRenderQpc = 0;
             vsDue = absDue = 0;
-            bool deep = g_settings.deepIdle && engine.IsOpen() && idleMs > silentAfter + 5000;
+            // Deep idle: loopback only, with a meter that works, and not
+            // during the 1 s look after a meter wake.
+            bool deep = g_settings.deepIdle && engine.IsOpen() && engine.IsLoopback() && engine.MeterOk() &&
+                        idleMs > silentAfter + 5000 && now >= deepHoldUntil;
             if (deep) {
+                if (meterProbe) {
+                    // The look found nothing the engine calls audible (else
+                    // we'd be playing): a steady floor between the meter's
+                    // threshold and the engine's test. Wake only 6 dB above
+                    // it for the next 30 s, so it can't cycle
+                    // deep -> trickle -> deep four times a second.
+                    meterProbe = false;
+                    meterWake = std::clamp(2.f * meterProbePeak, kVizAudibleLin, 0.1f);
+                    meterWakeRaisedUntil = now + 30000;
+                    Wh_Log(L"[Idle] meter wake was a noise floor (%.1f dBFS); waking above %.1f dBFS for 30 s",
+                           20.0 * log10(std::max(1e-9f, meterProbePeak)), 20.0 * log10(meterWake));
+                }
                 if (g_idleState.exchange((int)VizIdleState::Deep) != (int)VizIdleState::Deep) {
                     // One last tick so the renderer can settle on its final frame.
                     postTick(overlayWnd, now);
                 }
                 engine.StopStream();  // idempotent; also covers a reopen after a device change
                 WaitForSingleObject(g_engineWake, 250);
-                if (engine.MeterPeak() > 0.0001f) {
+                if (now > meterWakeRaisedUntil) meterWake = kVizAudibleLin;
+                float peak = 0.f;
+                bool ok = engine.ReadMeter(&peak);
+                float gain = (g_settings.inputGainDb == 0.0f) ? 1.0f : powf(10.f, g_settings.inputGainDb / 20.f);
+                if (!ok || peak * gain > meterWake) {
+                    // A failed read (MeterOk() is now false, so no more deep
+                    // idle on this stream) or something above the audible
+                    // level: back to trickle, stream running, and let the
+                    // engine's own test decide whether this is playing.
                     engine.StartStream();
-                    g_lastAudibleTickMs.store(GetTickCount64(), std::memory_order_relaxed);
-                    g_idleState.store((int)VizIdleState::Playing);
+                    g_idleState.store((int)VizIdleState::Trickle);
                     lastEngineQpc = 0;
+                    trickleDue = 0;
+                    if (ok) {
+                        deepHoldUntil = GetTickCount64() + 1000;
+                        meterProbe = true;
+                        meterProbePeak = peak * gain;
+                    }
                 }
                 continue;
             }
             if (engine.IsStopped()) engine.StartStream();
             g_idleState.store((int)VizIdleState::Trickle);
-            // Wake on audio, the wake event, or every 250 ms.
+            // Loopback: wake on audio (only signalled while something renders
+            // to the device), the wake event, or the next 250 ms frame. An
+            // input device signals every device period, sound or not, so for
+            // one the thread just polls at the trickle rate.
+            ULONGLONG t0 = GetTickCount64();
+            if (trickleDue == 0 || trickleDue > t0 + 250) trickleDue = t0;
+            DWORD timeout = (DWORD)(trickleDue > t0 ? trickleDue - t0 : 0);
             HANDLE hs[2];
             DWORD nh = 0;
-            if (engine.AudioEvent()) hs[nh++] = engine.AudioEvent();
+            if (engine.IsLoopback() && engine.AudioEvent()) hs[nh++] = engine.AudioEvent();
             if (g_engineWake) hs[nh++] = g_engineWake;
-            if (nh) WaitForMultipleObjects(nh, hs, FALSE, 250);
-            else Sleep(250);
+            if (timeout > 0) {
+                if (nh) WaitForMultipleObjects(nh, hs, FALSE, timeout);
+                else Sleep(timeout);
+            }
             if (!g_renderThreadRunning.load(std::memory_order_relaxed) || g_unloading.load()) break;
-            engineFrame();
-            postTick(overlayWnd, GetTickCount64());
+            // Drain on every wake (cheap); analyse and draw only when it got
+            // loud, or when the 250 ms frame is due.
+            bool loud = engine.Pump();
+            ULONGLONG t1 = GetTickCount64();
+            if (loud || t1 >= trickleDue) {
+                trickleDue = t1 + 250;
+                // Always tick: the bars may have settled while a peak cap is
+                // still falling, and the renderer's skip test makes a tick
+                // with nothing new cost no present.
+                engineFrame();
+                postTick(overlayWnd, t1);
+            }
             continue;
         }
         if (engine.IsStopped()) engine.StartStream();
         g_idleState.store((int)VizIdleState::Playing);
         setEco(false);
+        trickleDue = 0;
+        meterProbe = false;
+        deepHoldUntil = 0;
+        meterWake = kVizAudibleLin;
+        meterWakeRaisedUntil = 0;
 
         LARGE_INTEGER nowQpc;
         QueryPerformanceCounter(&nowQpc);
@@ -13241,7 +14234,7 @@ static const VizMenuOption kFps[] = {{L"0", L"Match display"}, {L"30", L"30"}, {
                                      {L"120", L"120"},         {L"144", L"144"}, {L"240", L"240"}};
 static const VizMenuOption kReadouts[] = {
     {L"off", L"Off"},           {L"frequency", L"Peak frequency"}, {L"loudness", L"Loudness"},
-    {L"loudness_full", L"Loudness, true peak, PLR, correlation"}};
+    {L"loudness_full", L"Loudness, true peak, PLR, correlation"}, {L"both", L"Peak frequency and loudness"}};
 
 // Applied at the end of LoadSettings, before anything derived from settings.
 void VizApplyMenuOverrides() {
@@ -13293,7 +14286,8 @@ void VizApplyMenuOverrides() {
             g_settings.peakFreqEnabled = !is(L"off");
             if (!is(L"off"))
                 g_settings.readout = is(L"loudness") ? VizReadout::Loudness
-                                   : is(L"loudness_full") ? VizReadout::LoudnessFull : VizReadout::Frequency;
+                                   : is(L"loudness_full") ? VizReadout::LoudnessFull
+                                   : is(L"both") ? VizReadout::Both : VizReadout::Frequency;
         } else if (k == L"audioSource") {
             g_settings.audioSourceKey = v;
         } else if (k == L"peakHold") {
@@ -13339,6 +14333,7 @@ static std::wstring CurrentValue(const std::wstring& key) {
         if (!g_settings.peakFreqEnabled) return L"off";
         return g_settings.readout == VizReadout::Loudness       ? L"loudness"
                : g_settings.readout == VizReadout::LoudnessFull ? L"loudness_full"
+               : g_settings.readout == VizReadout::Both         ? L"both"
                                                                 : L"frequency";
     }
     return L"";
@@ -13348,6 +14343,7 @@ enum : UINT {
     kMenuToggleBase = 100,  // + index into kToggles
     kMenuPause = 190,
     kMenuReset = 191,
+    kMenuCopy = 192,
     kMenuDefaultOut = 200,
     kMenuDefaultIn = 201,
     kMenuDeviceBase = 300,   // + endpoint index
@@ -13378,8 +14374,57 @@ struct VizMenuToggle {
     bool* field;
 };
 
+// Windhawk has no way for a mod to open or fill in its settings page, so this
+// puts the active quick settings on the clipboard as "key = value" lines to
+// carry over by hand. Keys and values are written as the menu shows them
+// ("Peak Hold Caps = On", "Audio Source = <device name>"), close to the
+// settings page's own labels, not as the internal override strings.
+static void VizCopyMenuOverrides(const VizMenuToggle* toggles, size_t nToggles,
+                                 const std::vector<VizAudioEndpoint>& eps) {
+    std::wstring s;
+    for (const auto& kv : g_menuOverrides) {
+        std::wstring key = kv.first, value = kv.second;
+        for (const VizMenuGroup& grp : kGroups) {
+            if (kv.first != grp.key) continue;
+            key = grp.label;
+            for (size_t i = 0; i < grp.n; i++)
+                if (kv.second == grp.opts[i].value) value = grp.opts[i].label;
+        }
+        for (size_t i = 0; i < nToggles; i++)
+            if (kv.first == toggles[i].key) {
+                key = toggles[i].label;
+                value = (kv.second == L"1") ? L"On" : L"Off";
+            }
+        if (kv.first == L"audioSource") {
+            key = L"Audio Source";
+            if (kv.second == L"default_output") value = L"Default output";
+            else if (kv.second == L"default_input") value = L"Default input";
+            else
+                for (const auto& ep : eps)
+                    if (kv.second == L"id:" + ep.id) value = ep.name;
+        }
+        s += key + L" = " + value + L"\r\n";
+    }
+    if (s.empty() || !OpenClipboard(g_messageWnd)) return;
+    EmptyClipboard();
+    const size_t bytes = (s.size() + 1) * sizeof(wchar_t);
+    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, bytes);
+    bool owned = false;  // true once the clipboard owns `mem`
+    if (mem) {
+        if (void* p = GlobalLock(mem)) {
+            memcpy(p, s.c_str(), bytes);
+            GlobalUnlock(mem);
+            owned = SetClipboardData(CF_UNICODETEXT, mem) != nullptr;
+        }
+        if (!owned) GlobalFree(mem);
+    }
+    CloseClipboard();
+}
+
 void VizShowContextMenu(POINT pt) {
-    if (!g_messageWnd) return;
+    // One menu at a time: a second request (e.g. the media strip, posted while
+    // this menu's modal loop is dispatching messages) would nest and fail.
+    if (!g_messageWnd || g_menuOpen.load(std::memory_order_acquire)) return;
     const VizMenuToggle toggles[] = {
         {L"peakHold", L"Peak Hold Caps", &g_settings.peakHoldEnabled},
         {L"beatFlash", L"Beat Flash", &g_settings.beatFlashEnabled},
@@ -13440,6 +14485,7 @@ void VizShowContextMenu(POINT pt) {
     AppendMenuW(menu, MF_STRING | (g_userPaused.load() ? MF_CHECKED : 0), kMenuPause, L"Pause Visualizer");
     std::wstring reset = L"Reset Quick Settings";
     if (!g_menuOverrides.empty()) reset += L" (" + std::to_wstring(g_menuOverrides.size()) + L" active)";
+    AppendMenuW(menu, MF_STRING | (g_menuOverrides.empty() ? MF_GRAYED : 0), kMenuCopy, L"Copy Quick Settings");
     AppendMenuW(menu, MF_STRING | (g_menuOverrides.empty() ? MF_GRAYED : 0), kMenuReset, reset.c_str());
 
     // A menu only closes on an outside click when its owner is foreground.
@@ -13452,13 +14498,20 @@ void VizShowContextMenu(POINT pt) {
     SetForegroundWindow(g_messageWnd);
     if (attached) AttachThreadInput(me, fgThread, FALSE);
 
+    // While the menu is up the mouse hook passes every click through, so a
+    // right-click elsewhere closes it instead of being swallowed.
+    g_menuOpen.store(true, std::memory_order_release);
     UINT cmd = (UINT)TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, pt.x, pt.y, g_messageWnd,
                                       nullptr);
+    g_menuOpen.store(false, std::memory_order_release);
     PostMessage(g_messageWnd, WM_NULL, 0, 0);
     DestroyMenu(menu);  // destroys the submenus with it
     if (!cmd) return;
 
-    if (cmd == kMenuReset) {
+    if (cmd == kMenuCopy) {
+        VizCopyMenuOverrides(toggles, ARRAYSIZE(toggles), eps);
+        return;
+    } else if (cmd == kMenuReset) {
         g_menuOverrides.clear();
         VizSaveMenuOverrides();
     } else if (cmd == kMenuPause) {
@@ -14056,6 +15109,7 @@ void LoadSettings() {
     g_settings.pauseOnFullscreen = Wh_GetIntSetting(L"performance.pauseOnFullscreen") != 0;
     g_settings.pauseWhenSilentSeconds = std::max(0, Wh_GetIntSetting(L"performance.pauseWhenSilentSeconds"));
     g_settings.deepIdle = Wh_GetIntSetting(L"performance.deepIdle") != 0;
+    g_perfStatsEnabled.store(Wh_GetIntSetting(L"performance.perfStats") != 0, std::memory_order_relaxed);
 
     g_settings.peakHoldEnabled = Wh_GetIntSetting(L"appearance.peakHoldEnabled") != 0;
 

@@ -1,0 +1,28 @@
+    - nowPlayingLayout: one_line
+      $name: Now Playing Layout
+      $description: One line ("Artist - Title") or two (the title, with the artist underneath in its own colour)
+      $options:
+        - one_line: One line
+        - two_lines: Two lines (title, then artist)
+    - nowPlayingPlacement: above
+      $name: Now Playing Placement
+      $description: Above the bars, as before, or inside the background panel, in the padding above or below the bars, as wide as the bars so Left and Right line up with them. For the inside placements give the panel enough padding on that side (Background, Padding) to hold the text
+      $options:
+        - above: Above the visualizer
+        - panel_top: Inside the panel, top
+        - panel_bottom: Inside the panel, bottom
+    - nowPlayingAlign: center
+      $name: Now Playing Alignment
+      $options:
+        - center: Center
+        - left: Left
+        - right: Right
+    - nowPlayingArtistColor: '#B3FFFFFF'
+      $name: Now Playing Artist Color
+      $description: 'Colour of the artist: the second line in the two-line layout, the "Artist" part of the one-line layout. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b)'
+    - textRendering: smooth
+      $name: Text Rendering
+      $description: Smooth antialiases text. Pixel draws it without antialiasing, on whole pixels, for pixel fonts (e.g. Press Start 2P, Silkscreen, Pixelify Sans, installed in Windows) at a multiple of their design size. Applies to the Now Playing text, the readout and the Terminal shape
+      $options:
+        - smooth: Smooth
+        - pixel: Pixel (no antialiasing)

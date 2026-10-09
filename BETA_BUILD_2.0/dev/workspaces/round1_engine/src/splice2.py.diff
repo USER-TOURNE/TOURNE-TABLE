@@ -1,0 +1,29 @@
+--- src/splice2.py	2026-10-09 12:47:38.095964454 -0400
++++ work_engine/src/splice2.py	2026-10-09 03:50:14.119176517 -0400
+@@ -251,7 +251,7 @@
+ """)
+ 
+ # ================================================================ audio source (device helpers before the notification client)
+-before("class VizEndpointNotificationClient : public IMMNotificationClient {", read("p2_perf.cpp") + "\n" + read("p2_device.cpp") + "\n")
++before("class VizEndpointNotificationClient : public IMMNotificationClient {", read("p2_device.cpp") + "\n")
+ rep("""        if (flow == eRender) g_deviceChanged.store(true, std::memory_order_relaxed);""",
+     """        if ((flow == eRender || flow == eCapture) && VizSourceFollowsDefault(flow))
+             g_deviceChanged.store(true, std::memory_order_relaxed);""")
+@@ -644,17 +644,6 @@
+ 
+ rep("Program Files\\Intel\\openvino*, C:\\Intel\\openvino*, a pip-installed", "Program Files\\Intel\\openvino*, a pip-installed")
+ 
+-# ================================================================ Performance Stats setting
+-rep("""    - autoHideEnabled: false
+-""", """    - perfStats: false
+-      $name: Performance Stats
+-      $description: Every 30 seconds, writes one line to the Windhawk log (turn on Enable logging) with what the visualizer actually cost - engine wakes and milliseconds, analyses and FFTs, render ticks, frames presented versus skipped, text redraws, compositor commits and buffer uploads, and time spent playing / trickling / in deep idle. All per second, so settings and PCs compare directly. Counting is always on and costs a few atomic adds per frame; this only switches the log line
+-    - autoHideEnabled: false
+-""")
+-rep("""    g_settings.deepIdle = Wh_GetIntSetting(L"performance.deepIdle") != 0;
+-""", """    g_settings.deepIdle = Wh_GetIntSetting(L"performance.deepIdle") != 0;
+-    g_perfStatsEnabled.store(Wh_GetIntSetting(L"performance.perfStats") != 0, std::memory_order_relaxed);
+-""")
+ out = os.path.join(S, "v2b.cpp")
+ open(out, "w", encoding="utf-8", newline="\n").write(src)
+ print("wrote", out, src.count("\n"), "lines")

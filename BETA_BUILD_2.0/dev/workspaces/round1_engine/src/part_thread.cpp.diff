@@ -1,0 +1,168 @@
+--- src/part_thread.cpp	2026-10-08 11:42:52.962363990 -0400
++++ work_engine/src/part_thread.cpp	2026-10-09 04:00:53.336636117 -0400
+@@ -1,9 +1,19 @@
+-// Thread-scoped quality of service. While playing, the engine thread opts out
+-// of execution-speed throttling so frame pacing stays tight on a hybrid CPU;
+-// while idle it asks for EcoQoS, so the trickle and the meter reads run on
+-// efficiency cores at low clocks. Thread-scoped on purpose: nothing about the
+-// process changes. SetThreadInformation is resolved at runtime (Windows 8+;
+-// the power-throttling class needs Windows 10 1709, and older builds simply
++// Thread-scoped quality of service. While idle the engine thread asks for
++// EcoQoS (ControlMask and StateMask both EXECUTION_SPEED), so the trickle and
++// the meter reads run on efficiency cores at low clocks. While playing it
++// makes no request at all (both masks 0: "let the system manage"), which
++// clears the EcoQoS request and leaves the QoS to Windows' own heuristics
++// (a visible, audible app's threads get normal QoS). Up to 2.0 it explicitly
++// opted out of throttling (ControlMask set, StateMask 0), which is HighQoS:
++// on a hybrid CPU that steers the thread to P-cores and lets it pull them
++// into boost, against the whole point of a 0-2% visualizer. Pacing doesn't
++// depend on it: frame times come from a high-resolution waitable timer,
++// whose expiry is a timer interrupt that no QoS level delays; QoS only
++// changes which core runs the ~0.1 ms of analysis per frame and at what
++// clock, which even at half speed is a few percent of a 6.9 ms frame.
++// Thread-scoped on purpose: nothing about the process changes.
++// SetThreadInformation is resolved at runtime (Windows 8+; the
++// power-throttling class needs Windows 10 1709, and older builds simply
+ // return an error, which is ignored).
+ void VizThreadEcoQoS(bool eco) {
+     struct PowerThrottlingState {
+@@ -13,7 +23,7 @@
+     static SetThreadInformationFn fn =
+         (SetThreadInformationFn)(void*)GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "SetThreadInformation");
+     if (!fn) return;
+-    PowerThrottlingState st = {1, 0x1 /* EXECUTION_SPEED */, eco ? 0x1u : 0x0u};
++    PowerThrottlingState st = {1, eco ? 0x1u /* EXECUTION_SPEED */ : 0x0u, eco ? 0x1u : 0x0u};
+     fn(GetCurrentThread(), 3 /* ThreadPowerThrottling */, &st, sizeof(st));
+ }
+ 
+@@ -26,7 +36,7 @@
+     engine.ThreadInit();
+ 
+     ULONGLONG lastSuccessfulPostTick = 0;
+-    int ecoState = -1;  // -1 unknown, 0 full speed, 1 EcoQoS
++    int ecoState = -1;  // -1 unknown, 0 system-managed, 1 EcoQoS
+     auto setEco = [&](bool eco) {
+         if (ecoState == (eco ? 1 : 0)) return;
+         ecoState = eco ? 1 : 0;
+@@ -74,14 +84,22 @@
+             lastSuccessfulPostTick = now;
+         }
+     };
+-    auto engineFrame = [&]() {
++    auto engineFrame = [&]() -> bool {
+         LARGE_INTEGER q;
+         QueryPerformanceCounter(&q);
+         double dt = lastEngineQpc ? (double)(q.QuadPart - lastEngineQpc) / (double)qpcFreq.QuadPart : 1.0 / 60.0;
+         lastEngineQpc = q.QuadPart;
+-        engine.Frame(dt);
++        return engine.Frame(dt);
+     };
+ 
++    // Idle ladder state (see "Idle has three steps" in the audio engine).
++    ULONGLONG trickleDue = 0;        // next 250 ms trickle frame
++    ULONGLONG deepHoldUntil = 0;     // after a meter wake: stay in trickle until then
++    bool meterProbe = false;         // a meter wake whose 1 s look hasn't ended yet
++    float meterProbePeak = 0.f;      // the reading that caused it, after Input Gain
++    float meterWake = kVizAudibleLin;
++    ULONGLONG meterWakeRaisedUntil = 0;
++
+     while (g_renderThreadRunning.load(std::memory_order_relaxed)) {
+         HWND overlayWnd = g_overlayWnd.load(std::memory_order_relaxed);
+         bool paused = g_fullscreenPaused.load(std::memory_order_relaxed);
+@@ -126,39 +144,86 @@
+             setEco(true);
+             lastRenderQpc = 0;
+             vsDue = absDue = 0;
+-            bool deep = g_settings.deepIdle && engine.IsOpen() && idleMs > silentAfter + 5000;
++            // Deep idle: loopback only, with a meter that works, and not
++            // during the 1 s look after a meter wake.
++            bool deep = g_settings.deepIdle && engine.IsOpen() && engine.IsLoopback() && engine.MeterOk() &&
++                        idleMs > silentAfter + 5000 && now >= deepHoldUntil;
+             if (deep) {
++                if (meterProbe) {
++                    // The look found nothing the engine calls audible (else
++                    // we'd be playing): a steady floor between the meter's
++                    // threshold and the engine's test. Wake only 6 dB above
++                    // it for the next 30 s, so it can't cycle
++                    // deep -> trickle -> deep four times a second.
++                    meterProbe = false;
++                    meterWake = std::clamp(2.f * meterProbePeak, kVizAudibleLin, 0.1f);
++                    meterWakeRaisedUntil = now + 30000;
++                    Wh_Log(L"[Idle] meter wake was a noise floor (%.1f dBFS); waking above %.1f dBFS for 30 s",
++                           20.0 * log10(std::max(1e-9f, meterProbePeak)), 20.0 * log10(meterWake));
++                }
+                 if (g_idleState.exchange((int)VizIdleState::Deep) != (int)VizIdleState::Deep) {
+                     // One last tick so the renderer can settle on its final frame.
+                     postTick(overlayWnd, now);
+                 }
+                 engine.StopStream();  // idempotent; also covers a reopen after a device change
+                 WaitForSingleObject(g_engineWake, 250);
+-                if (engine.MeterPeak() > 0.0001f) {
++                if (now > meterWakeRaisedUntil) meterWake = kVizAudibleLin;
++                float peak = 0.f;
++                bool ok = engine.ReadMeter(&peak);
++                float gain = (g_settings.inputGainDb == 0.0f) ? 1.0f : powf(10.f, g_settings.inputGainDb / 20.f);
++                if (!ok || peak * gain > meterWake) {
++                    // A failed read (MeterOk() is now false, so no more deep
++                    // idle on this stream) or something above the audible
++                    // level: back to trickle, stream running, and let the
++                    // engine's own test decide whether this is playing.
+                     engine.StartStream();
+-                    g_lastAudibleTickMs.store(GetTickCount64(), std::memory_order_relaxed);
+-                    g_idleState.store((int)VizIdleState::Playing);
++                    g_idleState.store((int)VizIdleState::Trickle);
+                     lastEngineQpc = 0;
++                    trickleDue = 0;
++                    if (ok) {
++                        deepHoldUntil = GetTickCount64() + 1000;
++                        meterProbe = true;
++                        meterProbePeak = peak * gain;
++                    }
+                 }
+                 continue;
+             }
+             if (engine.IsStopped()) engine.StartStream();
+             g_idleState.store((int)VizIdleState::Trickle);
+-            // Wake on audio, the wake event, or every 250 ms.
++            // Loopback: wake on audio (only signalled while something renders
++            // to the device), the wake event, or the next 250 ms frame. An
++            // input device signals every device period, sound or not, so for
++            // one the thread just polls at the trickle rate.
++            ULONGLONG t0 = GetTickCount64();
++            if (trickleDue == 0 || trickleDue > t0 + 250) trickleDue = t0;
++            DWORD timeout = (DWORD)(trickleDue > t0 ? trickleDue - t0 : 0);
+             HANDLE hs[2];
+             DWORD nh = 0;
+-            if (engine.AudioEvent()) hs[nh++] = engine.AudioEvent();
++            if (engine.IsLoopback() && engine.AudioEvent()) hs[nh++] = engine.AudioEvent();
+             if (g_engineWake) hs[nh++] = g_engineWake;
+-            if (nh) WaitForMultipleObjects(nh, hs, FALSE, 250);
+-            else Sleep(250);
++            if (timeout > 0) {
++                if (nh) WaitForMultipleObjects(nh, hs, FALSE, timeout);
++                else Sleep(timeout);
++            }
+             if (!g_renderThreadRunning.load(std::memory_order_relaxed) || g_unloading.load()) break;
+-            engineFrame();
+-            postTick(overlayWnd, GetTickCount64());
++            // Drain on every wake (cheap); analyse and draw only when it got
++            // loud, or when the 250 ms frame is due.
++            bool loud = engine.Pump();
++            ULONGLONG t1 = GetTickCount64();
++            if (loud || t1 >= trickleDue) {
++                trickleDue = t1 + 250;
++                if (engineFrame()) postTick(overlayWnd, t1);
++            }
+             continue;
+         }
+         if (engine.IsStopped()) engine.StartStream();
+         g_idleState.store((int)VizIdleState::Playing);
+         setEco(false);
++        trickleDue = 0;
++        meterProbe = false;
++        deepHoldUntil = 0;
++        meterWake = kVizAudibleLin;
++        meterWakeRaisedUntil = 0;
+ 
+         LARGE_INTEGER nowQpc;
+         QueryPerformanceCounter(&nowQpc);
