@@ -1138,6 +1138,31 @@ rep("""        - card: Card (art, seek, output, volume)
       $description: 'Card only, with Card Accent = Card Accent Color. Same formats as Card Background'
 """)
 
+# ================================================================ FX: Glow and Bloom (2.1)
+after("    int reflection = 0;  // %, of Bar Max Size\n",
+      "    int fxGlow = 0, fxGlowRadius = 6, fxBloom = 0, fxBloomRadius = 16;  // FX (2.1)\n")
+rep("""    g_settings.reflection = std::clamp(Wh_GetIntSetting(L"appearance.reflection"), 0, 100);""",
+    """    g_settings.reflection = std::clamp(Wh_GetIntSetting(L"appearance.reflection"), 0, 100);
+    g_settings.fxGlow = std::clamp(Wh_GetIntSetting(L"appearance.fxGlow"), 0, 100);
+    g_settings.fxGlowRadius = std::clamp(Wh_GetIntSetting(L"appearance.fxGlowRadius"), 1, 32);
+    g_settings.fxBloom = std::clamp(Wh_GetIntSetting(L"appearance.fxBloom"), 0, 100);
+    g_settings.fxBloomRadius = std::clamp(Wh_GetIntSetting(L"appearance.fxBloomRadius"), 4, 64);""")
+rep("""      $description: 0-100. Mirrors the bars onto a floor beneath them, fading out over this percentage of Bar Max Size. Horizontal bars anchored to the bottom only, with the bar shapes, LED Meter, Line Spectrum and Particles. Direct3D 11 renderer only
+""", """      $description: 0-100. Mirrors the bars onto a floor beneath them, fading out over this percentage of Bar Max Size. Horizontal bars anchored to the bottom only, with the bar shapes, LED Meter, Line Spectrum and Particles. Direct3D 11 renderer only
+    - fxGlow: 0
+      $name: Glow
+      $description: 0-100. A soft halo around each bar, dot, line and spark, worked out in the same shader pass that draws them, so it costs next to nothing. Direct3D 11 renderer only
+    - fxGlowRadius: 6
+      $name: Glow Radius
+      $description: 1-32 pixels. How far the halo reaches
+    - fxBloom: 0
+      $name: Bloom
+      $description: 0-100. Light bleeding out of the whole picture, like a camera lens, from a blurred copy at a quarter of the size added back on top. A little GPU work, and only on frames that change. Direct3D 11 renderer only
+    - fxBloomRadius: 16
+      $name: Bloom Radius
+      $description: 4-64 pixels. How far the light spreads
+""")
+
 out = os.path.join(S, "v2b.cpp")
 open(out, "w", encoding="utf-8", newline="\n").write(src)
 print("wrote", out, src.count("\n"), "lines")

@@ -36,6 +36,10 @@ TT_CBUFFER(FrameCB, b0) {
     float4 fVu;     // VU needle L, R (0..1 of the scale), peak LED L, R (0..1)
     float4 fVuBox;  // one meter's width, height, offset of the second meter x, y
     uint fSpecW, fSpecHead, fSpecTex, fSpecPad;  // bars per row, newest row, rows in the texture
+    // FX (2.1): Glow strength 0..1 and radius px, Bloom strength 0..1 and
+    // radius px; texel size of the quarter-res bloom target and of the scene.
+    float fFxGlow, fFxGlowR, fFxBloom, fFxBloomR;
+    float4 fFxTexel;
 }
 TT_CBUFFER_END
 
