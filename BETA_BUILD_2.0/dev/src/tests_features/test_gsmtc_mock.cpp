@@ -42,6 +42,7 @@ static void* g_mediaWnd = (void*)1;
 enum class VizColorMode { Solid, AlbumArt, DynamicAlbum };
 struct { VizColorMode colorMode = VizColorMode::Solid; bool nowPlayingEnabled = false; } g_settings;
 static void FetchAlbumArtColorAsync() {}
+static bool VizCardWantsArt() { return false; }  // Media Card (2.1)
 std::atomic<bool> g_mediaIsPlaying{false};
 static HANDLE g_gsmtcStopEvent = nullptr;
 static std::optional<std::thread> g_gsmtcThread;
