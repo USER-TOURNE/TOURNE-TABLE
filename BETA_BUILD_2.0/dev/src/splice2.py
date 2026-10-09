@@ -889,6 +889,188 @@ rep("""    g_settings.deepIdle = Wh_GetIntSetting(L"performance.deepIdle") != 0;
 """, """    g_settings.deepIdle = Wh_GetIntSetting(L"performance.deepIdle") != 0;
     g_perfStatsEnabled.store(Wh_GetIntSetting(L"performance.perfStats") != 0, std::memory_order_relaxed);
 """)
+# ================================================================ styles (2.1)
+# Eight new styles chosen from the Shape list, plus Reflection. See
+# p3_styles.cpp for what each one is and how it rides on an existing shape.
+after("enum class VizContextMenu { RightClick, CtrlRightClick, Off };\n",
+      "enum class VizStyle { None, Led, Line, Bloom, Spectrogram, Vu, SplitLR, Particles };\n")
+after("    std::wstring audioSourceKey;\n", """
+    // Styles (2.1): picked from the Shape list on top of an internal shape.
+    VizStyle style = VizStyle::None;
+    int reflection = 0;  // %, of Bar Max Size
+""")
+after("std::atomic<uint32_t> g_gonioSerial{0};\n",
+      "std::atomic<uint32_t> g_vizStereoRate{48000};  // sample rate of g_gonioXY, for Stereo Field\n")
+rep("""        gonioPending_.clear();
+        g_gonioSerial.fetch_add(1, std::memory_order_release);""", """        gonioPending_.clear();
+        g_vizStereoRate.store(sampleRate_, std::memory_order_relaxed);
+        g_gonioSerial.fetch_add(1, std::memory_order_release);""")
+# The stereo feed also drives VU Needles and Stereo Field; beats throw the sparks.
+rep("    c.wantGonio = g_settings.shape == VizShape::Goniometer;",
+    "    c.wantGonio = g_settings.shape == VizShape::Goniometer || g_settings.style == VizStyle::Vu ||\n"
+    "                  g_settings.style == VizStyle::SplitLR;")
+rep("    c.beat = g_settings.beatFlashEnabled;",
+    "    c.beat = g_settings.beatFlashEnabled || g_settings.style == VizStyle::Particles;")
+before("bool ComputeVizLayout(VizLayout* out) {", read("p3_styles.cpp") + "\n")
+rep("""        totalWidth  = horizontal ? barsThickness : maxSize;
+        totalHeight = horizontal ? maxSize       : barsThickness;
+    }
+""", """        totalWidth  = horizontal ? barsThickness : maxSize;
+        totalHeight = horizontal ? maxSize       : barsThickness;
+    }
+    VizStyleBox(&totalWidth, &totalHeight, maxSize, horizontal);
+""", 2)
+rep("""        totalWidth  = horizontal ? groupThickness : groupExtent;
+        totalHeight = horizontal ? groupExtent    : groupThickness;
+    }
+""", """        totalWidth  = horizontal ? groupThickness : groupExtent;
+        totalHeight = horizontal ? groupExtent    : groupThickness;
+    }
+    VizStyleBox(&totalWidth, &totalHeight, maxSize, horizontal);
+""")
+rep("if (g_settings.shape == VizShape::Terminal) VizBuildTermGrid();\n",
+    "if (g_settings.shape == VizShape::Terminal) VizBuildTermGrid();\n        VizStylesFrame();\n", 2)
+rep("""        if (g_settings.shape == VizShape::Dots) {""", """        if (VizDrawStyleD2D(blockX, blockY, totalWidth, totalHeight, barCount, barW, barGap, maxSize, idleSize,
+                            horizontal, c1, cGrad1, c2, rainbowBase)) {
+            // drawn by the style
+        } else if (g_settings.shape == VizShape::Dots) {""")
+rep("""    PCWSTR shape = Wh_GetStringSetting(L"appearance.shape");
+    g_settings.shape = (wcscmp(shape, L"goniometer") == 0)   ? VizShape::Goniometer
+                       : (wcscmp(shape, L"mountain") == 0)   ? VizShape::Mountain
+                       : (wcscmp(shape, L"mirror") == 0)     ? VizShape::Mirror
+                       : (wcscmp(shape, L"wave") == 0)       ? VizShape::Wave
+                       : (wcscmp(shape, L"breathe") == 0)    ? VizShape::Breathe
+                       : (wcscmp(shape, L"dots") == 0)       ? VizShape::Dots
+                       : (wcscmp(shape, L"radial") == 0)     ? VizShape::Radial
+                       : (wcscmp(shape, L"oscilloscope") == 0) ? VizShape::Oscilloscope
+                       : (wcscmp(shape, L"terminal") == 0)   ? VizShape::Terminal
+                                                               : VizShape::Stereo;
+    Wh_FreeStringSetting(shape);""", """    PCWSTR shape = Wh_GetStringSetting(L"appearance.shape");
+    VizParseShape(shape, &g_settings.shape, &g_settings.style);
+    Wh_FreeStringSetting(shape);
+    g_settings.reflection = std::clamp(Wh_GetIntSetting(L"appearance.reflection"), 0, 100);""")
+rep("""        if (g_settings.workload == VizWorkload::Gpu && g_settings.shape == VizShape::Terminal) {""",
+    """        if (g_settings.workload == VizWorkload::Gpu && VizStyleNeedsCpuBars()) {
+            ReportSettingWarning(L"Hardware", L"Workload",
+                                 L"Spectrogram, Stereo Field and Particles work from the bar levels on the CPU, "
+                                 L"so with them the analysis runs on the CPU (Hybrid).");
+        }
+        if (g_settings.workload == VizWorkload::Gpu && g_settings.shape == VizShape::Terminal) {""")
+rep("""        - terminal: Terminal (text characters, see the Terminal section)
+    - orientation: horizontal""", """        - terminal: Terminal (text characters, see the Terminal section)
+        - led: LED Meter (segmented, green / amber / red)
+        - line: Line Spectrum (filled curve, glowing edge)
+        - bloom: Polar Bloom (Radial as one filled shape)
+        - spectrogram: Spectrogram (scrolling colour history)
+        - vu: VU Needles (two analog meters, L and R)
+        - stereo_field: Stereo Field (left above, right below)
+        - particles: Particles (bars plus sparks on each beat)
+    - reflection: 0
+      $name: Reflection
+      $description: 0-100. Mirrors the bars onto a floor beneath them, fading out over this percentage of Bar Max Size. Horizontal bars anchored to the bottom only, with the bar shapes, LED Meter, Line Spectrum and Particles. Direct3D 11 renderer only
+    - orientation: horizontal""")
+
+# ================================================================ Media Card (2.1)
+# Media Controls > Layout = Card: album art with controls on hover, a seek
+# bar, one-click output switching and a volume slider. See p3_media.cpp.
+after("#include <mmdeviceapi.h>\n", "#include <endpointvolume.h>\n")
+after("    int mediaPlatePadding = 0;\n", "    bool mediaCard = false;  // Media Controls > Layout = Card (2.1)\n")
+after("static std::thread* g_albumArtThread = nullptr;\n", """
+// Media Card (2.1): the cover, box-filtered down to at most 160 px, straight
+// alpha BGRA as WIC decodes it. Written by the album-art thread, read by the
+// media window's paint.
+std::mutex g_artTileMutex;
+std::vector<BYTE> g_artTile;
+int g_artTileW = 0, g_artTileH = 0;
+std::atomic<int64_t> g_mediaSeekTicks{0};  // seek target for media command 3, 100 ns units
+
+void VizStoreArtTile(const BYTE* px, int w, int h) {
+    std::vector<BYTE> out;
+    int ow = 0, oh = 0;
+    if (px && w > 0 && h > 0) {
+        int f = std::max(1, (std::max(w, h) + 159) / 160);
+        ow = std::max(1, w / f);
+        oh = std::max(1, h / f);
+        out.resize((size_t)ow * oh * 4);
+        for (int y = 0; y < oh; y++)
+            for (int x = 0; x < ow; x++)
+                for (int k = 0; k < 4; k++) {
+                    unsigned sum = 0;
+                    for (int yy = 0; yy < f; yy++)
+                        for (int xx = 0; xx < f; xx++) sum += px[((size_t)(y * f + yy) * w + (x * f + xx)) * 4 + k];
+                    out[((size_t)y * ow + x) * 4 + k] = (BYTE)(sum / (unsigned)(f * f));
+                }
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_artTileMutex);
+        if (out.empty() && g_artTile.empty()) return;
+        g_artTile.swap(out);
+        g_artTileW = ow;
+        g_artTileH = oh;
+    }
+    if (g_mediaWnd && g_settings.mediaCard) PostMessage(g_mediaWnd, WM_APP_MEDIA_REPAINT, 0, 0);
+}
+""")
+rep("            if (!thumbRef) { winrt::uninit_apartment();",
+    "            if (!thumbRef) { VizStoreArtTile(nullptr, 0, 0); winrt::uninit_apartment();")
+rep("""            if (!pixels.empty()) {
+                struct Bucket""", """            if (!pixels.empty()) VizStoreArtTile(pixels.data(), imgW, imgH);
+            if (!pixels.empty()) {
+                struct Bucket""")
+rep("                    else if (cmd == 2) session.TrySkipNextAsync().get();",
+    """                    else if (cmd == 2) session.TrySkipNextAsync().get();
+                    else if (cmd == 3)
+                        session.TryChangePlaybackPositionAsync(g_mediaSeekTicks.load(std::memory_order_relaxed)).get();""")
+before("void PaintMediaControls(int x, int y, int width, int height) {", read("p3_media.cpp") + "\n")
+rep("""    // Optional backing plate behind the whole strip, with an optional outline.""",
+    """    if (VizCardActive()) {
+        VizPaintCard(buf, stride, width, height);
+    } else {
+    // Optional backing plate behind the whole strip, with an optional outline.""")
+rep("""    HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, dib);
+
+    POINT ptSrc = {0, 0};""", """    }  // strip
+
+    HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, dib);
+
+    POINT ptSrc = {0, 0};""")
+rep("""    if (!g_settings.mediaControlsEnabled) {
+        ShowWindow(g_mediaWnd, SW_HIDE);
+        return;
+    }""", """    if (!g_settings.mediaControlsEnabled) {
+        VizCardTimer(g_mediaWnd, false);
+        ShowWindow(g_mediaWnd, SW_HIDE);
+        return;
+    }
+    VizCardTimer(g_mediaWnd, VizCardActive());""")
+rep("""    int width = size * 3 + spacing * 2 + pad * 2;
+    int height = size + pad * 2;
+""", """    int width = size * 3 + spacing * 2 + pad * 2;
+    int height = size + pad * 2;
+    if (VizCardActive()) VizCardSize(&width, &height);
+""", 2)
+rep("""LRESULT CALLBACK MediaWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    switch (uMsg) {""", """LRESULT CALLBACK MediaWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    if (VizCardActive() && VizCardMessage(hWnd, uMsg, wParam, lParam)) return 0;
+    switch (uMsg) {""")
+before("// Resolves a source key to a device. Falls back", read("p3_media_dev.cpp") + "\n")
+after("""    g_settings.mediaIconSize = std::clamp(Wh_GetIntSetting(L"media_controls.iconSize"), 8, 256);
+""", """    {
+        PCWSTR layout = Wh_GetStringSetting(L"media_controls.layout");
+        g_settings.mediaCard = layout && wcscmp(layout, L"card") == 0;
+        Wh_FreeStringSetting(layout);
+    }
+""")
+rep("""      $description: Distance in from the panel's top or bottom edge, in pixels. Only used with a panel anchor
+""", """      $description: Distance in from the panel's top or bottom edge, in pixels. Only used with a panel anchor
+    - layout: strip
+      $name: Layout
+      $description: Strip is the three buttons. Card is a small media card in the same place, sized from Icon Size and Icon Spacing - the album art (hover it for previous / play / next), a seek bar (click or drag), a speaker button that switches the Windows default output in one click, and a volume slider (drag it, or scroll anywhere on the card)
+      $options:
+        - strip: Strip (three buttons)
+        - card: Card (art, seek, output, volume)
+""")
+
 out = os.path.join(S, "v2b.cpp")
 open(out, "w", encoding="utf-8", newline="\n").write(src)
 print("wrote", out, src.count("\n"), "lines")

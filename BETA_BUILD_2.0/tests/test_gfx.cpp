@@ -79,6 +79,23 @@ int main(int argc, char** argv) {
     c->fScopeColor = float4(1, 1, 1, 1);
     c->fGonioR = (float)num("gonioR", 50);
     c->fGonioDot = 1.0f;
+    // Styles (2.1).
+    c->fSegs = (uint)num("segs", 0);
+    c->fSegStep = (float)num("segStep", 0);
+    c->fSegH = (float)num("segH", 0);
+    c->fSubdiv = (uint)num("subdiv", 4);
+    c->fGlowR = (float)num("glowR", 0);
+    c->fFillA = (float)num("fillA", 0.35);
+    c->fVu = cfg.count("vu") ? F4(cfg["vu"]) : float4(0, 0, 0, 0);
+    c->fVuBox = cfg.count("vuBox") ? F4(cfg["vuBox"]) : float4(0, 0, 0, 0);
+    c->fReflBase = (float)num("reflBase", 0);
+    c->fReflDir = 1.0f;
+    c->fReflDepth = (float)num("reflDepth", 1);
+    c->fReflAlpha = (float)num("reflAlpha", 0.4);
+    c->fSpecW = (uint)num("specW", 0);
+    c->fSpecRows = (uint)num("specRows", 1);
+    c->fSpecTex = (uint)num("specTex", 1);
+    c->fSpecHead = (uint)num("specHead", 0);
 
     std::vector<float2> bars(4096);
     std::vector<float4> globals(4);
@@ -119,16 +136,31 @@ int main(int argc, char** argv) {
     c->gGlobals.data = &globals;
     c->gWave.data = &wave;
     c->gPoints.data = &points;
+    if (cfg.count("points")) {
+        points.assign(cfg["points"].size() / 4 + 1, float4(0, 0, 0, 0));
+        for (size_t i = 0; i + 3 < cfg["points"].size(); i += 4)
+            points[i / 4] = float4((float)cfg["points"][i], (float)cfg["points"][i + 1], (float)cfg["points"][i + 2],
+                                   (float)cfg["points"][i + 3]);
+    }
+    std::vector<float> spec(1, 0.f);
+    if (cfg.count("spec")) {
+        spec.assign(cfg["spec"].begin(), cfg["spec"].end());
+        c->gSpec.data = &spec;
+        c->gSpec.w = (int)c->fSpecW;
+        c->gSpec.h = (int)c->fSpecTex;
+    }
 
     if (mode == "raster") {
         int W = (int)c->fViewport.x, H = (int)c->fViewport.y;
         std::vector<float> img((size_t)W * H * 4, 0.f);
         std::vector<double>& passes = cfg["passes"];  // pairs: pass, count
         for (size_t pi = 0; pi + 1 < passes.size(); pi += 2) {
-            c->pPass = (uint)passes[pi];
+            c->pPass = (uint)passes[pi] % 100u;  // 100 + pass: the Reflection twin
+            c->pPad0 = passes[pi] >= 100 ? 1u : 0u;
             uint count = (uint)passes[pi + 1];
             for (uint id = 0; id < count; id++) {
                 Ctx::Prim pr = c->BuildPrim(c->pPass, id);
+                if (c->pPad0 != 0u) pr = c->ReflectPrim(pr);
                 Ctx::VsOut v0 = c->EmitVertex(pr, 0), v3 = c->EmitVertex(pr, 3);
                 if (pr.kind == 3u) continue;
                 float lx = v0.pix.x, ly = v0.pix.y, hx = v3.pix.x, hy = v3.pix.y;

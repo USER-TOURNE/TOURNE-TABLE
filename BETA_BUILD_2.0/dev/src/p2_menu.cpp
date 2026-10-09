@@ -53,7 +53,11 @@ static const VizMenuOption kShapes[] = {
     {L"stereo", L"Stereo"},     {L"mountain", L"Mountain"},         {L"mirror", L"Mirror"},
     {L"wave", L"Wave"},         {L"breathe", L"Breathe"},           {L"dots", L"Dots"},
     {L"radial", L"Radial"},     {L"oscilloscope", L"Oscilloscope"}, {L"goniometer", L"Goniometer"},
-    {L"terminal", L"Terminal"}};
+    {L"terminal", L"Terminal"},
+    // Styles (2.1), in VizStyle order after the shapes (see VizShapeMenuIndex).
+    {L"led", L"LED Meter"},     {L"line", L"Line Spectrum"},        {L"bloom", L"Polar Bloom"},
+    {L"spectrogram", L"Spectrogram"}, {L"vu", L"VU Needles"},       {L"stereo_field", L"Stereo Field"},
+    {L"particles", L"Particles"}};
 static const VizMenuOption kColorModes[] = {
     {L"solid", L"Solid"},          {L"gradient", L"Gradient"},           {L"reactive_gradient", L"Reactive Gradient"},
     {L"accent", L"Windows Accent"}, {L"album_art", L"Album Art"},         {L"dynamic_album", L"Dynamic Album"},
@@ -86,11 +90,7 @@ void VizApplyMenuOverrides() {
         PCWSTR v = kv.second.c_str();
         auto is = [&](PCWSTR s) { return wcscmp(v, s) == 0; };
         if (k == L"shape") {
-            g_settings.shape = is(L"mountain") ? VizShape::Mountain : is(L"mirror") ? VizShape::Mirror
-                             : is(L"wave") ? VizShape::Wave : is(L"breathe") ? VizShape::Breathe
-                             : is(L"dots") ? VizShape::Dots : is(L"radial") ? VizShape::Radial
-                             : is(L"oscilloscope") ? VizShape::Oscilloscope : is(L"goniometer") ? VizShape::Goniometer
-                             : is(L"terminal") ? VizShape::Terminal : VizShape::Stereo;
+            VizParseShape(v, &g_settings.shape, &g_settings.style);
         } else if (k == L"colorMode") {
             g_settings.colorMode = is(L"gradient") ? VizColorMode::Gradient
                                  : is(L"reactive_gradient") ? VizColorMode::ReactiveGradient
@@ -158,7 +158,7 @@ static std::wstring CurrentValue(const std::wstring& key) {
     auto pick = [](const VizMenuOption* opts, size_t n, int index) -> std::wstring {
         return (index >= 0 && (size_t)index < n) ? opts[index].value : L"";
     };
-    if (key == L"shape") return pick(kShapes, ARRAYSIZE(kShapes), (int)g_settings.shape);
+    if (key == L"shape") return pick(kShapes, ARRAYSIZE(kShapes), VizShapeMenuIndex());
     if (key == L"colorMode") return pick(kColorModes, ARRAYSIZE(kColorModes), (int)g_settings.colorMode);
     if (key == L"termStyle") return pick(kTermStyles, ARRAYSIZE(kTermStyles), (int)g_settings.termStyle);
     if (key == L"engine") return pick(kEngines, ARRAYSIZE(kEngines), (int)g_settings.engine);

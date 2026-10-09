@@ -690,6 +690,16 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
         - oscilloscope: Oscilloscope
         - goniometer: Goniometer (stereo field)
         - terminal: Terminal (text characters, see the Terminal section)
+        - led: LED Meter (segmented, green / amber / red)
+        - line: Line Spectrum (filled curve, glowing edge)
+        - bloom: Polar Bloom (Radial as one filled shape)
+        - spectrogram: Spectrogram (scrolling colour history)
+        - vu: VU Needles (two analog meters, L and R)
+        - stereo_field: Stereo Field (left above, right below)
+        - particles: Particles (bars plus sparks on each beat)
+    - reflection: 0
+      $name: Reflection
+      $description: 0-100. Mirrors the bars onto a floor beneath them, fading out over this percentage of Bar Max Size. Horizontal bars anchored to the bottom only, with the bar shapes, LED Meter, Line Spectrum and Particles. Direct3D 11 renderer only
     - orientation: horizontal
       $name: Orientation
       $description: Whether bars run left-to-right or bottom-to-top
@@ -1316,6 +1326,12 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
     - anchorOffsetY: 8
       $name: Anchor Inset Y
       $description: Distance in from the panel's top or bottom edge, in pixels. Only used with a panel anchor
+    - layout: strip
+      $name: Layout
+      $description: Strip is the three buttons. Card is a small media card in the same place, sized from Icon Size and Icon Spacing - the album art (hover it for previous / play / next), a seek bar (click or drag), a speaker button that switches the Windows default output in one click, and a volume slider (drag it, or scroll anywhere on the card)
+      $options:
+        - strip: Strip (three buttons)
+        - card: Card (art, seek, output, volume)
   $name: Media Controls
 - background:
     - enabled: true
@@ -1455,6 +1471,7 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
 #include <shlwapi.h>
 #include <shellapi.h>
 #include <mmdeviceapi.h>
+#include <endpointvolume.h>
 #include <audioclient.h>
 #include <wrl/client.h>
 #include <wincodec.h>
@@ -1563,6 +1580,7 @@ enum class VizNpPlacement { Above, PanelTop, PanelBottom };
 enum class VizProgressPlacement { Below, Above, PanelBottom };
 enum class VizMediaAnchor { Screen, PanelTopLeft, PanelTopRight, PanelBottomLeft, PanelBottomRight };
 enum class VizContextMenu { RightClick, CtrlRightClick, Off };
+enum class VizStyle { None, Led, Line, Bloom, Spectrogram, Vu, SplitLR, Particles };
 
 struct Settings {
     VizShape shape = VizShape::Stereo;
@@ -1668,6 +1686,7 @@ struct Settings {
     int mediaIconSpacing = 14;
     BYTE mediaPlateA = 0, mediaPlateR = 0, mediaPlateG = 0, mediaPlateB = 0;
     int mediaPlatePadding = 0;
+    bool mediaCard = false;  // Media Controls > Layout = Card (2.1)
     int mediaPlateCornerRadius = 8;
     int mediaPlateBorderSize = 0;
     BYTE mediaPlateBorderA = 0x40, mediaPlateBorderR = 255, mediaPlateBorderG = 255,
@@ -1709,6 +1728,10 @@ struct Settings {
 
     // Audio source (2.0): "" / default_output, default_input, id:<endpoint>, name:<text>.
     std::wstring audioSourceKey;
+
+    // Styles (2.1): picked from the Shape list on top of an internal shape.
+    VizStyle style = VizStyle::None;
+    int reflection = 0;  // %, of Bar Max Size
 
     // Media widget (2.0).
     VizNpLayout npLayout = VizNpLayout::OneLine;
@@ -2209,6 +2232,41 @@ static HANDLE g_gsmtcStopEvent = nullptr;
 // pair. This is the documented form for a global worker thread.
 [[clang::no_destroy]] static std::optional<std::thread> g_gsmtcThread;
 static std::thread* g_albumArtThread = nullptr;
+
+// Media Card (2.1): the cover, box-filtered down to at most 160 px, straight
+// alpha BGRA as WIC decodes it. Written by the album-art thread, read by the
+// media window's paint.
+std::mutex g_artTileMutex;
+std::vector<BYTE> g_artTile;
+int g_artTileW = 0, g_artTileH = 0;
+std::atomic<int64_t> g_mediaSeekTicks{0};  // seek target for media command 3, 100 ns units
+
+void VizStoreArtTile(const BYTE* px, int w, int h) {
+    std::vector<BYTE> out;
+    int ow = 0, oh = 0;
+    if (px && w > 0 && h > 0) {
+        int f = std::max(1, (std::max(w, h) + 159) / 160);
+        ow = std::max(1, w / f);
+        oh = std::max(1, h / f);
+        out.resize((size_t)ow * oh * 4);
+        for (int y = 0; y < oh; y++)
+            for (int x = 0; x < ow; x++)
+                for (int k = 0; k < 4; k++) {
+                    unsigned sum = 0;
+                    for (int yy = 0; yy < f; yy++)
+                        for (int xx = 0; xx < f; xx++) sum += px[((size_t)(y * f + yy) * w + (x * f + xx)) * 4 + k];
+                    out[((size_t)y * ow + x) * 4 + k] = (BYTE)(sum / (unsigned)(f * f));
+                }
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_artTileMutex);
+        if (out.empty() && g_artTile.empty()) return;
+        g_artTile.swap(out);
+        g_artTileW = ow;
+        g_artTileH = oh;
+    }
+    if (g_mediaWnd && g_settings.mediaCard) PostMessage(g_mediaWnd, WM_APP_MEDIA_REPAINT, 0, 0);
+}
 // Guards the pointer above: callers arrive from WinRT callbacks, the GSMTC
 // thread and the UI thread, and the worker can clear the pending flag before
 // the caller has stored its new thread.
@@ -3057,7 +3115,7 @@ void FetchAlbumArtColorAsync() {
             }
 
             auto thumbRef = props.Thumbnail();
-            if (!thumbRef) { winrt::uninit_apartment(); g_albumArtFetchPending.store(false); return; }
+            if (!thumbRef) { VizStoreArtTile(nullptr, 0, 0); winrt::uninit_apartment(); g_albumArtFetchPending.store(false); return; }
 
             auto stream = thumbRef.OpenReadAsync().get();
             if (!stream) { winrt::uninit_apartment(); g_albumArtFetchPending.store(false); return; }
@@ -3108,6 +3166,7 @@ void FetchAlbumArtColorAsync() {
             pStream->Release();
             pFactory->Release();
 
+            if (!pixels.empty()) VizStoreArtTile(pixels.data(), imgW, imgH);
             if (!pixels.empty()) {
                 struct Bucket { uint32_t r=0,g=0,b=0,n=0; };
                 Bucket buckets[16][16][16]{};
@@ -3336,6 +3395,8 @@ void SendMediaCommand(int cmd) {
                     if (cmd == 0)      session.TrySkipPreviousAsync().get();
                     else if (cmd == 1) session.TryTogglePlayPauseAsync().get();
                     else if (cmd == 2) session.TrySkipNextAsync().get();
+                    else if (cmd == 3)
+                        session.TryChangePlaybackPositionAsync(g_mediaSeekTicks.load(std::memory_order_relaxed)).get();
                 }
             }
         } catch (...) {}
@@ -3543,6 +3604,328 @@ int GetMediaPlatePaddingPx() {
     return std::max(0, (int)std::lround(g_settings.mediaPlatePadding * GetMediaControlsDpiScale()));
 }
 
+// ---- Media Card (2.1) -------------------------------------------------------------------
+// Media Controls > Layout = Card turns the three-button strip into a small
+// card, after the Rainmeter media modules:
+//   album art   the current track's cover; hover it for prev / play / next
+//   seek bar    the track position; click or drag it to seek
+//   output      the speaker button lists the outputs, one click switches the
+//               Windows default (the visualizer follows if it listens to it)
+//   volume      drag the slider, or scroll anywhere on the card
+// It is the same layered window as the strip, painted in software, and only
+// repainted when something on it changes: hover, a click, a new cover, the
+// volume, or the seek bar moving by a whole pixel (checked once a second
+// while a track plays).
+
+float VizCardGetVolume();                 // default output, 0..1, or -1
+void VizCardSetVolume(float v);
+void VizCardOutputMenu(HWND hWnd, POINT screenPt);
+
+constexpr UINT_PTR kCardTimer = 0x7701;
+
+bool VizCardActive() { return g_settings.mediaCard; }
+
+struct VizCardGeom {
+    int pad, tile, gap, progY, progH, rowY, rowH, w, h;
+    float dpi;
+};
+
+VizCardGeom VizCardLayout() {
+    VizCardGeom g;
+    g.dpi = GetMediaControlsDpiScale();
+    int s = std::max(1, (int)std::lround(g_settings.mediaIconSize * g.dpi));
+    int sp = std::max(0, (int)std::lround(g_settings.mediaIconSpacing * g.dpi));
+    g.pad = std::max(GetMediaPlatePaddingPx(), (int)std::lround(8 * g.dpi));
+    g.tile = s * 3 + sp * 2;
+    g.gap = std::max(4, (int)std::lround(7 * g.dpi));
+    g.progH = std::max(3, (int)std::lround(3 * g.dpi));
+    g.progY = g.pad + g.tile + g.gap;
+    g.rowH = std::max((int)std::lround(18 * g.dpi), (int)std::lround(s * 0.6f));
+    g.rowY = g.progY + g.progH + g.gap;
+    g.w = g.tile + g.pad * 2;
+    g.h = g.rowY + g.rowH + g.pad;
+    return g;
+}
+
+void VizCardSize(int* w, int* h) {
+    VizCardGeom g = VizCardLayout();
+    *w = g.w;
+    *h = g.h;
+}
+
+namespace {
+enum CardPart { kPartNone, kPartArt, kPartSeek, kPartSpeaker, kPartVolume };
+bool s_cardHover = false, s_cardTracking = false;
+int s_cardDrag = kPartNone;
+int s_cardHoverPart = kPartNone;
+float s_cardSeekPreview = -1.f;  // while dragging the seek bar
+float s_cardVolume = -1.f;
+int s_cardProgPx = -1;
+
+// Straight-alpha colour over the premultiplied buffer, with coverage.
+void CardBlend(BYTE* p, float r, float g, float b, float a) {
+    if (a <= 0.f) return;
+    BlendPremultipliedOver(p, (BYTE)std::lround(b * a * 255.f), (BYTE)std::lround(g * a * 255.f),
+                           (BYTE)std::lround(r * a * 255.f), (BYTE)std::lround(a * 255.f));
+}
+
+// Coverage of a pixel by a rounded rect (signed distance, one pixel of AA).
+float CardRoundCov(float px, float py, float l, float t, float r, float b, float rad) {
+    float cx = (l + r) * 0.5f, cy = (t + b) * 0.5f, hx = (r - l) * 0.5f, hy = (b - t) * 0.5f;
+    rad = std::min({rad, hx, hy});
+    float qx = fabsf(px - cx) - hx + rad, qy = fabsf(py - cy) - hy + rad;
+    float d = sqrtf(std::max(qx, 0.f) * std::max(qx, 0.f) + std::max(qy, 0.f) * std::max(qy, 0.f)) +
+              std::min(std::max(qx, qy), 0.f) - rad;
+    return std::clamp(0.5f - d, 0.f, 1.f);
+}
+
+void CardFillRound(BYTE* buf, int stride, int W, int H, float l, float t, float r, float b, float rad, float cr,
+                   float cg, float cb, float ca) {
+    int x0 = std::max(0, (int)floorf(l)), x1 = std::min(W, (int)ceilf(r));
+    int y0 = std::max(0, (int)floorf(t)), y1 = std::min(H, (int)ceilf(b));
+    for (int y = y0; y < y1; y++)
+        for (int x = x0; x < x1; x++) {
+            float cov = CardRoundCov(x + 0.5f, y + 0.5f, l, t, r, b, rad);
+            if (cov > 0.f) CardBlend(buf + (size_t)y * stride + (size_t)x * 4, cr, cg, cb, ca * cov);
+        }
+}
+
+// A small speaker: body, cone, and one or two sound waves by volume.
+void CardSpeaker(BYTE* buf, int stride, int ox, int oy, int sz, float vol, float ir, float ig, float ib, float ia) {
+    float s = (float)sz;
+    for (int y = 0; y < sz; y++)
+        for (int x = 0; x < sz; x++) {
+            float cov = 0.f;
+            for (int k = 0; k < 4; k++) {
+                float px = x + ((k & 1) + 0.5f) / 2.f, py = y + ((k >> 1) + 0.5f) / 2.f;
+                float u = px / s, v = py / s;
+                bool in = (u >= 0.14f && u <= 0.3f && v >= 0.38f && v <= 0.62f) ||
+                          PointInTriangle(px, py, s * 0.3f, s * 0.38f, s * 0.3f, s * 0.62f, s * 0.5f, s * 0.2f) ||
+                          PointInTriangle(px, py, s * 0.3f, s * 0.62f, s * 0.5f, s * 0.8f, s * 0.5f, s * 0.2f);
+                float dx = u - 0.5f, dy = v - 0.5f, rr = sqrtf(dx * dx + dy * dy);
+                bool arcs = dx > 0.05f && fabsf(dy) < dx * 1.1f;
+                if (arcs && vol > 0.01f && fabsf(rr - 0.2f) < 0.035f) in = true;
+                if (arcs && vol > 0.5f && fabsf(rr - 0.33f) < 0.035f) in = true;
+                if (in) cov += 0.25f;
+            }
+            if (cov > 0.f) CardBlend(buf + (size_t)(oy + y) * stride + (size_t)(ox + x) * 4, ir, ig, ib, ia * cov);
+        }
+}
+
+int CardHit(const VizCardGeom& g, int x, int y) {
+    int slack = (int)std::lround(5 * g.dpi);
+    if (x >= g.pad && x < g.pad + g.tile && y >= g.pad && y < g.pad + g.tile) return kPartArt;
+    if (x >= g.pad && x < g.pad + g.tile && y >= g.progY - slack && y < g.progY + g.progH + slack) return kPartSeek;
+    if (y >= g.rowY && y < g.rowY + g.rowH) {
+        if (x >= g.pad && x < g.pad + g.rowH) return kPartSpeaker;
+        if (x >= g.pad + g.rowH && x < g.pad + g.tile + slack) return kPartVolume;
+    }
+    return kPartNone;
+}
+
+float CardSliderFrac(const VizCardGeom& g, int x) {
+    float l = (float)(g.pad + g.rowH + g.gap), r = (float)(g.pad + g.tile) - 6.f * g.dpi;
+    return std::clamp((x - l) / std::max(1.f, r - l), 0.f, 1.f);
+}
+
+void CardRepaint() {
+    if (g_mediaWnd) PostMessage(g_mediaWnd, WM_APP_MEDIA_REPAINT, 0, 0);
+}
+
+// Seek to a fraction of the track, through the media command thread.
+void CardSeek(float frac) {
+    int64_t start = g_tlStart.load(std::memory_order_relaxed), end = g_tlEnd.load(std::memory_order_relaxed);
+    if (!g_tlValid.load(std::memory_order_relaxed) || end <= start) return;
+    g_mediaSeekTicks.store(start + (int64_t)((double)(end - start) * std::clamp(frac, 0.f, 1.f)),
+                           std::memory_order_relaxed);
+    SendMediaCommand(3);
+}
+}  // namespace
+
+void VizPaintCard(BYTE* buf, int stride, int W, int H) {
+    VizCardGeom g = VizCardLayout();
+    const float ir = g_settings.mediaIconColorR / 255.f, ig = g_settings.mediaIconColorG / 255.f,
+                ib = g_settings.mediaIconColorB / 255.f, ia = g_settings.mediaIconColorA / 255.f;
+    // Card background: the plate colour if one is set, otherwise dark glass.
+    // Never fully transparent: a layered window lets clicks through pixels
+    // with zero alpha, and the card should take every click inside it.
+    bool plate = g_settings.mediaPlateA > 0;
+    CardFillRound(buf, stride, W, H, 0.f, 0.f, (float)W, (float)H, 10.f * g.dpi,
+                  plate ? g_settings.mediaPlateR / 255.f : 0.04f, plate ? g_settings.mediaPlateG / 255.f : 0.04f,
+                  plate ? g_settings.mediaPlateB / 255.f : 0.05f, plate ? g_settings.mediaPlateA / 255.f : 0.62f);
+
+    // Album art, scaled bilinearly into the tile with rounded corners.
+    const float tl = (float)g.pad, tt = (float)g.pad, ts = (float)g.tile, rad = 7.f * g.dpi;
+    bool art = false;
+    {
+        std::lock_guard<std::mutex> lock(g_artTileMutex);
+        if (!g_artTile.empty() && g_artTileW > 0 && g_artTileH > 0) {
+            art = true;
+            const int aw = g_artTileW, ah = g_artTileH;
+            for (int y = 0; y < g.tile; y++)
+                for (int x = 0; x < g.tile; x++) {
+                    float cov = CardRoundCov(tl + x + 0.5f, tt + y + 0.5f, tl, tt, tl + ts, tt + ts, rad);
+                    if (cov <= 0.f) continue;
+                    float u = (x + 0.5f) / ts * aw - 0.5f, v = (y + 0.5f) / ts * ah - 0.5f;
+                    int x0 = std::clamp((int)floorf(u), 0, aw - 1), y0 = std::clamp((int)floorf(v), 0, ah - 1);
+                    int x1 = std::min(x0 + 1, aw - 1), y1 = std::min(y0 + 1, ah - 1);
+                    float fx = std::clamp(u - x0, 0.f, 1.f), fy = std::clamp(v - y0, 0.f, 1.f);
+                    float c[4];
+                    for (int k = 0; k < 4; k++) {
+                        auto px = [&](int xx, int yy) { return g_artTile[((size_t)yy * aw + xx) * 4 + k] / 255.f; };
+                        c[k] = (px(x0, y0) * (1 - fx) + px(x1, y0) * fx) * (1 - fy) +
+                               (px(x0, y1) * (1 - fx) + px(x1, y1) * fx) * fy;
+                    }
+                    CardBlend(buf + (size_t)(g.pad + y) * stride + (size_t)(g.pad + x) * 4, c[2], c[1], c[0], c[3] * cov);
+                }
+        }
+    }
+    if (!art) CardFillRound(buf, stride, W, H, tl, tt, tl + ts, tt + ts, rad, 1.f, 1.f, 1.f, 0.06f);
+
+    // Controls over the art: on hover, or always when there is no cover.
+    if (!art || s_cardHoverPart == kPartArt) {
+        if (art) CardFillRound(buf, stride, W, H, tl, tt, tl + ts, tt + ts, rad, 0.f, 0.f, 0.f, 0.45f);
+        int gs = std::max(8, g.tile / 4);
+        int gy = g.pad + (g.tile - gs) / 2;
+        bool playing = g_mediaIsPlaying.load(std::memory_order_relaxed);
+        int slot = g.tile / 3;
+        DrawBuiltinGlyph(buf, stride, g.pad + (slot - gs) / 2, gy, gs, 0);
+        DrawBuiltinGlyph(buf, stride, g.pad + slot + (slot - gs) / 2, gy, gs, playing ? 2 : 1);
+        DrawBuiltinGlyph(buf, stride, g.pad + 2 * slot + (slot - gs) / 2, gy, gs, 3);
+    }
+
+    // Seek bar.
+    float prog = s_cardSeekPreview >= 0.f ? s_cardSeekPreview : VizTrackProgress();
+    bool seekHot = s_cardHoverPart == kPartSeek || s_cardDrag == kPartSeek;
+    float ph = seekHot ? g.progH + 2.f * g.dpi : (float)g.progH;
+    float py = g.progY + g.progH * 0.5f - ph * 0.5f;
+    CardFillRound(buf, stride, W, H, tl, py, tl + ts, py + ph, ph * 0.5f, ir, ig, ib, ia * 0.22f);
+    if (prog >= 0.f) {
+        float px = tl + ts * std::clamp(prog, 0.f, 1.f);
+        CardFillRound(buf, stride, W, H, tl, py, std::max(px, tl + ph), py + ph, ph * 0.5f, ir, ig, ib, ia * 0.9f);
+        if (seekHot) {
+            float kr = ph * 1.1f;
+            CardFillRound(buf, stride, W, H, px - kr, py + ph * 0.5f - kr, px + kr, py + ph * 0.5f + kr, kr, ir, ig, ib, ia);
+        }
+        s_cardProgPx = (int)lroundf(ts * std::clamp(prog, 0.f, 1.f));
+    }
+
+    // Output button and volume slider.
+    s_cardVolume = VizCardGetVolume();
+    int spk = g.rowH;
+    float spA = s_cardHoverPart == kPartSpeaker ? ia : ia * 0.8f;
+    CardSpeaker(buf, stride, g.pad, g.rowY, spk, std::max(0.f, s_cardVolume), ir, ig, ib, spA);
+    if (s_cardVolume >= 0.f) {
+        float l = (float)(g.pad + g.rowH + g.gap), r = (float)(g.pad + g.tile) - 6.f * g.dpi;
+        float cy = g.rowY + g.rowH * 0.5f, th = std::max(2.f, 3.f * g.dpi);
+        CardFillRound(buf, stride, W, H, l, cy - th * 0.5f, r, cy + th * 0.5f, th * 0.5f, ir, ig, ib, ia * 0.22f);
+        float kx = l + (r - l) * s_cardVolume;
+        CardFillRound(buf, stride, W, H, l, cy - th * 0.5f, std::max(kx, l + th), cy + th * 0.5f, th * 0.5f, ir, ig, ib, ia * 0.9f);
+        float kr = (s_cardHoverPart == kPartVolume || s_cardDrag == kPartVolume) ? 6.f * g.dpi : 4.5f * g.dpi;
+        CardFillRound(buf, stride, W, H, kx - kr, cy - kr, kx + kr, cy + kr, kr, ir, ig, ib, ia);
+    }
+}
+
+// Mouse and timer messages for the card. Returns true when handled.
+bool VizCardMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    VizCardGeom g = VizCardLayout();
+    int x = GET_X_LPARAM(lParam), y = GET_Y_LPARAM(lParam);
+    switch (msg) {
+        case WM_MOUSEMOVE: {
+            if (!s_cardTracking) {
+                TRACKMOUSEEVENT tme = {sizeof(tme), TME_LEAVE, hWnd, 0};
+                s_cardTracking = TrackMouseEvent(&tme) != FALSE;
+            }
+            s_cardHover = true;
+            int part = s_cardDrag != kPartNone ? s_cardDrag : CardHit(g, x, y);
+            bool repaint = part != s_cardHoverPart;
+            s_cardHoverPart = part;
+            if (s_cardDrag == kPartVolume) {
+                VizCardSetVolume(CardSliderFrac(g, x));
+                repaint = true;
+            } else if (s_cardDrag == kPartSeek) {
+                s_cardSeekPreview = std::clamp((x - g.pad) / (float)std::max(1, g.tile), 0.f, 1.f);
+                repaint = true;
+            }
+            if (repaint) CardRepaint();
+            return true;
+        }
+        case WM_MOUSELEAVE:
+            s_cardTracking = false;
+            s_cardHover = false;
+            if (s_cardDrag == kPartNone && s_cardHoverPart != kPartNone) {
+                s_cardHoverPart = kPartNone;
+                CardRepaint();
+            }
+            return true;
+        case WM_LBUTTONDOWN: {
+            int part = CardHit(g, x, y);
+            if (part == kPartSeek || part == kPartVolume) {
+                s_cardDrag = part;
+                SetCapture(hWnd);
+                if (part == kPartVolume) VizCardSetVolume(CardSliderFrac(g, x));
+                else s_cardSeekPreview = std::clamp((x - g.pad) / (float)std::max(1, g.tile), 0.f, 1.f);
+                CardRepaint();
+            }
+            return true;
+        }
+        case WM_LBUTTONUP: {
+            int drag = s_cardDrag;
+            s_cardDrag = kPartNone;
+            if (GetCapture() == hWnd) ReleaseCapture();
+            if (drag == kPartSeek) {
+                CardSeek(s_cardSeekPreview);
+                s_cardSeekPreview = -1.f;
+                CardRepaint();
+                return true;
+            }
+            if (drag == kPartVolume) {
+                CardRepaint();
+                return true;
+            }
+            int part = CardHit(g, x, y);
+            if (part == kPartArt) {
+                int third = std::clamp((x - g.pad) * 3 / std::max(1, g.tile), 0, 2);
+                SendMediaCommand(third);
+            } else if (part == kPartSpeaker) {
+                POINT pt;
+                GetCursorPos(&pt);
+                VizCardOutputMenu(hWnd, pt);
+                CardRepaint();
+            }
+            return true;
+        }
+        case WM_MOUSEWHEEL: {
+            float v = VizCardGetVolume();
+            if (v >= 0.f) {
+                VizCardSetVolume(v + 0.02f * (GET_WHEEL_DELTA_WPARAM(wParam) / (float)WHEEL_DELTA));
+                CardRepaint();
+            }
+            return true;
+        }
+        case WM_TIMER:
+            if (wParam != kCardTimer) return false;
+            // Repaint only when the seek bar moved by a pixel, or the volume
+            // changed from elsewhere (the volume flyout, a keyboard key).
+            if (g_mediaIsPlaying.load(std::memory_order_relaxed) && s_cardDrag == kPartNone) {
+                float p = VizTrackProgress();
+                if (p >= 0.f && (int)lroundf(g.tile * std::clamp(p, 0.f, 1.f)) != s_cardProgPx) CardRepaint();
+            }
+            if (fabsf(VizCardGetVolume() - s_cardVolume) > 0.004f) CardRepaint();
+            return true;
+    }
+    return false;
+}
+
+// The card's once-a-second check runs only while the card is showing.
+void VizCardTimer(HWND hWnd, bool on) {
+    static bool s_on = false;
+    if (on == s_on || !hWnd) return;
+    s_on = on;
+    if (on) SetTimer(hWnd, kCardTimer, 1000, nullptr);
+    else KillTimer(hWnd, kCardTimer);
+}
+
 void PaintMediaControls(int x, int y, int width, int height) {
     if (!g_mediaWnd || width <= 0 || height <= 0) return;
 
@@ -3569,6 +3952,9 @@ void PaintMediaControls(int x, int y, int width, int height) {
     BYTE* buf = (BYTE*)bits;
     int stride = width * 4;
 
+    if (VizCardActive()) {
+        VizPaintCard(buf, stride, width, height);
+    } else {
     // Optional backing plate behind the whole strip, with an optional outline.
     // v0.5.2 drew a plate unconditionally as a fix for pale icons vanishing
     // against a pale wallpaper, which meant icons that were meant to sit
@@ -3684,6 +4070,8 @@ void PaintMediaControls(int x, int y, int width, int height) {
         BlitIcon(buf, stride, xNext, iconY, size, g_mediaIconPixels[3]);
     else DrawBuiltinGlyph(buf, stride, xNext, iconY, size, 3);
 
+    }  // strip
+
     HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, dib);
 
     POINT ptSrc = {0, 0};
@@ -3710,9 +4098,11 @@ bool g_mediaHiddenByCover = false;
 void RepositionAndRepaintMediaControls() {
     if (!g_mediaWnd) return;
     if (!g_settings.mediaControlsEnabled) {
+        VizCardTimer(g_mediaWnd, false);
         ShowWindow(g_mediaWnd, SW_HIDE);
         return;
     }
+    VizCardTimer(g_mediaWnd, VizCardActive());
     if (g_mediaHiddenByCover && g_settings.mediaHideWhenCovered) return;
 
     float dpiScale = GetMediaControlsDpiScale();
@@ -3721,6 +4111,7 @@ void RepositionAndRepaintMediaControls() {
     int pad = GetMediaPlatePaddingPx();
     int width = size * 3 + spacing * 2 + pad * 2;
     int height = size + pad * 2;
+    if (VizCardActive()) VizCardSize(&width, &height);
 
     HMONITOR monitor = GetMonitorById(g_settings.monitor - 1);
     if (!monitor) monitor = MonitorFromPoint({0, 0}, MONITOR_DEFAULTTONEAREST);
@@ -3777,6 +4168,7 @@ void RepositionAndRepaintMediaControls() {
 }
 
 LRESULT CALLBACK MediaWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    if (VizCardActive() && VizCardMessage(hWnd, uMsg, wParam, lParam)) return 0;
     switch (uMsg) {
         case WM_LBUTTONUP: {
             int x = GET_X_LPARAM(lParam);
@@ -6176,6 +6568,112 @@ std::vector<VizAudioEndpoint> VizListAudioEndpoints(IMMDeviceEnumerator* e) {
     return out;
 }
 
+// ---- Media Card (2.1): output switching and volume -------------------------------------
+// Windows has no public call to change the default output; IPolicyConfig is
+// the interface the Sound control panel itself uses, unchanged since Windows
+// 7 (only SetDefaultEndpoint is called; the slots before it keep the vtable
+// order).
+MIDL_INTERFACE("f8679f50-850a-41cf-9c72-430f290290c8")
+IVizPolicyConfig : public IUnknown {
+public:
+    virtual HRESULT STDMETHODCALLTYPE GetMixFormat(PCWSTR, WAVEFORMATEX**) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetDeviceFormat(PCWSTR, INT, WAVEFORMATEX**) = 0;
+    virtual HRESULT STDMETHODCALLTYPE ResetDeviceFormat(PCWSTR) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetDeviceFormat(PCWSTR, WAVEFORMATEX*, WAVEFORMATEX*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetProcessingPeriod(PCWSTR, INT, PINT64, PINT64) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetProcessingPeriod(PCWSTR, PINT64) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetShareMode(PCWSTR, void*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetShareMode(PCWSTR, void*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetPropertyValue(PCWSTR, const PROPERTYKEY&, PROPVARIANT*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetPropertyValue(PCWSTR, const PROPERTYKEY&, PROPVARIANT*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetDefaultEndpoint(PCWSTR, ERole) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetEndpointVisibility(PCWSTR, INT) = 0;
+};
+static const CLSID kCLSID_VizPolicyConfigClient = {0x870af99c, 0x171d, 0x4f9e, {0xaf, 0x0d, 0xe6, 0x3d, 0xf4, 0x0c, 0x2b, 0xc9}};
+static const IID kIID_VizPolicyConfig = {0xf8679f50, 0x850a, 0x41cf, {0x9c, 0x72, 0x43, 0x0f, 0x29, 0x02, 0x90, 0xc8}};
+
+namespace {
+// The default output's volume control, kept between calls and fetched again
+// after a switch, a failure, or every ten seconds (so a default changed
+// elsewhere is picked up). Media window thread only.
+ComPtr<IAudioEndpointVolume> s_cardVol;
+ULONGLONG s_cardVolTick = 0;
+
+// COM on the calling thread for the duration of a call, if it isn't already.
+struct VizComScope {
+    bool owned;
+    VizComScope() : owned(SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) {}
+    ~VizComScope() {
+        if (owned) CoUninitialize();
+    }
+};
+
+IAudioEndpointVolume* CardVolume() {
+    ULONGLONG now = GetTickCount64();
+    if (s_cardVol && now - s_cardVolTick < 10000) return s_cardVol.Get();
+    s_cardVol.Reset();
+    s_cardVolTick = now;
+    ComPtr<IMMDeviceEnumerator> e;
+    ComPtr<IMMDevice> d;
+    if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&e))) ||
+        FAILED(e->GetDefaultAudioEndpoint(eRender, eMultimedia, &d)) ||
+        FAILED(d->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, nullptr, (void**)s_cardVol.GetAddressOf())))
+        s_cardVol.Reset();
+    return s_cardVol.Get();
+}
+}  // namespace
+
+float VizCardGetVolume() {
+    VizComScope com;
+    IAudioEndpointVolume* v = CardVolume();
+    float level = -1.f;
+    if (v && FAILED(v->GetMasterVolumeLevelScalar(&level))) {
+        s_cardVol.Reset();
+        level = -1.f;
+    }
+    return level;
+}
+
+void VizCardSetVolume(float level) {
+    VizComScope com;
+    IAudioEndpointVolume* v = CardVolume();
+    if (v) v->SetMasterVolumeLevelScalar(std::clamp(level, 0.f, 1.f), nullptr);
+}
+
+// One click: the outputs, the current default ticked; picking one makes it
+// the default for every role, as the Sound settings page does.
+void VizCardOutputMenu(HWND hWnd, POINT pt) {
+    VizComScope com;
+    ComPtr<IMMDeviceEnumerator> e;
+    if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&e)))) return;
+    std::wstring current;
+    {
+        ComPtr<IMMDevice> d;
+        if (SUCCEEDED(e->GetDefaultAudioEndpoint(eRender, eMultimedia, &d))) current = VizDeviceId(d.Get());
+    }
+    std::vector<VizAudioEndpoint> outs;
+    for (auto& ep : VizListAudioEndpoints(e.Get()))
+        if (ep.render) outs.push_back(ep);
+    if (outs.empty()) return;
+    HMENU menu = CreatePopupMenu();
+    if (!menu) return;
+    for (size_t i = 0; i < outs.size(); i++)
+        AppendMenuW(menu, MF_STRING | (outs[i].id == current ? MF_CHECKED : 0), 1 + i, outs[i].name.c_str());
+    SetForegroundWindow(hWnd);  // so a click elsewhere closes the menu
+    UINT cmd = (UINT)TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_BOTTOMALIGN, pt.x, pt.y, hWnd, nullptr);
+    PostMessage(hWnd, WM_NULL, 0, 0);
+    DestroyMenu(menu);
+    if (cmd < 1 || cmd > outs.size() || outs[cmd - 1].id == current) return;
+    ComPtr<IVizPolicyConfig> pc;
+    if (FAILED(CoCreateInstance(kCLSID_VizPolicyConfigClient, nullptr, CLSCTX_ALL, kIID_VizPolicyConfig,
+                                (void**)pc.GetAddressOf())) || !pc) {
+        Wh_Log(L"[Media] output switch unavailable");
+        return;
+    }
+    for (ERole role : {eConsole, eMultimedia, eCommunications}) pc->SetDefaultEndpoint(outs[cmd - 1].id.c_str(), role);
+    s_cardVol.Reset();  // the volume now belongs to the new output
+}
+
 // Resolves a source key to a device. Falls back to the default output (and
 // says so through *fellBack) when the asked-for device isn't there, so a
 // device that was unplugged or renamed leaves the visualizer working.
@@ -6448,6 +6946,7 @@ VizMeterValues g_meters;
 std::mutex g_gonioMutex;
 std::vector<float> g_gonioXY;
 std::atomic<uint32_t> g_gonioSerial{0};
+std::atomic<uint32_t> g_vizStereoRate{48000};  // sample rate of g_gonioXY, for Stereo Field
 
 // Engine thread control.
 std::atomic<bool> g_captureWanted{false};
@@ -7349,6 +7848,7 @@ private:
             }
         }
         gonioPending_.clear();
+        g_vizStereoRate.store(sampleRate_, std::memory_order_relaxed);
         g_gonioSerial.fetch_add(1, std::memory_order_release);
     }
 
@@ -7756,7 +8256,8 @@ void VizPublishEngineConfig() {
     // True peak and correlation are only shown by the full loudness readout
     // (correlation also under the Goniometer), so only then are they measured.
     c.wantTruePeak = readout && g_settings.readout == VizReadout::LoudnessFull;
-    c.wantGonio = g_settings.shape == VizShape::Goniometer;
+    c.wantGonio = g_settings.shape == VizShape::Goniometer || g_settings.style == VizStyle::Vu ||
+                  g_settings.style == VizStyle::SplitLR;
     c.wantCorrelation = c.wantTruePeak || c.wantGonio;
 
     // Oscilloscope and Goniometer draw no bars, but the bands still feed the
@@ -7778,7 +8279,7 @@ void VizPublishEngineConfig() {
         s.bars = 24;
         if (!c.wantDominant) s.maxTier = 0;
     }
-    c.beat = g_settings.beatFlashEnabled;
+    c.beat = g_settings.beatFlashEnabled || g_settings.style == VizStyle::Particles;
     c.loudnessResetOnTrack = g_settings.loudnessResetOnTrack;
     {
         std::lock_guard<std::mutex> lock(g_engineCfgMutex);
@@ -8611,6 +9112,585 @@ bool PointInVisualizerBounds(POINT pt) {
     return pt.x >= l && pt.x < r && pt.y >= t && pt.y < b;
 }
 
+// ---- Styles (2.1) ---------------------------------------------------------------------
+// Eight new looks, picked from the Shape list like the shapes. Each one rides
+// on an existing shape underneath (Bloom on Radial, the rest on Stereo), so
+// the bar maths, layout, panel and settings all keep working unchanged, and
+// a style only adds what it really needs:
+//   LED Meter      segmented bars, green / amber / red, peak segment held
+//   Line Spectrum  a smooth filled curve through the bar tops, glowing edge
+//   Polar Bloom    the Radial bars joined into one filled shape
+//   Spectrogram    a scrolling colour history of the bars, with a legend
+//   VU Needles     two analog L / R meters with real VU ballistics
+//   Stereo Field   the left channel above the centre line, the right below
+//   Particles      the bars, plus sparks thrown off their tops on each beat
+// Reflection (Appearance) mirrors the bar styles onto the floor beneath them.
+//
+// Spectrogram, Stereo Field and Particles need the bar levels on the CPU, so
+// with them the analysis runs there (Hybrid), as with Terminal.
+
+static const float kVizSpecRate = 60.f;  // Spectrogram rows per second
+constexpr int kVizSpecRows = 256;        // rows kept (the texture's height)
+constexpr int kVizSparkMax = 512;
+
+bool VizParseShape(PCWSTR v, VizShape* shape, VizStyle* style) {
+    struct Entry { const wchar_t* name; VizShape shape; VizStyle style; };
+    static const Entry kEntries[] = {
+        {L"stereo", VizShape::Stereo, VizStyle::None},         {L"mountain", VizShape::Mountain, VizStyle::None},
+        {L"mirror", VizShape::Mirror, VizStyle::None},         {L"wave", VizShape::Wave, VizStyle::None},
+        {L"breathe", VizShape::Breathe, VizStyle::None},       {L"dots", VizShape::Dots, VizStyle::None},
+        {L"radial", VizShape::Radial, VizStyle::None},         {L"oscilloscope", VizShape::Oscilloscope, VizStyle::None},
+        {L"goniometer", VizShape::Goniometer, VizStyle::None}, {L"terminal", VizShape::Terminal, VizStyle::None},
+        {L"led", VizShape::Stereo, VizStyle::Led},             {L"line", VizShape::Stereo, VizStyle::Line},
+        {L"bloom", VizShape::Radial, VizStyle::Bloom},         {L"spectrogram", VizShape::Stereo, VizStyle::Spectrogram},
+        {L"vu", VizShape::Stereo, VizStyle::Vu},               {L"stereo_field", VizShape::Stereo, VizStyle::SplitLR},
+        {L"particles", VizShape::Stereo, VizStyle::Particles},
+    };
+    for (const Entry& e : kEntries) {
+        if (v && wcscmp(v, e.name) == 0) {
+            *shape = e.shape;
+            *style = e.style;
+            return true;
+        }
+    }
+    *shape = VizShape::Stereo;
+    *style = VizStyle::None;
+    return false;
+}
+
+// Position in the right-click menu's Shape list: the ten shapes, then the styles.
+int VizShapeMenuIndex() {
+    return g_settings.style != VizStyle::None ? 9 + (int)g_settings.style : (int)g_settings.shape;
+}
+
+bool VizStyleNeedsCpuBars() {
+    VizStyle s = g_settings.style;
+    return s == VizStyle::Spectrogram || s == VizStyle::SplitLR || s == VizStyle::Particles;
+}
+
+// Reflection: horizontal bars standing on the bottom edge only, where there
+// is a floor to reflect in.
+bool VizReflectionActive() {
+    if (g_settings.reflection <= 0) return false;
+    if (g_settings.orientation != VizOrientation::Horizontal) return false;
+    if (g_settings.verticalAnchor != VizAnchor::Bottom) return false;
+    VizStyle st = g_settings.style;
+    if (!(st == VizStyle::None || st == VizStyle::Led || st == VizStyle::Line || st == VizStyle::Particles)) return false;
+    VizShape s = g_settings.shape;
+    return s == VizShape::Stereo || s == VizShape::Mountain || s == VizShape::Mirror || s == VizShape::Wave ||
+           s == VizShape::Breathe || s == VizShape::Dots;
+}
+
+float VizReflectionDepth(float maxSize) { return maxSize * std::clamp(g_settings.reflection, 0, 100) / 100.f; }
+
+// The styles' extra room, applied after the shapes have sized the box.
+void VizStyleBox(float* w, float* h, float maxSize, bool horizontal) {
+    switch (g_settings.style) {
+        case VizStyle::Vu: {
+            float mw = maxSize * 1.5f, gap = 8.f * g_dpiScale;
+            *w = horizontal ? mw * 2.f + gap : mw;
+            *h = horizontal ? maxSize : maxSize * 2.f + gap;
+            break;
+        }
+        case VizStyle::Spectrogram: {
+            float legend = 3.f * g_dpiScale + 6.f * g_dpiScale;
+            if (horizontal) *w += legend;
+            else *h += legend;
+            break;
+        }
+        default: break;
+    }
+    if (VizReflectionActive()) *h += VizReflectionDepth(maxSize);
+}
+
+// ---- Per-frame data, on the render thread ----------------------------------------------
+float g_vizSplitL[VIZ_BARS_MAX] = {}, g_vizSplitR[VIZ_BARS_MAX] = {};
+float g_vizVu[4] = {};  // needle L, R (0..1 of the scale), peak LED L, R
+std::vector<uint8_t> g_vizSpecRing;  // bars x kVizSpecRows, newest row at g_vizSpecHead
+int g_vizSpecW = 0, g_vizSpecHead = 0;
+uint32_t g_vizSpecSerial = 0;  // rows pushed so far
+float g_vizSparkBuf[kVizSparkMax * 4] = {};
+int g_vizSparkCount = 0;
+uint32_t g_vizSparkSerial = 0;
+
+namespace {
+struct VizSpark { float x, y, vx, vy, life, band, r; };
+std::vector<VizSpark> s_sparks;
+double s_styleClock = 0.0, s_specAcc = 0.0;
+uint32_t s_stereoSerial = 0;
+float s_hist[2][2048] = {};  // newest stereo samples, L and R
+int s_histPos = 0;
+float s_vuIn[2] = {}, s_vuPos[2] = {-0.03f, -0.03f}, s_vuVel[2] = {};
+double s_vuLastBlock = 0.0;
+float s_lastPulse = 0.f;
+uint32_t s_rng = 2463534242u;
+
+float Rand01() {
+    s_rng ^= s_rng << 13;
+    s_rng ^= s_rng >> 17;
+    s_rng ^= s_rng << 5;
+    return (float)(s_rng & 0xFFFFFF) / 16777216.f;
+}
+
+// VU scale position (0 at -20 VU, 1 at +3 VU) of a linear level, with
+// 0 VU = -18 dBFS. Real VU meters are close to linear in voltage, so the
+// scale's marks crowd toward the top as they do here.
+float VuPosOf(float rms) { return std::clamp((rms * 7.943f - 0.1f) / (1.41254f - 0.1f), -0.03f, 1.08f); }
+
+// New stereo samples from the engine (the Goniometer feed): VU input levels
+// and peak LEDs, and the history Stereo Field analyses.
+void TakeStereo(double now) {
+    uint32_t serial = g_gonioSerial.load(std::memory_order_acquire);
+    if (serial == s_stereoSerial) {
+        if (now - s_vuLastBlock > 0.25) s_vuIn[0] = s_vuIn[1] = 0.f;  // nothing new: the signal stopped
+        return;
+    }
+    s_stereoSerial = serial;
+    s_vuLastBlock = now;
+    double ms[2] = {0, 0};
+    float pk[2] = {0, 0};
+    size_t n = 0;
+    {
+        std::lock_guard<std::mutex> lock(g_gonioMutex);
+        n = g_gonioXY.size() / 2;
+        for (size_t i = 0; i < n; i++) {
+            float side = g_gonioXY[2 * i], mid = g_gonioXY[2 * i + 1];
+            float l = mid + side, r = mid - side;
+            ms[0] += (double)l * l;
+            ms[1] += (double)r * r;
+            pk[0] = std::max(pk[0], fabsf(l));
+            pk[1] = std::max(pk[1], fabsf(r));
+            s_hist[0][s_histPos] = l;
+            s_hist[1][s_histPos] = r;
+            s_histPos = (s_histPos + 1) & 2047;
+        }
+    }
+    if (!n) return;
+    for (int c = 0; c < 2; c++) {
+        s_vuIn[c] = VuPosOf((float)sqrt(ms[c] / (double)n));
+        if (pk[c] >= 0.708f) g_vizVu[2 + c] = 1.f;  // -3 dBFS sample peak
+    }
+}
+
+// VU ballistics, IEC 60268-17: a second-order needle, 99 % of a step in
+// 300 ms with 1.5 % overshoot (zeta 0.8, omega 13.1 rad/s).
+void StepVu(float dt) {
+    const float wn = 13.1f, z = 0.8f;
+    int steps = std::max(1, (int)ceilf(dt / 0.002f));
+    float h = dt / steps;
+    for (int c = 0; c < 2; c++) {
+        for (int s = 0; s < steps; s++) {
+            float a = wn * wn * (s_vuIn[c] - s_vuPos[c]) - 2.f * z * wn * s_vuVel[c];
+            s_vuVel[c] += a * h;
+            s_vuPos[c] += s_vuVel[c] * h;
+        }
+        s_vuPos[c] = std::clamp(s_vuPos[c], -0.04f, 1.1f);
+        g_vizVu[c] = s_vuPos[c];
+        g_vizVu[2 + c] = std::max(0.f, g_vizVu[2 + c] - dt / 0.6f);
+    }
+}
+
+// Stereo Field: a 2048-point spectrum per channel, log-spaced bars from
+// 30 Hz, 72 dB of range. Only when new samples came in.
+void StepSplit(int bars, float dt, bool fresh) {
+    static ttdsp::RealFft fft;
+    static std::vector<float> win, buf, re, im;
+    static float target[2][VIZ_BARS_MAX] = {};
+    const int N = 2048;
+    if (fft.Size() != N) {
+        fft.Init(N);
+        win.resize(N);
+        for (int i = 0; i < N; i++) win[i] = 0.5f - 0.5f * cosf(2.f * VIZ_PI * i / (N - 1));
+        buf.resize(N);
+        re.resize(N / 2 + 1);
+        im.resize(N / 2 + 1);
+    }
+    if (fresh) {
+        float sr = (float)std::max<uint32_t>(8000, g_vizStereoRate.load(std::memory_order_relaxed));
+        float fmax = std::min(18000.f, sr * 0.45f), fmin = 30.f;
+        const double norm = 1.0 / ((N / 4.0) * (N / 4.0));  // full-scale sine through Hann = 0 dB
+        for (int c = 0; c < 2; c++) {
+            for (int i = 0; i < N; i++) buf[i] = s_hist[c][(s_histPos + i) & 2047] * win[i];
+            fft.Forward(buf.data(), re.data(), im.data());
+            for (int b = 0; b < bars; b++) {
+                float f0 = fmin * powf(fmax / fmin, (float)b / bars), f1 = fmin * powf(fmax / fmin, (float)(b + 1) / bars);
+                int k0 = std::clamp((int)(f0 * N / sr), 1, N / 2), k1 = std::clamp((int)(f1 * N / sr), k0, N / 2);
+                double p = 0;
+                for (int k = k0; k <= k1; k++) p = std::max(p, (double)re[k] * re[k] + (double)im[k] * im[k]);
+                float db = 10.f * log10f((float)std::max(p * norm, 1e-12));
+                target[c][b] = std::clamp((db + 72.f) / 66.f, 0.f, 1.f);
+            }
+        }
+    }
+    float att = 1.f - expf(-dt / 0.012f);
+    float fall = dt * 1.4f;
+    for (int b = 0; b < bars; b++) {
+        float* lv[2] = {&g_vizSplitL[b], &g_vizSplitR[b]};
+        for (int c = 0; c < 2; c++) {
+            float t = target[c][b];
+            *lv[c] = t > *lv[c] ? *lv[c] + (t - *lv[c]) * att : std::max(t, *lv[c] - fall);
+        }
+    }
+}
+
+// Spectrogram: a row of the bars' levels every 1/60 s into the ring.
+void StepSpectrogram(int bars, float dt) {
+    if (bars != g_vizSpecW || (int)g_vizSpecRing.size() != bars * kVizSpecRows) {
+        g_vizSpecW = bars;
+        g_vizSpecRing.assign((size_t)bars * kVizSpecRows, 0);
+        g_vizSpecHead = 0;
+        g_vizSpecSerial += kVizSpecRows;  // a full re-upload
+        s_specAcc = 0.0;
+    }
+    s_specAcc += dt * kVizSpecRate;
+    int rows = std::min(8, (int)s_specAcc);
+    s_specAcc -= rows;
+    for (int r = 0; r < rows; r++) {
+        g_vizSpecHead = (g_vizSpecHead + 1) % kVizSpecRows;
+        uint8_t* row = &g_vizSpecRing[(size_t)g_vizSpecHead * bars];
+        for (int i = 0; i < bars; i++) row[i] = (uint8_t)lroundf(std::clamp(g_vizPeak[i], 0.f, 1.f) * 255.f);
+        g_vizSpecSerial++;
+    }
+}
+
+// Particles: on each beat, sparks leave the tops of the louder bars, thrown
+// no higher than the box, and fall back under gravity.
+void StepSparks(int bars, float dt) {
+    const bool horizontal = g_settings.orientation == VizOrientation::Horizontal;
+    const bool top = g_settings.verticalAnchor == VizAnchor::Top;
+    const float barW = std::max(1.f, VizPx((float)std::max(1, g_settings.barWidth)));
+    const float barGap = VizPx((float)std::max(0, g_settings.barGap));
+    const float maxSize = std::max(2.f, VizPx((float)std::max(2, g_settings.barMaxSize)));
+    const float idle = VizPx((float)std::max(0, g_settings.barIdleSize));
+    const float G = 900.f * g_dpiScale;
+    // Growth direction of the bars, in block coordinates.
+    const float gx = horizontal ? 0.f : (top ? -1.f : 1.f);
+    const float gy = horizontal ? (top ? 1.f : -1.f) : 0.f;
+    float pulse = g_beatPulse.load(std::memory_order_relaxed);
+    if (pulse > s_lastPulse + 0.3f && bars > 0) {
+        for (int k = 0; k < 18 && (int)s_sparks.size() < kVizSparkMax; k++) {
+            int i = std::min(bars - 1, (int)(Rand01() * bars));
+            for (int t = 0; t < 4 && g_vizPeak[i] < 0.25f; t++) i = std::min(bars - 1, (int)(Rand01() * bars));
+            float len = idle + std::max(0.f, g_vizPeak[i]) * std::max(0.f, maxSize - idle);
+            float along = i * (barW + barGap) + barW * 0.5f;
+            float base = horizontal ? (top ? 0.f : maxSize) : (top ? maxSize : 0.f);
+            float tip = base + (horizontal ? gy : gx) * len;
+            float room = std::max(0.f, maxSize - len);
+            float v = sqrtf(2.f * G * room) * (0.45f + 0.55f * Rand01());
+            float side = (Rand01() - 0.5f) * 80.f * g_dpiScale;
+            VizSpark s;
+            s.x = horizontal ? along : tip;
+            s.y = horizontal ? tip : along;
+            s.vx = gx * v + (horizontal ? side : 0.f);
+            s.vy = gy * v + (horizontal ? 0.f : side);
+            s.life = 1.f;
+            s.band = (float)i;
+            s.r = std::min(15.f, (1.2f + 1.4f * Rand01()) * g_dpiScale);
+            s_sparks.push_back(s);
+        }
+    }
+    s_lastPulse = pulse;
+    const float boxW = horizontal ? bars * (barW + barGap) - barGap : maxSize;
+    const float boxH = horizontal ? maxSize : bars * (barW + barGap) - barGap;
+    size_t out = 0;
+    for (size_t k = 0; k < s_sparks.size(); k++) {
+        VizSpark s = s_sparks[k];
+        s.vx -= gx * G * dt;
+        s.vy -= gy * G * dt;
+        s.x += s.vx * dt;
+        s.y += s.vy * dt;
+        s.life -= dt / 1.1f;
+        bool inside = s.x >= -s.r && s.y >= -s.r && s.x <= boxW + s.r && s.y <= boxH + s.r;
+        if (s.life > 0.f && inside) s_sparks[out++] = s;
+    }
+    s_sparks.resize(out);
+    g_vizSparkCount = (int)out;
+    for (size_t k = 0; k < out; k++) {
+        const VizSpark& s = s_sparks[k];
+        g_vizSparkBuf[k * 4] = s.x;
+        g_vizSparkBuf[k * 4 + 1] = s.y;
+        g_vizSparkBuf[k * 4 + 2] = s.life;
+        g_vizSparkBuf[k * 4 + 3] = s.band * 16.f + s.r;
+    }
+    if (out) g_vizSparkSerial++;
+}
+}  // namespace
+
+// Called once per drawn frame, after VizComputeBarFrame.
+void VizStylesFrame() {
+    VizStyle st = g_settings.style;
+    if (st == VizStyle::None || st == VizStyle::Led || st == VizStyle::Line || st == VizStyle::Bloom) return;
+    double now = VizClockSeconds();
+    float dt = s_styleClock > 0.0 ? (float)std::clamp(now - s_styleClock, 0.0, 0.1) : 1.f / 60.f;
+    s_styleClock = now;
+    int bars = VizEffectiveBarCount();
+    if (st == VizStyle::Vu || st == VizStyle::SplitLR) {
+        uint32_t before = s_stereoSerial;
+        TakeStereo(now);
+        if (st == VizStyle::Vu) StepVu(dt);
+        else StepSplit(bars, dt, s_stereoSerial != before);
+    } else if (st == VizStyle::Spectrogram) {
+        StepSpectrogram(bars, dt);
+    } else if (st == VizStyle::Particles) {
+        StepSparks(bars, dt);
+    }
+}
+
+// ---- Direct2D (the 1.5 path, and the fallback) ---------------------------------------------
+// The same looks drawn with plain Direct2D calls. Fine for a fallback; the
+// Direct3D 11 renderer is the one to use for these (and the only one that
+// draws Reflection).
+namespace {
+RGBA StyleBarColor(int i, int n, float fac, RGBA c1, RGBA cGrad1, RGBA c2, float rainbowBase, bool radial) {
+    RGBA col = c1;
+    VizColorMode m = g_settings.colorMode;
+    float t = n > 1 ? (float)i / (n - 1) : 0.f;
+    if (m == VizColorMode::Gradient || m == VizColorMode::Tourne) col = LerpColor(cGrad1, c2, t);
+    else if (m == VizColorMode::ReactiveGradient) col = LerpColor(cGrad1, c2, fac);
+    else if (m == VizColorMode::DynamicAlbum && !radial) col = LerpColor(cGrad1, c2, std::min(1.f, t * 0.6f + fac * 0.4f));
+    else if (m == VizColorMode::RainbowCycle)
+        col = HSVtoRGB(fmodf(rainbowBase + (radial ? (float)i / std::max(1, n) : t) * 360.f, 360.f), 0.85f, 1.0f, c1.a);
+    if (m == VizColorMode::Acrylic) col = {(BYTE)std::clamp((int)(180.f * fac), 0, 180), c1.r, c1.g, c1.b};
+    return col;
+}
+
+void SetBrush(RGBA c, float alphaScale = 1.f) {
+    g_barBrush->SetColor(D2D1::ColorF(c.r / 255.f, c.g / 255.f, c.b / 255.f, c.a / 255.f * alphaScale));
+}
+
+RGBA SpecColorCpu(float v) {
+    v = std::clamp(v, 0.f, 1.f);
+    static const float stops[5][3] = {{0, 0, 0}, {0.25f, 0.02f, 0.45f}, {0.85f, 0.15f, 0.35f}, {1, 0.6f, 0.1f}, {1, 1, 0.85f}};
+    int k = std::min(3, (int)(v * 4.f));
+    float f = v * 4.f - k;
+    auto ch = [&](int c) { return (BYTE)lroundf((stops[k][c] + (stops[k + 1][c] - stops[k][c]) * f) * 255.f); };
+    return {(BYTE)lroundf(std::clamp(v * 2.5f, 0.f, 1.f) * 255.f), ch(0), ch(1), ch(2)};
+}
+}  // namespace
+
+// Draws the current style and returns true, or returns false for the shape
+// path to draw (Particles draw their sparks here, then let the bars draw).
+bool VizDrawStyleD2D(float blockX, float blockY, float totalWidth, float totalHeight, int barCount, float barW,
+                     float barGap, float maxSize, float idleSize, bool horizontal, RGBA c1, RGBA cGrad1, RGBA c2,
+                     float rainbowBase) {
+    const VizStyle st = g_settings.style;
+    if (st == VizStyle::None || !g_dc || !g_barBrush) return false;
+    const float range = std::max(0.f, maxSize - idleSize);
+    const bool top = g_settings.verticalAnchor == VizAnchor::Top;
+    auto lenOf = [&](float lev) { return idleSize + std::max(0.f, lev) * range; };
+    // Rect of bar i between distances a and b from its base edge (SpanRect in the shader).
+    auto span = [&](int i, float a, float b) {
+        float lead = i * (barW + barGap);
+        if (horizontal) {
+            float x = blockX + lead;
+            if (top) return D2D1::RectF(x, blockY + a, x + barW, blockY + b);
+            float base = blockY + maxSize;
+            return D2D1::RectF(x, base - b, x + barW, base - a);
+        }
+        float y = blockY + lead;
+        if (top) return D2D1::RectF(blockX + maxSize - b, y, blockX + maxSize - a, y + barW);
+        return D2D1::RectF(blockX + a, y, blockX + b, y + barW);
+    };
+
+    if (st == VizStyle::Particles) {
+        for (int k = 0; k < g_vizSparkCount; k++) {
+            const float* p = &g_vizSparkBuf[k * 4];
+            int band = std::min(std::max(barCount - 1, 0), (int)(p[3] / 16.f));
+            float r = p[3] - band * 16.f;
+            SetBrush(StyleBarColor(band, barCount, 1.f, c1, cGrad1, c2, rainbowBase, false), p[2]);
+            g_dc->FillEllipse(D2D1::Ellipse(D2D1::Point2F(blockX + p[0], blockY + p[1]), r, r), g_barBrush.Get());
+        }
+        return false;
+    }
+
+    if (st == VizStyle::Led) {
+        float segH = std::max(2.f * g_dpiScale, roundf(barW * 0.5f));
+        float step = segH + std::max(1.f, roundf(1.5f * g_dpiScale));
+        int segs = std::max(1, (int)((maxSize + step - segH) / step));
+        for (int i = 0; i < barCount; i++) {
+            float lit = lenOf(g_vizPeak[i]) / step;
+            float hold = g_settings.peakHoldEnabled ? lenOf(g_vizPeakHold[i]) : 0.f;
+            int holdSeg = hold > 0.5f ? std::min(segs - 1, (int)(hold / step)) : -1;
+            for (int s = 0; s < segs; s++) {
+                float t = (s + 0.5f) / segs;
+                RGBA col = g_settings.colorMode == VizColorMode::Solid
+                               ? (t >= 0.85f ? RGBA{255, 255, 59, 48} : t >= 0.6f ? RGBA{255, 255, 176, 0} : RGBA{255, 56, 227, 107})
+                               : StyleBarColor(i, barCount, g_vizPeak[i], c1, cGrad1, c2, rainbowBase, false);
+                bool on = s + 0.5f <= lit || s == holdSeg;
+                SetBrush(col, on ? 1.f : 0.1f);
+                g_dc->FillRectangle(span(i, s * step, s * step + segH), g_barBrush.Get());
+            }
+        }
+        return true;
+    }
+
+    if (st == VizStyle::SplitLR) {
+        for (int i = 0; i < barCount; i++) {
+            float lead = i * (barW + barGap);
+            for (int c = 0; c < 2; c++) {
+                float lev = c ? g_vizSplitR[i] : g_vizSplitL[i];
+                float s = lenOf(lev) * 0.5f;
+                if (s < 0.25f) continue;
+                SetBrush(StyleBarColor(i, barCount, lev, c1, cGrad1, c2, rainbowBase, false));
+                D2D1_RECT_F r;
+                if (horizontal) {
+                    float x = blockX + lead, cy = blockY + maxSize * 0.5f;
+                    r = c ? D2D1::RectF(x, cy + 0.5f, x + barW, cy + 0.5f + s) : D2D1::RectF(x, cy - 0.5f - s, x + barW, cy - 0.5f);
+                } else {
+                    float y = blockY + lead, cx = blockX + maxSize * 0.5f;
+                    r = c ? D2D1::RectF(cx + 0.5f, y, cx + 0.5f + s, y + barW) : D2D1::RectF(cx - 0.5f - s, y, cx - 0.5f, y + barW);
+                }
+                g_dc->FillRectangle(r, g_barBrush.Get());
+            }
+        }
+        return true;
+    }
+
+    if (st == VizStyle::Line || st == VizStyle::Bloom) {
+        ComPtr<ID2D1PathGeometry> geo;
+        ComPtr<ID2D1GeometrySink> sink;
+        if (!g_d2dFactory || barCount < 3 || FAILED(g_d2dFactory->CreatePathGeometry(&geo)) || FAILED(geo->Open(&sink)))
+            return true;
+        RGBA col = StyleBarColor(barCount / 2, barCount, 0.5f, c1, cGrad1, c2, rainbowBase, st == VizStyle::Bloom);
+        if (st == VizStyle::Line) {
+            float sg = horizontal ? (top ? 1.f : -1.f) : (top ? -1.f : 1.f);
+            float base = horizontal ? (top ? blockY : blockY + maxSize) : (top ? blockX + maxSize : blockX);
+            float start = horizontal ? blockX : blockY;
+            auto val = [&](int i) { return lenOf(g_vizPeak[std::clamp(i, 0, barCount - 1)]); };
+            auto pt = [&](float along, float v) {
+                float c = base + sg * std::clamp(v, 0.f, maxSize);
+                return horizontal ? D2D1::Point2F(along, c) : D2D1::Point2F(c, along);
+            };
+            sink->BeginFigure(pt(start, 0.f), D2D1_FIGURE_BEGIN_FILLED);
+            sink->AddLine(pt(start, val(0)));
+            const int sub = 4;
+            for (int k = 0; k + 1 < barCount; k++) {
+                float p0 = val(k - 1), p1 = val(k), p2 = val(k + 1), p3 = val(k + 2);
+                for (int j = 1; j <= sub; j++) {
+                    float t = (float)j / sub, t2 = t * t, t3 = t2 * t;
+                    float v = 0.5f * (2 * p1 + (p2 - p0) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (3 * p1 - p0 - 3 * p2 + p3) * t3);
+                    sink->AddLine(pt(start + (k + t) * (barW + barGap) + barW * 0.5f, v));
+                }
+            }
+            float end = start + barCount * (barW + barGap) - barGap;
+            sink->AddLine(pt(end, val(barCount - 1)));
+            sink->AddLine(pt(end, 0.f));
+            sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+        } else {
+            float cx = blockX + totalWidth * 0.5f, cy = blockY + totalHeight * 0.5f, innerR = maxSize * 0.15f;
+            for (int i = 0; i < barCount; i++) {
+                float a = (float)i / barCount * 2.f * VIZ_PI - VIZ_PI * 0.5f, r = innerR + lenOf(g_vizPeak[i]);
+                D2D1_POINT_2F p = D2D1::Point2F(cx + cosf(a) * r, cy + sinf(a) * r);
+                if (i == 0) sink->BeginFigure(p, D2D1_FIGURE_BEGIN_FILLED);
+                else sink->AddLine(p);
+            }
+            sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+        }
+        sink->Close();
+        SetBrush(col, st == VizStyle::Line ? 0.35f : 0.55f);
+        g_dc->FillGeometry(geo.Get(), g_barBrush.Get());
+        SetBrush(col);
+        g_dc->DrawGeometry(geo.Get(), g_barBrush.Get(), std::max(1.5f, barW * 0.2f));
+        return true;
+    }
+
+    if (st == VizStyle::Spectrogram) {
+        static ComPtr<ID2D1Bitmap> bmp;
+        static ID2D1DeviceContext* bmpDc = nullptr;
+        static uint32_t bmpSerial = 0;
+        static std::vector<uint32_t> px;
+        int w = g_vizSpecW, rows = kVizSpecRows;
+        if (w <= 0) return true;
+        float thick = barCount * (barW + barGap) - barGap;
+        if (!bmp || bmpDc != g_dc.Get() || bmp->GetPixelSize().width != (UINT32)w) {
+            bmp.Reset();
+            bmpDc = g_dc.Get();
+            D2D1_BITMAP_PROPERTIES bp = D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+            if (FAILED(g_dc->CreateBitmap(D2D1::SizeU(w, rows), nullptr, 0, bp, &bmp))) return true;
+            bmpSerial = g_vizSpecSerial - 1;
+        }
+        if (bmpSerial != g_vizSpecSerial) {  // newest row first
+            bmpSerial = g_vizSpecSerial;
+            px.resize((size_t)w * rows);
+            for (int a = 0; a < rows; a++) {
+                const uint8_t* src = &g_vizSpecRing[(size_t)((g_vizSpecHead - a + rows) % rows) * w];
+                for (int i = 0; i < w; i++) {
+                    RGBA c = g_settings.colorMode == VizColorMode::Solid ? SpecColorCpu(src[i] / 255.f)
+                                                                         : LerpColor(cGrad1, c2, src[i] / 255.f);
+                    if (g_settings.colorMode != VizColorMode::Solid) c.a = (BYTE)std::min(255, src[i] * 5 / 2);
+                    float al = c.a / 255.f * c1.a / 255.f;
+                    px[(size_t)a * w + i] = ((uint32_t)lroundf(al * 255.f) << 24) | ((uint32_t)lroundf(c.r * al) << 16) |
+                                            ((uint32_t)lroundf(c.g * al) << 8) | (uint32_t)lroundf(c.b * al);
+                }
+            }
+            bmp->CopyFromMemory(nullptr, px.data(), w * 4);
+        }
+        float vis = std::min((float)rows, maxSize);
+        D2D1_RECT_F dst = horizontal ? D2D1::RectF(blockX, blockY, blockX + thick, blockY + maxSize)
+                                     : D2D1::RectF(blockX, blockY, blockX + maxSize, blockY + thick);
+        if (horizontal) {
+            g_dc->DrawBitmap(bmp.Get(), dst, 1.f, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1::RectF(0, 0, (float)w, vis));
+        } else {  // time runs left to right: rotate the image a quarter turn
+            D2D1_MATRIX_3X2_F old;
+            g_dc->GetTransform(&old);
+            D2D1_POINT_2F o = D2D1::Point2F(blockX, blockY);
+            g_dc->SetTransform(D2D1::Matrix3x2F(0, 1, 1, 0, 0, 0) * D2D1::Matrix3x2F::Translation(o.x, o.y) * old);
+            g_dc->DrawBitmap(bmp.Get(), D2D1::RectF(0, 0, thick, maxSize), 1.f, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+                             D2D1::RectF(0, 0, (float)w, vis));
+            g_dc->SetTransform(old);
+        }
+        // Legend, hot end at the top (right when vertical), quarter ticks.
+        float gap = 3.f * g_dpiScale, lw = 6.f * g_dpiScale;
+        for (int k = 0; k < 32; k++) {
+            float v = (k + 0.5f) / 32.f;
+            RGBA c = g_settings.colorMode == VizColorMode::Solid ? SpecColorCpu(v) : LerpColor(cGrad1, c2, v);
+            c.a = std::max<BYTE>(c.a, 89);  // the legend stays readable at the quiet end
+            SetBrush(c);
+            float a0 = k / 32.f, a1 = (k + 1) / 32.f;
+            D2D1_RECT_F r = horizontal ? D2D1::RectF(dst.right + gap, dst.bottom - a1 * maxSize, dst.right + gap + lw, dst.bottom - a0 * maxSize)
+                                       : D2D1::RectF(dst.left + a0 * maxSize, dst.bottom + gap, dst.left + a1 * maxSize, dst.bottom + gap + lw);
+            g_dc->FillRectangle(r, g_barBrush.Get());
+        }
+        return true;
+    }
+
+    if (st == VizStyle::Vu) {
+        float mh = maxSize, mw = maxSize * 1.5f, gap = 8.f * g_dpiScale;
+        const float marks[11] = {-20, -10, -7, -5, -3, -2, -1, 0, 1, 2, 3};
+        auto posOf = [](float db) { return (powf(10.f, db / 20.f) - 0.1f) / (1.41254f - 0.1f); };
+        ID2D1SolidColorBrush* b = g_barBrush.Get();
+        for (int m = 0; m < 2; m++) {
+            float ox = blockX + (horizontal ? m * (mw + gap) : 0.f), oy = blockY + (horizontal ? 0.f : m * (mh + gap));
+            float pvx = ox + mw * 0.5f, pvy = oy + mh * 0.9f, R = mh * 0.68f, lw = std::max(1.2f, mh * 0.016f);
+            auto at = [&](float p, float r) {
+                float an = (-48.f + 96.f * p) * VIZ_PI / 180.f;
+                return D2D1::Point2F(pvx + sinf(an) * r, pvy - cosf(an) * r);
+            };
+            b->SetColor(D2D1::ColorF(0.05f, 0.05f, 0.06f, 0.6f));
+            g_dc->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(ox, oy, ox + mw, oy + mh), mh * 0.08f, mh * 0.08f), b);
+            for (int k = 0; k < 11; k++) {
+                float p = posOf(marks[k]);
+                b->SetColor(marks[k] > 0 ? D2D1::ColorF(1.f, 0.27f, 0.23f, 0.95f) : D2D1::ColorF(0.92f, 0.92f, 0.9f, 0.85f));
+                g_dc->DrawLine(at(p, (k == 0 || k == 7) ? R * 0.84f : R * 0.9f), at(p, R), b, lw);
+            }
+            for (int k = 0; k < 16; k++) {
+                bool hot = (k + 0.5f) / 16.f > posOf(0.f);
+                b->SetColor(hot ? D2D1::ColorF(1.f, 0.27f, 0.23f, 0.95f) : D2D1::ColorF(0.92f, 0.92f, 0.9f, 0.85f));
+                g_dc->DrawLine(at(k / 16.f, R * 0.9f), at((k + 1) / 16.f, R * 0.9f), b, hot ? lw * 1.8f : lw, g_roundCapStrokeStyle.Get());
+            }
+            SetBrush(RGBA{255, c1.r, c1.g, c1.b});
+            g_dc->DrawLine(at(g_vizVu[m], R * 0.12f), at(g_vizVu[m], R * 1.02f), b, std::max(1.6f, mh * 0.024f),
+                           g_roundCapStrokeStyle.Get());
+            b->SetColor(D2D1::ColorF(0.25f, 0.25f, 0.27f, 1.f));
+            g_dc->FillEllipse(D2D1::Ellipse(D2D1::Point2F(pvx, pvy), mh * 0.05f, mh * 0.05f), b);
+            b->SetColor(D2D1::ColorF(1.f, 0.18f, 0.12f, 0.18f + 0.82f * std::clamp(g_vizVu[2 + m], 0.f, 1.f)));
+            g_dc->FillEllipse(D2D1::Ellipse(D2D1::Point2F(ox + mw - mh * 0.12f, oy + mh * 0.12f), mh * 0.045f, mh * 0.045f), b);
+        }
+        return true;
+    }
+    return false;
+}
+
 bool ComputeVizLayout(VizLayout* out) {
     if (!out) return false;
 
@@ -8631,6 +9711,7 @@ bool ComputeVizLayout(VizLayout* out) {
         totalWidth  = horizontal ? barsThickness : maxSize;
         totalHeight = horizontal ? maxSize       : barsThickness;
     }
+    VizStyleBox(&totalWidth, &totalHeight, maxSize, horizontal);
 
     HMONITOR monitor = g_cachedMonitor;
     if (!monitor) monitor = MonitorFromPoint({0, 0}, MONITOR_DEFAULTTONEAREST);
@@ -8994,6 +10075,7 @@ bool GetVizTravelRange(float* travelX, float* travelY) {
         totalWidth  = horizontal ? barsThickness : maxSize;
         totalHeight = horizontal ? maxSize       : barsThickness;
     }
+    VizStyleBox(&totalWidth, &totalHeight, maxSize, horizontal);
 
     *travelX = (float)(mi.rcWork.right  - mi.rcWork.left) - totalWidth;
     *travelY = (float)(mi.rcWork.bottom - mi.rcWork.top)  - totalHeight;
@@ -9142,6 +10224,7 @@ bool GetMediaTravelRange(float* travelX, float* travelY) {
     int pad = GetMediaPlatePaddingPx();
     int width = size * 3 + spacing * 2 + pad * 2;
     int height = size + pad * 2;
+    if (VizCardActive()) VizCardSize(&width, &height);
 
     HMONITOR monitor = GetMonitorById(g_settings.monitor - 1);
     if (!monitor) monitor = MonitorFromPoint({0, 0}, MONITOR_DEFAULTTONEAREST);
@@ -10243,6 +11326,17 @@ TT_CBUFFER(FrameCB, b0) {
     float4 fTermGeom;   // origin x, origin y, cell width, cell height
     float4 fTermAtlas;  // atlas width, atlas height, -, -
     uint fTermCols, fTermRows, fTermAtlasCols, fTermPad;
+    // Styles (2.1): which one (0 none, 1 LED, 2 Line, 3 Bloom, 4 Spectrogram,
+    // 5 VU, 6 Stereo Field, 7 Particles), LED segments per bar, Line
+    // subdivisions per bar gap, Spectrogram history rows in use.
+    uint fStyle, fSegs, fSubdiv, fSpecRows;
+    // Reflection: base line y, direction (+1 down), depth px, start opacity.
+    float fReflBase, fReflDir, fReflDepth, fReflAlpha;
+    // LED segment pitch and height, Line glow radius and fill opacity.
+    float fSegStep, fSegH, fGlowR, fFillA;
+    float4 fVu;     // VU needle L, R (0..1 of the scale), peak LED L, R (0..1)
+    float4 fVuBox;  // one meter's width, height, offset of the second meter x, y
+    uint fSpecW, fSpecHead, fSpecTex, fSpecPad;  // bars per row, newest row, rows in the texture
 }
 TT_CBUFFER_END
 
@@ -10276,6 +11370,7 @@ Texture2D<float4> gPlate REG(t4);           // baked background panel, premultip
 SamplerState gSamp REG(s0);
 StructuredBuffer<uint> gCells REG(t10);     // Terminal: glyph cells only, char | colour << 8 | grid index << 16
 Texture2D<float4> gGlyphs REG(t11);         // Terminal: printable ASCII baked white, premultiplied
+Texture2D<float> gSpec REG(t12);            // Spectrogram: bar levels, one row per 1/60 s, ring
 
 // Analysis (compute shaders, Workload = GPU).
 StructuredBuffer<float> gTierIn REG(t5);     // 3 x N newest samples, one block per tier
@@ -10580,6 +11675,300 @@ Prim TermPrim(uint id) {
     return p;
 }
 
+// ---- Styles (2.1) ----------------------------------------------------------------
+//
+// Each style is one more pass over the same instanced quad. Bars, peak caps
+// and the frame constants are shared with the shapes above, so a style costs
+// one draw call and no new per-frame upload unless it has data of its own
+// (Spectrogram rows, Stereo Field levels, Particles).
+
+// The part of bar i that lies between distances a and b from its base edge.
+// Middle anchor is drawn from the bottom (or left) edge here: segmented and
+// filled styles read as meters, and a meter grows from one end.
+float4 SpanRect(uint i, float a, float b) {
+    float lead = (float)i * (fBarW + fBarGap);
+    if (fVertical == 0u) {
+        float x = fBlock.x + lead;
+        if (fAnchor == 0u) return float4(x, fBlock.y + a, x + fBarW, fBlock.y + b);
+        float base = fBlock.y + fMaxSize;
+        return float4(x, base - b, x + fBarW, base - a);
+    }
+    float y = fBlock.y + lead;
+    if (fAnchor == 0u) {
+        float base = fBlock.x + fMaxSize;
+        return float4(base - b, y, base - a, y + fBarW);
+    }
+    return float4(fBlock.x + a, y, fBlock.x + b, y + fBarW);
+}
+
+Prim RectPrimV(float4 r, float4 radii, float4 color) { return RectPrim(r.x, r.y, r.z, r.w, radii, color); }
+
+// LED Meter: green to 60 %, amber to 85 %, red above, like a hardware meter.
+// Unlit segments stay faintly visible; the peak-hold segment stays lit.
+float4 LedZone(float t) {
+    if (t >= 0.85f) return float4(1.0f, 0.23f, 0.19f, 1.0f);
+    if (t >= 0.6f) return float4(1.0f, 0.69f, 0.0f, 1.0f);
+    return float4(0.22f, 0.89f, 0.42f, 1.0f);
+}
+
+Prim LedPrim(uint id) {
+    uint segs = max(fSegs, 1u);
+    uint i = id / segs;
+    uint s = id % segs;
+    if (i >= fBarCount) return NoPrim();
+    float fac = max(0.0f, gBars[i].x);
+    float lit = (fIdleSize + fac * BarRange()) / max(fSegStep, 1.0f);
+    float4 col = (fColorMode == 0u) ? BeatFlash(LedZone(((float)s + 0.5f) / (float)segs)) : BarColor(i, fac, false);
+    bool on = (float)s + 0.5f <= lit;
+    if (!on && (fFlags & 1u) != 0u) {
+        float hold = fIdleSize + gBars[i].y * BarRange();
+        on = hold > 0.5f && (uint)min(floor(hold / max(fSegStep, 1.0f)), (float)(segs - 1u)) == s;
+    }
+    if (!on) col.w = col.w * 0.1f;
+    float a = (float)s * fSegStep;
+    return RectPrimV(SpanRect(i, a, a + fSegH), fRadii, col);
+}
+
+// Line Spectrum: a Catmull-Rom curve through the bar tops, filled down to the
+// base and lit along its edge. Each instance is one column between two
+// curve points (kind 5); columns tile exactly in x, so the translucent fill
+// and glow are never blended twice where they meet.
+float LineSign() {
+    if (fVertical == 0u) return (fAnchor == 0u) ? 1.0f : -1.0f;
+    return (fAnchor == 0u) ? -1.0f : 1.0f;
+}
+float LineBase() {
+    if (fVertical == 0u) return (fAnchor == 0u) ? fBlock.y : fBlock.y + fMaxSize;
+    return (fAnchor == 0u) ? fBlock.x + fMaxSize : fBlock.x;
+}
+float LineVal(int i) {
+    int n = (int)fBarCount;
+    i = clamp(i, 0, n - 1);
+    return fIdleSize + max(0.0f, gBars[(uint)i].x) * BarRange();
+}
+float LineAlong(float k) {
+    return ((fVertical == 0u) ? fBlock.x : fBlock.y) + k * (fBarW + fBarGap) + fBarW * 0.5f;
+}
+float CatRom(float p0, float p1, float p2, float p3, float t) {
+    float t2 = t * t, t3 = t2 * t;
+    return 0.5f * (2.0f * p1 + (p2 - p0) * t + (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3) * t2 +
+                   (3.0f * p1 - p0 - 3.0f * p2 + p3) * t3);
+}
+
+Prim LinePrim(uint id) {
+    uint sub = max(fSubdiv, 1u);
+    uint seg = id / sub;
+    uint j = id % sub;
+    if (fBarCount < 2u || seg + 1u >= fBarCount) return NoPrim();
+    int k = (int)seg;
+    float p0 = LineVal(k - 1), p1 = LineVal(k), p2 = LineVal(k + 1), p3 = LineVal(k + 2);
+    float t0 = (float)j / (float)sub, t1 = (float)(j + 1u) / (float)sub;
+    float v0 = clamp(CatRom(p0, p1, p2, p3, t0), 0.0f, fMaxSize);
+    float v1 = clamp(CatRom(p0, p1, p2, p3, t1), 0.0f, fMaxSize);
+    float u0 = LineAlong((float)seg + t0), u1 = LineAlong((float)seg + t1);
+    // The first and last columns reach the ends of the bar row.
+    float start = (fVertical == 0u) ? fBlock.x : fBlock.y;
+    if (seg == 0u && j == 0u) u0 = start;
+    if (seg + 2u == fBarCount && j + 1u == sub) u1 = start + (float)fBarCount * (fBarW + fBarGap) - fBarGap;
+    float base = LineBase(), sg = LineSign();
+    Prim p;
+    p.kind = 5u;
+    p.a = float4(u0, base + sg * v0, u1, base + sg * v1);
+    p.radii = float4(base, max(1.5f, fBarW * 0.2f), fGlowR, fFillA);
+    p.color = BarColor(seg + ((t0 >= 0.5f) ? 1u : 0u), max(0.0f, gBars[seg].x), false);
+    return p;
+}
+
+// Polar Bloom: the Radial bars joined into one filled flower. One wedge per
+// bar (kind 6) from the centre to this bar's tip and the next one's. The
+// two straight sides are shared with the neighbours and tested with the
+// same expression from both sides, so every pixel lands in exactly one
+// wedge; only the outer edge is antialiased.
+float Cross2(float ax, float ay, float bx, float by) { return ax * by - ay * bx; }
+
+Prim BloomPrim(uint i) {
+    uint n = fBarCount;
+    if (n < 3u || i >= n) return NoPrim();
+    uint j = (i + 1u) % n;
+    float li = fIdleSize + max(0.0f, gBars[i].x) * BarRange();
+    float lj = fIdleSize + max(0.0f, gBars[j].x) * BarRange();
+    float ai = (float)i / (float)n * 2.0f * TT_PI - TT_PI * 0.5f;
+    float aj = (float)j / (float)n * 2.0f * TT_PI - TT_PI * 0.5f;
+    float ri = fInnerR + li, rj = fInnerR + lj;
+    Prim p;
+    p.kind = 6u;
+    p.a = float4(fCenter.x + cos(ai) * ri, fCenter.y + sin(ai) * ri, fCenter.x + cos(aj) * rj,
+                 fCenter.y + sin(aj) * rj);
+    p.radii = float4(max(1.0f, fBarW * 0.35f), 0.0f, 0.0f, 0.0f);
+    p.color = BarColor(i, max(0.0f, gBars[i].x), true);
+    return p;
+}
+
+// Spectrogram: one quad (kind 7) reading a history texture, a row of bar
+// levels per 1/60 s, newest at the top (left when vertical), plus a colour
+// legend with quarter ticks beside it.
+float4 SpecColor(float v) {
+    v = saturate(v);
+    float4 c;
+    if (fColorMode != 0u) {
+        c = lerp(fGrad1, fC2, v);
+    } else if (v < 0.25f) {
+        c = lerp(float4(0.0f, 0.0f, 0.0f, 1.0f), float4(0.25f, 0.02f, 0.45f, 1.0f), v * 4.0f);
+    } else if (v < 0.5f) {
+        c = lerp(float4(0.25f, 0.02f, 0.45f, 1.0f), float4(0.85f, 0.15f, 0.35f, 1.0f), (v - 0.25f) * 4.0f);
+    } else if (v < 0.75f) {
+        c = lerp(float4(0.85f, 0.15f, 0.35f, 1.0f), float4(1.0f, 0.6f, 0.1f, 1.0f), (v - 0.5f) * 4.0f);
+    } else {
+        c = lerp(float4(1.0f, 0.6f, 0.1f, 1.0f), float4(1.0f, 1.0f, 0.85f, 1.0f), (v - 0.75f) * 4.0f);
+    }
+    c.w = saturate(v * 2.5f) * fC1.w;
+    return c;
+}
+
+Prim SpecPrim(uint id) {
+    if (id > 1u || fSpecW == 0u) return NoPrim();
+    float thick = (float)fBarCount * (fBarW + fBarGap) - fBarGap;
+    float w = (fVertical == 0u) ? thick : fMaxSize;
+    float h = (fVertical == 0u) ? fMaxSize : thick;
+    Prim p;
+    p.kind = 7u;
+    p.radii = float4((float)id, 0.0f, 0.0f, 0.0f);
+    p.color = float4(1.0f, 1.0f, 1.0f, 1.0f);
+    if (id == 0u) {
+        p.a = float4(fBlock.x, fBlock.y, fBlock.x + w, fBlock.y + h);
+    } else if (fVertical == 0u) {
+        float x = fBlock.x + w + fVuBox.x;
+        p.a = float4(x, fBlock.y, x + fVuBox.y, fBlock.y + h);
+    } else {
+        float y = fBlock.y + h + fVuBox.x;
+        p.a = float4(fBlock.x, y, fBlock.x + w, y + fVuBox.y);
+    }
+    return p;
+}
+
+// VU Needles: two analog meters (L, R) built from rects and capsules, 32
+// instances each: face, 11 scale marks, a 16-piece arc (red from 0 VU),
+// needle, pivot and peak LED. The needle positions come from the CPU with
+// real VU ballistics (99 % in 300 ms, 1.5 % overshoot).
+float VuPos(float db) { return (pow(10.0f, db / 20.0f) - 0.1f) / (1.41254f - 0.1f); }
+float VuMark(uint k) {
+    if (k == 0u) return -20.0f;
+    if (k == 1u) return -10.0f;
+    if (k == 2u) return -7.0f;
+    if (k == 3u) return -5.0f;
+    if (k == 4u) return -3.0f;
+    if (k == 5u) return -2.0f;
+    if (k == 6u) return -1.0f;
+    if (k == 7u) return 0.0f;
+    if (k == 8u) return 1.0f;
+    if (k == 9u) return 2.0f;
+    return 3.0f;
+}
+
+Prim VuPrim(uint id) {
+    uint m = id / 32u, k = id % 32u;
+    if (m > 1u) return NoPrim();
+    float ox = fBlock.x + (float)m * fVuBox.z, oy = fBlock.y + (float)m * fVuBox.w;
+    float w = fVuBox.x, h = fVuBox.y;
+    float pvx = ox + w * 0.5f, pvy = oy + h * 0.9f;
+    float R = h * 0.68f;
+    float lw = max(0.6f, h * 0.008f);
+    float4 ink = float4(0.92f, 0.92f, 0.9f, 0.85f);
+    float4 red = float4(1.0f, 0.27f, 0.23f, 0.95f);
+    float zero = VuPos(0.0f);
+    if (k == 0u) {
+        float rr = h * 0.08f;
+        return RectPrim(ox, oy, ox + w, oy + h, float4(rr, rr, rr, rr), float4(0.05f, 0.05f, 0.06f, 0.6f));
+    }
+    if (k <= 11u) {
+        float db = VuMark(k - 1u);
+        float an = (-48.0f + 96.0f * VuPos(db)) * TT_PI / 180.0f;
+        float dx = sin(an), dy = -cos(an);
+        float r0 = (k == 1u || k == 8u) ? R * 0.84f : R * 0.9f;
+        return CapsulePrim(pvx + dx * r0, pvy + dy * r0, pvx + dx * R, pvy + dy * R, lw, db > 0.0f ? red : ink);
+    }
+    if (k <= 27u) {
+        float t0 = (float)(k - 12u) / 16.0f, t1 = (float)(k - 11u) / 16.0f;
+        float a0 = (-48.0f + 96.0f * t0) * TT_PI / 180.0f, a1 = (-48.0f + 96.0f * t1) * TT_PI / 180.0f;
+        bool hot = (t0 + t1) * 0.5f > zero;
+        float ra = R * 0.9f;
+        return CapsulePrim(pvx + sin(a0) * ra, pvy - cos(a0) * ra, pvx + sin(a1) * ra, pvy - cos(a1) * ra,
+                           hot ? lw * 1.8f : lw, hot ? red : ink);
+    }
+    float pos = (m == 0u) ? fVu.x : fVu.y;
+    if (k == 28u) {
+        float an = (-48.0f + 96.0f * pos) * TT_PI / 180.0f;
+        float dx = sin(an), dy = -cos(an);
+        float4 col = BeatFlash(fC1);
+        col.w = 1.0f;
+        return CapsulePrim(pvx + dx * R * 0.12f, pvy + dy * R * 0.12f, pvx + dx * R * 1.02f, pvy + dy * R * 1.02f,
+                           max(0.8f, h * 0.012f), col);
+    }
+    if (k == 29u) {
+        float r = h * 0.05f;
+        return RectPrim(pvx - r, pvy - r, pvx + r, pvy + r, float4(r, r, r, r), float4(0.25f, 0.25f, 0.27f, 1.0f));
+    }
+    if (k == 30u) {
+        float led = (m == 0u) ? fVu.z : fVu.w;
+        float r = h * 0.045f;
+        float cx = ox + w - h * 0.12f, cy = oy + h * 0.12f;
+        return RectPrim(cx - r, cy - r, cx + r, cy + r, float4(r, r, r, r),
+                        float4(1.0f, 0.18f, 0.12f, lerp(0.18f, 1.0f, saturate(led))));
+    }
+    return NoPrim();
+}
+
+// Stereo Field: left channel grows up from the centre line, right channel
+// down (left and right when vertical). gBars holds L in x and R in y.
+Prim SplitPrim(uint id) {
+    uint i = id >> 1u, ch = id & 1u;
+    if (i >= fBarCount) return NoPrim();
+    float lev = max(0.0f, (ch == 0u) ? gBars[i].x : gBars[i].y);
+    float s = (fIdleSize + lev * BarRange()) * 0.5f;
+    if (s < 0.25f) return NoPrim();
+    float lead = (float)i * (fBarW + fBarGap);
+    float4 col = BarColor(i, lev, false);
+    if (fVertical == 0u) {
+        float x = fBlock.x + lead, cy = fBlock.y + fMaxSize * 0.5f;
+        if (ch == 0u) return RectPrim(x, cy - 0.5f - s, x + fBarW, cy - 0.5f, fRadii, col);
+        return RectPrim(x, cy + 0.5f, x + fBarW, cy + 0.5f + s, fRadii, col);
+    }
+    float y = fBlock.y + lead, cx = fBlock.x + fMaxSize * 0.5f;
+    if (ch == 0u) return RectPrim(cx - 0.5f - s, y, cx - 0.5f, y + fBarW, fRadii, col);
+    return RectPrim(cx + 0.5f, y, cx + 0.5f + s, y + fBarW, fRadii, col);
+}
+
+// Particles: sparks thrown off the bar tops on each beat, simulated on the
+// CPU and uploaded as (x, y, alpha, bar * 16 + radius) relative to the block.
+Prim SparkPrim(uint j) {
+    float4 p = gPoints[j];
+    if (p.z <= 0.002f) return NoPrim();
+    float band = floor(p.w / 16.0f);
+    float r = p.w - band * 16.0f;
+    float x = fBlock.x + p.x, y = fBlock.y + p.y;
+    float4 col = BarColor(min((uint)band, max(fBarCount, 1u) - 1u), 1.0f, false);
+    col.w = col.w * saturate(p.z);
+    return RectPrim(x - r, y - r, x + r, y + r, float4(r, r, r, r), col);
+}
+
+// Reflection: the pass mirrored about the base line, faded out over
+// fReflDepth in the pixel shader (flag 16 on the kind).
+Prim ReflectPrim(Prim p) {
+    float B2 = 2.0f * fReflBase;
+    if (p.kind == 0u) {
+        p.a = float4(p.a.x, B2 - p.a.w, p.a.z, B2 - p.a.y);
+        p.radii = float4(p.radii.w, p.radii.z, p.radii.y, p.radii.x);
+    } else if (p.kind == 5u) {
+        p.a = float4(p.a.x, B2 - p.a.y, p.a.z, B2 - p.a.w);
+        p.radii.x = B2 - p.radii.x;
+    } else {
+        return NoPrim();
+    }
+    p.color.w = p.color.w * fReflAlpha;
+    p.kind = p.kind | 16u;
+    return p;
+}
+
 Prim BuildPrim(uint passId, uint id) {
     if (passId == 0u) {
         Prim p = RectPrim(fPlateRect.x, fPlateRect.y, fPlateRect.z, fPlateRect.w,
@@ -10595,6 +11984,13 @@ Prim BuildPrim(uint passId, uint id) {
     if (passId == 6u) return GonioPrim(id);
     if (passId == 7u) return CorrPrim(id);
     if (passId == 8u) return TermPrim(id);
+    if (passId == 9u) return LedPrim(id);
+    if (passId == 10u) return LinePrim(id);
+    if (passId == 11u) return BloomPrim(id);
+    if (passId == 12u) return SpecPrim(id);
+    if (passId == 13u) return VuPrim(id);
+    if (passId == 14u) return SplitPrim(id);
+    if (passId == 15u) return SparkPrim(id);
     return NoPrim();
 }
 
@@ -10604,7 +12000,7 @@ struct VsOut {
     NOINTERP float4 shape SEM(TEXCOORD1);
     NOINTERP float4 radii SEM(TEXCOORD2);
     NOINTERP float4 color SEM(TEXCOORD3);
-    NOINTERP uint kind SEM(TEXCOORD4);
+    NOINTERP uint kind SEM(TEXCOORD4);  // low 4 bits: Prim kind; 16: reflected
 };
 
 // Quad corner `vid` (triangle strip 0..3) of the primitive's bounds. The
@@ -10613,11 +12009,20 @@ struct VsOut {
 VsOut EmitVertex(Prim p, uint vid) {
     VsOut o;
     float2 lo, hi;
-    if (p.kind == 1u) {
+    uint kb = p.kind & 15u;
+    if (kb == 5u) {
+        float c0 = min(min(p.a.y, p.a.w), p.radii.x) - p.radii.z * 2.0f - 1.0f;
+        float c1 = max(max(p.a.y, p.a.w), p.radii.x) + p.radii.z * 2.0f + 1.0f;
+        lo = (fVertical == 0u) ? float2(p.a.x - 1.0f, c0) : float2(c0, p.a.x - 1.0f);
+        hi = (fVertical == 0u) ? float2(p.a.z + 1.0f, c1) : float2(c1, p.a.z + 1.0f);
+    } else if (kb == 6u) {
+        lo = float2(min(fCenter.x, min(p.a.x, p.a.z)) - 1.5f, min(fCenter.y, min(p.a.y, p.a.w)) - 1.5f);
+        hi = float2(max(fCenter.x, max(p.a.x, p.a.z)) + 1.5f, max(fCenter.y, max(p.a.y, p.a.w)) + 1.5f);
+    } else if (kb == 1u) {
         float r = p.radii.x + 1.0f;
         lo = float2(min(p.a.x, p.a.z) - r, min(p.a.y, p.a.w) - r);
         hi = float2(max(p.a.x, p.a.z) + r, max(p.a.y, p.a.w) + r);
-    } else if (p.kind == 2u || p.kind == 4u) {
+    } else if (kb == 2u || kb == 4u || kb == 7u) {
         lo = float2(p.a.x, p.a.y);
         hi = float2(p.a.z, p.a.w);
     } else {
@@ -10638,7 +12043,67 @@ VsOut EmitVertex(Prim p, uint vid) {
 }
 
 VsOut VSMain(uint vid SEM(SV_VertexID), uint iid SEM(SV_InstanceID)) {
-    return EmitVertex(BuildPrim(pPass, iid), vid);
+    Prim p = BuildPrim(pPass, iid);
+    if (pPad0 != 0u) p = ReflectPrim(p);
+    return EmitVertex(p, vid);
+}
+
+float4 LineShade(VsOut i) {
+    float u = (fVertical == 0u) ? i.pix.x : i.pix.y;
+    float c = (fVertical == 0u) ? i.pix.y : i.pix.x;
+    float4 a = i.shape;
+    float base = i.radii.x;
+    float xcov = saturate(min(u + 0.5f, a.z) - max(u - 0.5f, a.x));
+    float k = (a.w - a.y) / max(a.z - a.x, 1e-4f);
+    float cl = a.y + k * (u - a.x);
+    float sb = (base >= cl) ? 1.0f : -1.0f;
+    float d = (c - cl) / sqrt(1.0f + k * k);  // perpendicular distance to the curve
+    float dd = d * sb;                         // positive toward the base
+    float depth = max(abs(base - cl), 1.0f);
+    float fill = saturate(dd + 0.5f) * saturate((base - c) * sb + 0.5f) * i.radii.w *
+                 lerp(1.0f, 0.15f, saturate(dd / depth));
+    float edge = saturate(i.radii.y * 0.5f + 0.5f - abs(d));
+    float glow = 0.0f;
+    if (i.radii.z > 0.0f) glow = 0.4f * exp(-(d * d) / (i.radii.z * i.radii.z * 0.5f));
+    float alpha = 1.0f - (1.0f - edge) * (1.0f - fill) * (1.0f - glow);
+    return i.color * (alpha * xcov);
+}
+
+float4 BloomShade(VsOut i) {
+    float px = i.pix.x - fCenter.x, py = i.pix.y - fCenter.y;
+    float dix = i.shape.x - fCenter.x, diy = i.shape.y - fCenter.y;
+    float djx = i.shape.z - fCenter.x, djy = i.shape.w - fCenter.y;
+    if (!(Cross2(dix, diy, px, py) >= 0.0f && Cross2(djx, djy, px, py) < 0.0f)) return float4(0.0f, 0.0f, 0.0f, 0.0f);
+    float ex = djx - dix, ey = djy - diy;
+    float el = max(sqrt(ex * ex + ey * ey), 1e-4f);
+    float dOut = Cross2(ex, ey, px - dix, py - diy) / el;  // distance inside the outer edge
+    float cov = saturate(dOut + 0.5f);
+    float r = sqrt(px * px + py * py) / max(sqrt(dix * dix + diy * diy), 1.0f);
+    float fill = lerp(0.2f, 0.75f, saturate(r));
+    float rim = saturate(i.radii.x + 0.5f - dOut);
+    return i.color * (max(fill, rim) * cov);
+}
+
+float4 SpecShade(VsOut i) {
+    float rx = saturate((i.pix.x - i.shape.x) / max(1.0f, i.shape.z - i.shape.x));
+    float ry = saturate((i.pix.y - i.shape.y) / max(1.0f, i.shape.w - i.shape.y));
+    if (i.radii.x > 0.5f) {  // legend: hot end at the top (right when vertical)
+        float v = (fVertical == 0u) ? 1.0f - ry : rx;
+        float len = (fVertical == 0u) ? i.shape.w - i.shape.y : i.shape.z - i.shape.x;
+        float q = v * 4.0f;
+        bool tick = abs(q - floor(q + 0.5f)) * len * 0.25f < 0.5f;
+        float4 c = SpecColor(v);
+        c.w = max(c.w, 0.35f);
+        if (tick) c = float4(1.0f, 1.0f, 1.0f, 0.9f);
+        return Premul(c);
+    }
+    float along = (fVertical == 0u) ? rx : ry;
+    float age = (fVertical == 0u) ? ry : rx;
+    uint w = max(fSpecW, 1u), rows = max(fSpecRows, 1u), tex = max(fSpecTex, 1u);
+    uint bar = min((uint)(along * (float)w), w - 1u);
+    uint ago = min((uint)(age * (float)rows), rows - 1u);
+    uint row = (fSpecHead + tex - ago) % tex;
+    return Premul(SpecColor(gSpec.Load(int3((int)bar, (int)row, 0))));
 }
 
 // Coverage of the pixel centred at `pix` by a rectangle with a separate radius
@@ -10677,25 +12142,31 @@ float SdCapsule(float2 pix, float4 seg, float radius) {
     return length(float2(pa.x - ba.x * h, pa.y - ba.y * h)) - radius;
 }
 
-float Coverage(VsOut i) {
-    if (i.kind == 1u) return saturate(0.5f - SdCapsule(i.pix, i.shape, i.radii.x));
+float Coverage(VsOut i, uint kb) {
+    if (kb == 1u) return saturate(0.5f - SdCapsule(i.pix, i.shape, i.radii.x));
     return RectCoverage(i.pix, i.shape, i.radii);
 }
 
 float4 PSMain(VsOut i) SEM(SV_Target) {
-    if (i.kind == 2u) {
+    uint kb = i.kind & 15u;
+    float fade = 1.0f;
+    if ((i.kind & 16u) != 0u) fade = saturate(1.0f - (i.pix.y - fReflBase) * fReflDir / max(fReflDepth, 1.0f));
+    if (kb == 5u) return LineShade(i) * (fade * fSceneAlpha);
+    if (kb == 6u) return BloomShade(i) * fSceneAlpha;
+    if (kb == 7u) return SpecShade(i) * fSceneAlpha;
+    if (kb == 2u) {
         float2 uv = float2((i.pix.x - i.shape.x) / max(1.0f, i.shape.z - i.shape.x),
                            (i.pix.y - i.shape.y) / max(1.0f, i.shape.w - i.shape.y));
         return gPlate.SampleLevel(gSamp, uv, 0.0f) * fSceneAlpha;
     }
-    if (i.kind == 4u) {
+    if (kb == 4u) {
         float fx = (i.pix.x - i.shape.x) / max(1.0f, i.shape.z - i.shape.x);
         float fy = (i.pix.y - i.shape.y) / max(1.0f, i.shape.w - i.shape.y);
         float2 uv = float2(i.radii.x + (i.radii.z - i.radii.x) * fx, i.radii.y + (i.radii.w - i.radii.y) * fy);
         float cov = gGlyphs.SampleLevel(gSamp, uv, 0.0f).w;
         return i.color * (cov * fSceneAlpha);
     }
-    return i.color * (Coverage(i) * fSceneAlpha);
+    return i.color * (Coverage(i, kb) * fade * fSceneAlpha);
 }
 
 // ---- Analysis on the GPU (Workload = GPU) ----------------------------------------
@@ -11011,6 +12482,12 @@ struct FrameCB {
     float termGeom[4];   // origin x, origin y, cell width, cell height
     float termAtlas[4];  // atlas width, atlas height, -, -
     uint32_t termCols, termRows, termAtlasCols, termPad;
+    uint32_t style, segs, subdiv, specRows;
+    float reflBase, reflDir, reflDepth, reflAlpha;
+    float segStep, segH, glowR, fillA;
+    float vu[4];
+    float vuBox[4];
+    uint32_t specW, specHead, specTex, specPad;
 };
 struct PassCB {
     uint32_t pass, count, pad0, pad1;
@@ -11027,11 +12504,14 @@ struct CsCB {
     float fmin, fmax, breatheUp, breatheDown;
 };
 #pragma pack(pop)
-static_assert(sizeof(FrameCB) == 26 * 16, "FrameCB must match tt_cb.hlsl");
+static_assert(sizeof(FrameCB) == 32 * 16, "FrameCB must match tt_cb.hlsl");
 static_assert(sizeof(PassCB) == 16, "PassCB must match tt_cb.hlsl");
 static_assert(sizeof(CsCB) == 9 * 16, "CsCB must match tt_cb.hlsl");
 
-enum Pass : uint32_t { kPlate = 0, kBars, kCaps, kDots, kRadial, kScope, kGonio, kCorr, kTerm, kPassCount };
+enum Pass : uint32_t {
+    kPlate = 0, kBars, kCaps, kDots, kRadial, kScope, kGonio, kCorr, kTerm,
+    kLed, kLine, kBloom, kSpectro, kVu, kSplit, kSpark, kPassCount
+};
 constexpr int kMaxPoints = 8192;
 constexpr int kGonioFrames = 6;  // persistence: this frame and the five before it
 
@@ -11053,7 +12533,7 @@ struct State {
     ComPtr<ID3D11VertexShader> vs;
     ComPtr<ID3D11PixelShader> ps;
     ComPtr<ID3D11ComputeShader> cs[4];
-    ComPtr<ID3D11Buffer> frameCB, passCB[kPassCount], csCB;
+    ComPtr<ID3D11Buffer> frameCB, passCB[kPassCount], passCBRefl[kPassCount], csCB;
     ComPtr<ID3D11Buffer> barsDyn, globalsDyn, waveDyn, pointsDyn;
     ComPtr<ID3D11ShaderResourceView> barsDynSRV, globalsDynSRV, waveSRV, pointsSRV;
     ComPtr<ID3D11SamplerState> sampler;
@@ -11072,6 +12552,12 @@ struct State {
     uint32_t cellsSerial = 0;
     uint64_t cellsShape = 0;
     UINT termCount = 0;  // non-blank cells uploaded (the Terminal draw's instance count)
+    uint32_t sparkSerial = 0;
+    // Spectrogram history (2.1): bars x kVizSpecRows, R8, one row per 1/60 s.
+    ComPtr<ID3D11Texture2D> specTex;
+    ComPtr<ID3D11ShaderResourceView> specSRV;
+    int specW = 0, specHead = 0;
+    uint32_t specSerial = 0;
     bool frameCBValid = false;
     FrameCB frameCBLast = {};
 
@@ -11248,6 +12734,9 @@ bool EnsureDevice() {
     for (uint32_t p = 0; p < kPassCount; p++) {
         PassCB pc = {p, 0, 0, 0};
         if (FAILED(MakeCB(sizeof(PassCB), false, &pc, g.passCB[p]))) return false;
+        // The same pass mirrored for Reflection: pPad0 = 1.
+        PassCB pr = {p, 0, 1, 0};
+        if (FAILED(MakeCB(sizeof(PassCB), false, &pr, g.passCBRefl[p]))) return false;
     }
     if (FAILED(MakeStructured(8, VIZ_BARS_MAX, true, false, nullptr, g.barsDyn, &g.barsDynSRV, nullptr)) ||
         FAILED(MakeStructured(16, 4, true, false, nullptr, g.globalsDyn, &g.globalsDynSRV, nullptr)) ||
@@ -11356,9 +12845,11 @@ void ReleaseDevice() {
     for (auto& c : g.cs) c.Reset();
     g.frameCB.Reset(); g.csCB.Reset();
     for (auto& p : g.passCB) p.Reset();
+    for (auto& p : g.passCBRefl) p.Reset();
     g.barsDyn.Reset(); g.globalsDyn.Reset(); g.waveDyn.Reset(); g.pointsDyn.Reset();
     g.barsDynSRV.Reset(); g.globalsDynSRV.Reset(); g.waveSRV.Reset(); g.pointsSRV.Reset();
     g.cellsDyn.Reset(); g.cellsSRV.Reset(); g.glyphTex.Reset(); g.glyphSRV.Reset();
+    g.specTex.Reset(); g.specSRV.Reset(); g.specW = 0;
     g.glyphKey = 0;
     g.sampler.Reset(); g.blend.Reset(); g.blendOff.Reset(); g.raster.Reset();
     g.uploadsValid = g.cellsValid = g.frameCBValid = false;
@@ -11944,6 +13435,7 @@ bool Render(const FrameInputs& in) {
     // ---- Surface: the panel, or the bars plus their bleed without one -----
     float margin = std::max(4.0f * g_dpiScale, barW);
     if (shape == VizShape::Radial) margin += maxSize * 0.15f;
+    if (g_settings.style == VizStyle::Line) margin += 6.f * g_dpiScale;  // the edge glow
     D2D1_RECT_F content = D2D1::RectF(L.blockX - margin, L.blockY - margin, L.blockX + L.totalWidth + margin,
                                       L.blockY + L.totalHeight + margin);
     D2D1_RECT_F want = content;
@@ -12002,7 +13494,7 @@ bool Render(const FrameInputs& in) {
     // The Terminal grid is built on the CPU from the bar levels, so that
     // shape keeps the analysis there (Hybrid).
     const bool gpuWork = g_settings.workload == VizWorkload::Gpu && g_settings.engine == VizEngineKind::Precision &&
-                         !in.dragPause && !term;
+                         !in.dragPause && !term && !VizStyleNeedsCpuBars();
     bool gpuOk = false;
     if (gpuWork) {
         int st = EnsureGpuAnalysis();
@@ -12103,6 +13595,44 @@ bool Render(const FrameInputs& in) {
     f.plateRect[2] = (float)g.w;
     f.plateRect[3] = (float)g.h;
 
+    // Styles (2.1): only the constants the chosen style reads, so the others
+    // stay zero and never change (or re-upload) the frame constants.
+    const VizStyle style = g_settings.style;
+    const bool split = style == VizStyle::SplitLR;
+    f.style = (uint32_t)style;
+    if (style == VizStyle::Led) {
+        f.segH = std::max(2.f * g_dpiScale, roundf(barW * 0.5f));
+        f.segStep = f.segH + std::max(1.f, roundf(1.5f * g_dpiScale));
+        f.segs = (uint32_t)std::max(1, (int)((maxSize + f.segStep - f.segH) / f.segStep));
+    } else if (style == VizStyle::Line) {
+        f.subdiv = 4;
+        f.glowR = 5.f * g_dpiScale;
+        f.fillA = 0.35f;
+    } else if (style == VizStyle::Vu) {
+        // Quantised to 1/2048 of the scale, far below a pixel: a resting
+        // needle leaves the frame constants, and so the frame, unchanged.
+        for (int k = 0; k < 4; k++) f.vu[k] = roundf(g_vizVu[k] * 2048.f) / 2048.f;
+        float mw = maxSize * 1.5f, gap = 8.f * g_dpiScale;
+        f.vuBox[0] = mw;
+        f.vuBox[1] = maxSize;
+        f.vuBox[2] = horizontal ? mw + gap : 0.f;
+        f.vuBox[3] = horizontal ? 0.f : maxSize + gap;
+    } else if (style == VizStyle::Spectrogram) {
+        f.vuBox[0] = 3.f * g_dpiScale;  // legend gap and width
+        f.vuBox[1] = 6.f * g_dpiScale;
+        f.specW = (uint32_t)g_vizSpecW;
+        f.specTex = (uint32_t)kVizSpecRows;
+        f.specRows = (uint32_t)std::clamp((int)maxSize, 1, kVizSpecRows);  // one row per pixel
+        f.specHead = (uint32_t)g_vizSpecHead;
+    }
+    const bool refl = VizReflectionActive();
+    if (refl) {
+        f.reflBase = f.block[1] + maxSize;
+        f.reflDir = 1.f;
+        f.reflDepth = VizReflectionDepth(maxSize);
+        f.reflAlpha = 0.4f;
+    }
+
     // ---- Did anything change? ---------------------------------------------------------
     // Hashed from the CPU-side inputs first; the dynamic buffers are mapped
     // only when the frame will actually be drawn, and then only the ones
@@ -12126,6 +13656,8 @@ bool Render(const FrameInputs& in) {
     if (g_settings.colorMode == VizColorMode::RainbowCycle) MixF(hash, in.rainbowBase, 2.f);
     if (g_settings.beatFlashEnabled) MixF(hash, pulse, 128.f);
     Mix(hash, in.dragPause);
+    Mix(hash, (uint64_t)style * 1009u + (uint64_t)g_settings.reflection);
+    for (int k = 0; k < 4; k++) MixF(hash, f.vu[k], 2048.f);
 
     const bool drawBars = !in.dragPause;
     const bool cpuBars = !gpuOk && drawBars;
@@ -12138,13 +13670,17 @@ bool Render(const FrameInputs& in) {
     const float glPulse = g_settings.beatFlashEnabled ? pulse : 0.f;
     const bool glZones = g_settings.oscilloscopeMultibandEnabled;
     const float glZ[3] = {glZones ? in.zones[0] : 0.f, glZones ? in.zones[1] : 0.f, glZones ? in.zones[2] : 0.f};
+    // Stereo Field puts the left channel's levels where the bars go and the
+    // right channel's where the peak caps go.
+    const float* barLv = split ? g_vizSplitL : g_vizPeak;
+    const float* barHv = split ? g_vizSplitR : g_vizPeakHold;
     if (cpuBars) {
         barsKey = 1469598103934665603ull;
-        Mix(barsKey, (uint64_t)bars);
-        const bool caps = g_settings.peakHoldEnabled;
+        Mix(barsKey, (uint64_t)bars * 2u + (split ? 1u : 0u));
+        const bool caps = g_settings.peakHoldEnabled || split;
         for (int i = 0; i < bars; i++) {
-            MixF(barsKey, std::max(0.f, g_vizPeak[i]) * rangePx, 4.f);
-            if (caps) MixF(barsKey, g_vizPeakHold[i] * rangePx, 4.f);
+            MixF(barsKey, std::max(0.f, barLv[i]) * rangePx, 4.f);
+            if (caps) MixF(barsKey, barHv[i] * rangePx, 4.f);
         }
         Mix(hash, barsKey);
         globalsKey = 1469598103934665603ull;
@@ -12182,6 +13718,14 @@ bool Render(const FrameInputs& in) {
         MixF(hash, in.correlation, 256.f);
     }
 
+    const bool sparks = style == VizStyle::Particles && drawBars;
+    if (sparks) {
+        Mix(hash, g_vizSparkSerial);
+        Mix(hash, (uint64_t)g_vizSparkCount);
+    }
+    const bool spec = style == VizStyle::Spectrogram && drawBars && g_vizSpecW > 0;
+    if (spec) Mix(hash, g_vizSpecSerial);
+
     if (!g.forcePresent && hash == g.lastHash) {  // nothing changed: no upload, no draw, no present
         VizPerf(kPerfSkipped);
         return true;
@@ -12196,8 +13740,8 @@ bool Render(const FrameInputs& in) {
             if (SUCCEEDED(g.ctx->Map(g.barsDyn.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
                 float* p = (float*)ms.pData;
                 for (int i = 0; i < bars; i++) {
-                    p[2 * i] = std::max(0.f, g_vizPeak[i]);
-                    p[2 * i + 1] = g_vizPeakHold[i];
+                    p[2 * i] = std::max(0.f, barLv[i]);
+                    p[2 * i + 1] = barHv[i];
                 }
                 g.ctx->Unmap(g.barsDyn.Get(), 0);
                 VizPerf(kPerfMaps);
@@ -12255,6 +13799,57 @@ bool Render(const FrameInputs& in) {
             g.pointsSerial = gonioSerial;
         }
     }
+    if (sparks && (!g.uploadsValid || g.sparkSerial != g_vizSparkSerial)) {
+        if (SUCCEEDED(g.ctx->Map(g.pointsDyn.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
+            memcpy(ms.pData, g_vizSparkBuf, sizeof(float) * 4 * (size_t)g_vizSparkCount);
+            g.ctx->Unmap(g.pointsDyn.Get(), 0);
+            VizPerf(kPerfMaps);
+            g.sparkSerial = g_vizSparkSerial;
+            g.pointsSerial = 0xFFFFFFFFu;  // the Goniometer's points are gone
+        }
+    }
+    bool specReady = false;
+    if (spec) {
+        const int W = g_vizSpecW, R = kVizSpecRows;
+        if (!g.specTex || g.specW != W) {
+            g.specTex.Reset();
+            g.specSRV.Reset();
+            D3D11_TEXTURE2D_DESC td = {};
+            td.Width = (UINT)W;
+            td.Height = (UINT)R;
+            td.MipLevels = td.ArraySize = 1;
+            td.Format = DXGI_FORMAT_R8_UNORM;
+            td.SampleDesc.Count = 1;
+            td.Usage = D3D11_USAGE_DEFAULT;
+            td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+            if (SUCCEEDED(g_d3dDevice->CreateTexture2D(&td, nullptr, &g.specTex)) &&
+                SUCCEEDED(g_d3dDevice->CreateShaderResourceView(g.specTex.Get(), nullptr, &g.specSRV))) {
+                g.specW = W;
+                g.specSerial = g_vizSpecSerial - (uint32_t)R;  // everything is new
+            } else {
+                g.specTex.Reset();
+                g.specSRV.Reset();
+            }
+        }
+        if (g.specTex) {
+            // Only the rows pushed since the last upload: a row is a few
+            // hundred bytes, the whole history a few hundred kilobytes.
+            uint32_t fresh = g_vizSpecSerial - g.specSerial;
+            if (fresh >= (uint32_t)R) {
+                g.ctx->UpdateSubresource(g.specTex.Get(), 0, nullptr, g_vizSpecRing.data(), (UINT)W, 0);
+            } else {
+                for (uint32_t k = fresh; k > 0; k--) {
+                    int row = (g_vizSpecHead - (int)k + 1 + R) % R;
+                    D3D11_BOX box = {0, (UINT)row, 0, (UINT)W, (UINT)row + 1, 1};
+                    g.ctx->UpdateSubresource(g.specTex.Get(), 0, &box, &g_vizSpecRing[(size_t)row * W], (UINT)W, 0);
+                }
+            }
+            if (fresh) VizPerf(kPerfMaps);
+            g.specSerial = g_vizSpecSerial;
+            g.specHead = g_vizSpecHead;
+            specReady = true;
+        }
+    }
     g.uploadsValid = true;
 
     if (!g.frameCBValid || memcmp(&f, &g.frameCBLast, sizeof(f)) != 0) {
@@ -12298,6 +13893,10 @@ bool Render(const FrameInputs& in) {
         g.ctx->VSSetShaderResources(10, 1, &cells);
         g.ctx->PSSetShaderResources(11, 1, &glyphs);
     }
+    if (specReady) {
+        ID3D11ShaderResourceView* sv = g.specSRV.Get();
+        g.ctx->PSSetShaderResources(12, 1, &sv);
+    }
     ID3D11SamplerState* smp = g.sampler.Get();
     g.ctx->PSSetSamplers(0, 1, &smp);
     ID3D11Buffer* fcb = g.frameCB.Get();
@@ -12314,7 +13913,38 @@ bool Render(const FrameInputs& in) {
         draw(kPlate, 1);
     }
     g.ctx->OMSetBlendState(g.blend.Get(), nullptr, 0xffffffff);
+    // Reflection first, under the bars it mirrors.
+    auto drawRefl = [&](Pass p, UINT count) {
+        if (!count) return;
+        ID3D11Buffer* pcb = g.passCBRefl[p].Get();
+        g.ctx->VSSetConstantBuffers(1, 1, &pcb);
+        g.ctx->DrawInstanced(4, count, 0, 0);
+    };
+    const UINT lineCount = bars > 1 ? (UINT)(bars - 1) * f.subdiv : 0u;
+    if (drawBars && refl) {
+        if (style == VizStyle::Led) drawRefl(kLed, (UINT)bars * f.segs);
+        else if (style == VizStyle::Line) drawRefl(kLine, lineCount);
+        else if (shape == VizShape::Dots) drawRefl(kDots, (UINT)bars * f.dotSlots);
+        else {
+            drawRefl(kBars, (UINT)bars);
+            if (g_settings.peakHoldEnabled) drawRefl(kCaps, (UINT)bars);
+        }
+    }
+    bool styled = drawBars;
     if (drawBars) {
+        switch (style) {
+            case VizStyle::Led: draw(kLed, (UINT)bars * f.segs); break;
+            case VizStyle::Line: draw(kLine, lineCount); break;
+            case VizStyle::Bloom: draw(kBloom, (UINT)bars); break;
+            case VizStyle::Spectrogram:
+                if (specReady) draw(kSpectro, 2);
+                break;
+            case VizStyle::Vu: draw(kVu, 64); break;
+            case VizStyle::SplitLR: draw(kSplit, (UINT)bars * 2u); break;
+            default: styled = false; break;
+        }
+    }
+    if (drawBars && !styled) {
         switch (shape) {
             case VizShape::Dots: draw(kDots, (UINT)bars * f.dotSlots); break;
             case VizShape::Radial: draw(kRadial, (UINT)bars); break;
@@ -12331,6 +13961,7 @@ bool Render(const FrameInputs& in) {
                 if (g_settings.peakHoldEnabled) draw(kCaps, (UINT)bars);
                 break;
         }
+        if (sparks) draw(kSpark, (UINT)g_vizSparkCount);
     }
     ID3D11ShaderResourceView* nullSrv[5] = {};
     g.ctx->VSSetShaderResources(0, 4, nullSrv);
@@ -12339,6 +13970,7 @@ bool Render(const FrameInputs& in) {
         g.ctx->VSSetShaderResources(10, 1, nullSrv);
         g.ctx->PSSetShaderResources(11, 1, nullSrv);
     }
+    if (specReady) g.ctx->PSSetShaderResources(12, 1, nullSrv);
 
     HRESULT hr = g.sc->Present(0, 0);
     VizCheckDeviceLost(S_OK, hr);
@@ -12814,6 +14446,7 @@ bool RenderVisualizerD3D(float sceneAlpha) {
             VizComputeBarFrame();
             if (g_settings.shape == VizShape::Oscilloscope) VizUpdateScopeTrace();
             if (g_settings.shape == VizShape::Terminal) VizBuildTermGrid();
+        VizStylesFrame();
         }
         VizResolveColors(&in.c1, &in.cGrad1, &in.c2);
         in.rainbowBase = VizClockPhase(VizClockSeconds(), (double)g_settings.rainbowSpeed, 360.0);
@@ -12966,6 +14599,7 @@ void RenderVisualizer() {
     if (!g_dragRenderPauseActive.load(std::memory_order_relaxed)) {
         VizComputeBarFrame();
         if (g_settings.shape == VizShape::Terminal) VizBuildTermGrid();
+        VizStylesFrame();
     }
 
     int barCount = VizEffectiveBarCount();
@@ -12994,6 +14628,7 @@ void RenderVisualizer() {
         totalWidth  = horizontal ? groupThickness : groupExtent;
         totalHeight = horizontal ? groupExtent    : groupThickness;
     }
+    VizStyleBox(&totalWidth, &totalHeight, maxSize, horizontal);
 
     float animTime = (float)GetTickCount64() * 0.001f;
     // Rainbow hue offset, degrees. With Smooth Mode off this is the 1.4
@@ -13179,7 +14814,10 @@ void RenderVisualizer() {
             cGrad1 = c1;
         }
 
-        if (g_settings.shape == VizShape::Dots) {
+        if (VizDrawStyleD2D(blockX, blockY, totalWidth, totalHeight, barCount, barW, barGap, maxSize, idleSize,
+                            horizontal, c1, cGrad1, c2, rainbowBase)) {
+            // drawn by the style
+        } else if (g_settings.shape == VizShape::Dots) {
             float dotR  = barW * 0.5f;
             float step  = barW + barGap;
             float dTL = g_settings.barRadiusTL * g_dpiScale;
@@ -14210,7 +15848,11 @@ static const VizMenuOption kShapes[] = {
     {L"stereo", L"Stereo"},     {L"mountain", L"Mountain"},         {L"mirror", L"Mirror"},
     {L"wave", L"Wave"},         {L"breathe", L"Breathe"},           {L"dots", L"Dots"},
     {L"radial", L"Radial"},     {L"oscilloscope", L"Oscilloscope"}, {L"goniometer", L"Goniometer"},
-    {L"terminal", L"Terminal"}};
+    {L"terminal", L"Terminal"},
+    // Styles (2.1), in VizStyle order after the shapes (see VizShapeMenuIndex).
+    {L"led", L"LED Meter"},     {L"line", L"Line Spectrum"},        {L"bloom", L"Polar Bloom"},
+    {L"spectrogram", L"Spectrogram"}, {L"vu", L"VU Needles"},       {L"stereo_field", L"Stereo Field"},
+    {L"particles", L"Particles"}};
 static const VizMenuOption kColorModes[] = {
     {L"solid", L"Solid"},          {L"gradient", L"Gradient"},           {L"reactive_gradient", L"Reactive Gradient"},
     {L"accent", L"Windows Accent"}, {L"album_art", L"Album Art"},         {L"dynamic_album", L"Dynamic Album"},
@@ -14243,11 +15885,7 @@ void VizApplyMenuOverrides() {
         PCWSTR v = kv.second.c_str();
         auto is = [&](PCWSTR s) { return wcscmp(v, s) == 0; };
         if (k == L"shape") {
-            g_settings.shape = is(L"mountain") ? VizShape::Mountain : is(L"mirror") ? VizShape::Mirror
-                             : is(L"wave") ? VizShape::Wave : is(L"breathe") ? VizShape::Breathe
-                             : is(L"dots") ? VizShape::Dots : is(L"radial") ? VizShape::Radial
-                             : is(L"oscilloscope") ? VizShape::Oscilloscope : is(L"goniometer") ? VizShape::Goniometer
-                             : is(L"terminal") ? VizShape::Terminal : VizShape::Stereo;
+            VizParseShape(v, &g_settings.shape, &g_settings.style);
         } else if (k == L"colorMode") {
             g_settings.colorMode = is(L"gradient") ? VizColorMode::Gradient
                                  : is(L"reactive_gradient") ? VizColorMode::ReactiveGradient
@@ -14315,7 +15953,7 @@ static std::wstring CurrentValue(const std::wstring& key) {
     auto pick = [](const VizMenuOption* opts, size_t n, int index) -> std::wstring {
         return (index >= 0 && (size_t)index < n) ? opts[index].value : L"";
     };
-    if (key == L"shape") return pick(kShapes, ARRAYSIZE(kShapes), (int)g_settings.shape);
+    if (key == L"shape") return pick(kShapes, ARRAYSIZE(kShapes), VizShapeMenuIndex());
     if (key == L"colorMode") return pick(kColorModes, ARRAYSIZE(kColorModes), (int)g_settings.colorMode);
     if (key == L"termStyle") return pick(kTermStyles, ARRAYSIZE(kTermStyles), (int)g_settings.termStyle);
     if (key == L"engine") return pick(kEngines, ARRAYSIZE(kEngines), (int)g_settings.engine);
@@ -14869,17 +16507,9 @@ void LoadSettings() {
     g_settings.showSettingsErrors = Wh_GetIntSetting(L"validation.showErrors") != 0;
 
     PCWSTR shape = Wh_GetStringSetting(L"appearance.shape");
-    g_settings.shape = (wcscmp(shape, L"goniometer") == 0)   ? VizShape::Goniometer
-                       : (wcscmp(shape, L"mountain") == 0)   ? VizShape::Mountain
-                       : (wcscmp(shape, L"mirror") == 0)     ? VizShape::Mirror
-                       : (wcscmp(shape, L"wave") == 0)       ? VizShape::Wave
-                       : (wcscmp(shape, L"breathe") == 0)    ? VizShape::Breathe
-                       : (wcscmp(shape, L"dots") == 0)       ? VizShape::Dots
-                       : (wcscmp(shape, L"radial") == 0)     ? VizShape::Radial
-                       : (wcscmp(shape, L"oscilloscope") == 0) ? VizShape::Oscilloscope
-                       : (wcscmp(shape, L"terminal") == 0)   ? VizShape::Terminal
-                                                               : VizShape::Stereo;
+    VizParseShape(shape, &g_settings.shape, &g_settings.style);
     Wh_FreeStringSetting(shape);
+    g_settings.reflection = std::clamp(Wh_GetIntSetting(L"appearance.reflection"), 0, 100);
 
     PCWSTR orientation = Wh_GetStringSetting(L"appearance.orientation");
     g_settings.orientation =
@@ -15253,6 +16883,11 @@ void LoadSettings() {
         ReadIconPathSetting(L"media_controls.iconNextPath", L"Media Controls", L"Next Icon Path");
 
     g_settings.mediaIconSize = std::clamp(Wh_GetIntSetting(L"media_controls.iconSize"), 8, 256);
+    {
+        PCWSTR layout = Wh_GetStringSetting(L"media_controls.layout");
+        g_settings.mediaCard = layout && wcscmp(layout, L"card") == 0;
+        Wh_FreeStringSetting(layout);
+    }
     g_settings.mediaIconSpacing = std::clamp(Wh_GetIntSetting(L"media_controls.iconSpacing"), 0, 200);
 
     ReadColorSetting(L"media_controls.plateColor", L"Media Controls", L"Backing Plate Color",
@@ -15504,6 +17139,11 @@ void LoadSettings() {
         // Quick settings from the right-click menu sit on top of all of the
         // above (and are cleared from the same menu).
         VizApplyMenuOverrides();
+        if (g_settings.workload == VizWorkload::Gpu && VizStyleNeedsCpuBars()) {
+            ReportSettingWarning(L"Hardware", L"Workload",
+                                 L"Spectrogram, Stereo Field and Particles work from the bar levels on the CPU, "
+                                 L"so with them the analysis runs on the CPU (Hybrid).");
+        }
         if (g_settings.workload == VizWorkload::Gpu && g_settings.shape == VizShape::Terminal) {
             ReportSettingWarning(L"Hardware", L"Workload",
                                  L"The Terminal shape is built on the CPU from the bar levels, so with it the "
