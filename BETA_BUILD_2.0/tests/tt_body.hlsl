@@ -8,7 +8,7 @@ StructuredBuffer<float> gWave REG(t2);      // oscilloscope trace, 256 samples, 
 StructuredBuffer<float4> gPoints REG(t3);   // goniometer: side, mid, alpha, -
 Texture2D<float4> gPlate REG(t4);           // baked background panel, premultiplied
 SamplerState gSamp REG(s0);
-StructuredBuffer<uint> gCells REG(t10);     // Terminal: one cell per glyph, char | colour << 8
+StructuredBuffer<uint> gCells REG(t10);     // Terminal: glyph cells only, char | colour << 8 | grid index << 16
 Texture2D<float4> gGlyphs REG(t11);         // Terminal: printable ASCII baked white, premultiplied
 
 // Analysis (compute shaders, Workload = GPU).
@@ -288,15 +288,17 @@ Prim CorrPrim(uint j) {
 // One terminal cell: a glyph from the atlas (printable ASCII from 32, laid
 // out fTermAtlasCols to a row, one cell each), in one of five palette
 // colours. Cells are whole pixels and drawn 1:1, so pixel fonts stay sharp.
+// Only cells with a glyph are uploaded, each as char | colour << 8 |
+// grid index << 16, so the instance count is the number of glyphs.
 Prim TermPrim(uint id) {
     uint cols = max(fTermCols, 1u);
-    if (id >= cols * fTermRows) return NoPrim();
     uint cell = gCells[id];
     uint ch = cell & 127u;
-    if (ch <= 32u) return NoPrim();
+    uint idx = cell >> 16u;
+    if (ch <= 32u || idx >= cols * fTermRows) return NoPrim();
     uint ci = min((cell >> 8u) & 7u, 4u);
-    uint col = id % cols;
-    uint row = id / cols;
+    uint col = idx % cols;
+    uint row = idx / cols;
     float cw = fTermGeom.z, chh = fTermGeom.w;
     float x0 = fTermGeom.x + (float)col * cw;
     float y0 = fTermGeom.y + (float)row * chh;

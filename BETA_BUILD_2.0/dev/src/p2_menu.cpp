@@ -77,7 +77,7 @@ static const VizMenuOption kFps[] = {{L"0", L"Match display"}, {L"30", L"30"}, {
                                      {L"120", L"120"},         {L"144", L"144"}, {L"240", L"240"}};
 static const VizMenuOption kReadouts[] = {
     {L"off", L"Off"},           {L"frequency", L"Peak frequency"}, {L"loudness", L"Loudness"},
-    {L"loudness_full", L"Loudness, true peak, PLR, correlation"}};
+    {L"loudness_full", L"Loudness, true peak, PLR, correlation"}, {L"both", L"Peak frequency and loudness"}};
 
 // Applied at the end of LoadSettings, before anything derived from settings.
 void VizApplyMenuOverrides() {
@@ -129,7 +129,8 @@ void VizApplyMenuOverrides() {
             g_settings.peakFreqEnabled = !is(L"off");
             if (!is(L"off"))
                 g_settings.readout = is(L"loudness") ? VizReadout::Loudness
-                                   : is(L"loudness_full") ? VizReadout::LoudnessFull : VizReadout::Frequency;
+                                   : is(L"loudness_full") ? VizReadout::LoudnessFull
+                                   : is(L"both") ? VizReadout::Both : VizReadout::Frequency;
         } else if (k == L"audioSource") {
             g_settings.audioSourceKey = v;
         } else if (k == L"peakHold") {
@@ -175,6 +176,7 @@ static std::wstring CurrentValue(const std::wstring& key) {
         if (!g_settings.peakFreqEnabled) return L"off";
         return g_settings.readout == VizReadout::Loudness       ? L"loudness"
                : g_settings.readout == VizReadout::LoudnessFull ? L"loudness_full"
+               : g_settings.readout == VizReadout::Both         ? L"both"
                                                                 : L"frequency";
     }
     return L"";
@@ -184,6 +186,7 @@ enum : UINT {
     kMenuToggleBase = 100,  // + index into kToggles
     kMenuPause = 190,
     kMenuReset = 191,
+    kMenuCopy = 192,
     kMenuDefaultOut = 200,
     kMenuDefaultIn = 201,
     kMenuDeviceBase = 300,   // + endpoint index
@@ -214,8 +217,57 @@ struct VizMenuToggle {
     bool* field;
 };
 
+// Windhawk has no way for a mod to open or fill in its settings page, so this
+// puts the active quick settings on the clipboard as "key = value" lines to
+// carry over by hand. Keys and values are written as the menu shows them
+// ("Peak Hold Caps = On", "Audio Source = <device name>"), close to the
+// settings page's own labels, not as the internal override strings.
+static void VizCopyMenuOverrides(const VizMenuToggle* toggles, size_t nToggles,
+                                 const std::vector<VizAudioEndpoint>& eps) {
+    std::wstring s;
+    for (const auto& kv : g_menuOverrides) {
+        std::wstring key = kv.first, value = kv.second;
+        for (const VizMenuGroup& grp : kGroups) {
+            if (kv.first != grp.key) continue;
+            key = grp.label;
+            for (size_t i = 0; i < grp.n; i++)
+                if (kv.second == grp.opts[i].value) value = grp.opts[i].label;
+        }
+        for (size_t i = 0; i < nToggles; i++)
+            if (kv.first == toggles[i].key) {
+                key = toggles[i].label;
+                value = (kv.second == L"1") ? L"On" : L"Off";
+            }
+        if (kv.first == L"audioSource") {
+            key = L"Audio Source";
+            if (kv.second == L"default_output") value = L"Default output";
+            else if (kv.second == L"default_input") value = L"Default input";
+            else
+                for (const auto& ep : eps)
+                    if (kv.second == L"id:" + ep.id) value = ep.name;
+        }
+        s += key + L" = " + value + L"\r\n";
+    }
+    if (s.empty() || !OpenClipboard(g_messageWnd)) return;
+    EmptyClipboard();
+    const size_t bytes = (s.size() + 1) * sizeof(wchar_t);
+    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, bytes);
+    bool owned = false;  // true once the clipboard owns `mem`
+    if (mem) {
+        if (void* p = GlobalLock(mem)) {
+            memcpy(p, s.c_str(), bytes);
+            GlobalUnlock(mem);
+            owned = SetClipboardData(CF_UNICODETEXT, mem) != nullptr;
+        }
+        if (!owned) GlobalFree(mem);
+    }
+    CloseClipboard();
+}
+
 void VizShowContextMenu(POINT pt) {
-    if (!g_messageWnd) return;
+    // One menu at a time: a second request (e.g. the media strip, posted while
+    // this menu's modal loop is dispatching messages) would nest and fail.
+    if (!g_messageWnd || g_menuOpen.load(std::memory_order_acquire)) return;
     const VizMenuToggle toggles[] = {
         {L"peakHold", L"Peak Hold Caps", &g_settings.peakHoldEnabled},
         {L"beatFlash", L"Beat Flash", &g_settings.beatFlashEnabled},
@@ -276,6 +328,7 @@ void VizShowContextMenu(POINT pt) {
     AppendMenuW(menu, MF_STRING | (g_userPaused.load() ? MF_CHECKED : 0), kMenuPause, L"Pause Visualizer");
     std::wstring reset = L"Reset Quick Settings";
     if (!g_menuOverrides.empty()) reset += L" (" + std::to_wstring(g_menuOverrides.size()) + L" active)";
+    AppendMenuW(menu, MF_STRING | (g_menuOverrides.empty() ? MF_GRAYED : 0), kMenuCopy, L"Copy Quick Settings");
     AppendMenuW(menu, MF_STRING | (g_menuOverrides.empty() ? MF_GRAYED : 0), kMenuReset, reset.c_str());
 
     // A menu only closes on an outside click when its owner is foreground.
@@ -288,13 +341,20 @@ void VizShowContextMenu(POINT pt) {
     SetForegroundWindow(g_messageWnd);
     if (attached) AttachThreadInput(me, fgThread, FALSE);
 
+    // While the menu is up the mouse hook passes every click through, so a
+    // right-click elsewhere closes it instead of being swallowed.
+    g_menuOpen.store(true, std::memory_order_release);
     UINT cmd = (UINT)TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, pt.x, pt.y, g_messageWnd,
                                       nullptr);
+    g_menuOpen.store(false, std::memory_order_release);
     PostMessage(g_messageWnd, WM_NULL, 0, 0);
     DestroyMenu(menu);  // destroys the submenus with it
     if (!cmd) return;
 
-    if (cmd == kMenuReset) {
+    if (cmd == kMenuCopy) {
+        VizCopyMenuOverrides(toggles, ARRAYSIZE(toggles), eps);
+        return;
+    } else if (cmd == kMenuReset) {
         g_menuOverrides.clear();
         VizSaveMenuOverrides();
     } else if (cmd == kMenuPause) {

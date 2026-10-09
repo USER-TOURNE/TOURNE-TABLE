@@ -12,6 +12,18 @@ Beta build, in `BETA_BUILD_2.0/`. Same `@id` as the 1.4 beta, so it upgrades tha
 
 > **Beta fix:** the Direct3D 11 shaders failed to compile on Windows ("unexpected token 'pass'"), so every PC fell back to Direct2D. Windows' own shader compiler (`fxc`) reserves `pass` and doesn't accept a macro with an empty parameter list, and the DXC compiler used for testing accepts both. Both are fixed, and `tests/fxc_lint.py` now checks for anything else in that class before a build goes out.
 
+### ✦ Efficiency and fixes pass (review merge)
+
+- **Nothing changed, nothing sent**: the compositor is only committed when the panel actually moves (was every frame, 144/s), buffers are hashed first and only uploaded when the frame will be drawn and that buffer changed (432 to 144 uploads/s while playing, 0 when still), the background plate is drawn without blending and without a redundant clear.
+- **No empty layer for DWM**: with Now Playing, the readout and the progress bar off (the default) the text surface is taken out of the composition instead of being blended over the whole box every frame.
+- **Readout at 10 Hz**, with the frequency held within one display step, instead of redrawing text every frame.
+- **Terminal**: a changed-grid serial replaces hashing 65,536 cells per tick, and only glyph cells are uploaded and drawn.
+- **Silence costs nothing**: after digital silence fills the analysis, FFTs stop until a non-zero sample arrives; trickle drains audio events without full frames; one `exp()` per frame for the ballistics and a table-free `log10` per band; true peak only when the full loudness readout shows it, and skipped for windows that can't raise it; the peak-frequency search runs on power and logs only new maxima.
+- **Deep Idle** no longer wakes in a loop on a noise floor between the meter and engine thresholds, applies Input Gain, and stays off for input devices (whose meter can read 0 once the stream stops).
+- **Audio devices**: a chosen device that won't open (exclusive mode) falls back to the default output with a notice and is re-probed every 30 s; retries back off from 0.5 s to 30 s.
+- **Fixes**: a use-after-release crash when the media session changed while its events were running; the progress bar snapping back on pause and jumping on resume; Waterfall scrolling past the end of its history; progress / two-line Now Playing clipped inside the panel; right-click on the empty desktop while Auto-Hide had faded the scene; a second right-click while the menu was open; the media strip ignoring Ctrl + Right-Click; the readout menu had no "Peak frequency and loudness" option. New: **Copy Quick Settings** in the menu.
+- **Performance Stats** (Performance section): one `[Perf]` line in the Windhawk log every 30 s with engine wakes and time, analyses and FFTs, render ticks and time, frames presented vs skipped, text redraws, compositor commits, buffer uploads and the idle split, so the numbers above can be checked on any PC.
+
 ### ✦ New: a right-click menu, any audio device, a Terminal shape, a media widget
 
 - **Right-click the visualizer** for quick settings applied live: shape, colours, engine, band layout, weighting, ballistics, readout, workload, renderer, frame rate, the overlays, Pixel Snap, and Pause. Mods can't write their own settings, so menu choices are stored by the mod and laid over the settings page; **Reset Quick Settings** hands control back. The menu only opens where the visualizer is visible on the desktop, never through a covering window (**Right-Click Menu**: Right-Click, Ctrl + Right-Click or Off). The media strip opens it too.
