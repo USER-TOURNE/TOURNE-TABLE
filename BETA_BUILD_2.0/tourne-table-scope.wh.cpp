@@ -1418,7 +1418,7 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
         - 'off': 'Off'
     - npuRuntimePath: ''
       $name: NPU Runtime Folder
-      $description: The folder that contains openvino_c.dll, or the root of an extracted OpenVINO archive. Leave blank to search the usual places - INTEL_OPENVINO_DIR, Program Files\Intel\openvino*, C:\Intel\openvino*, a pip-installed openvino package, and PATH. Only used when Workload is NPU
+      $description: The folder that contains openvino_c.dll, or the root of an extracted OpenVINO archive. Leave blank to search the usual places - INTEL_OPENVINO_DIR, Program Files\Intel\openvino*, a pip-installed openvino package, and PATH. Only used when Workload is NPU
     - smoothMode: auto
       $name: Smooth Mode
       $description: Frame timing locked to the display's refresh so every frame lands on its own refresh, and motion that scales with real elapsed time. Target FPS is rounded to an even fraction of the refresh rate (60 on a 144 Hz screen runs at 72) because that is what makes motion even. With the Direct2D renderer it also bakes the panel and batches the bars. Auto turns it on when drawing runs on an integrated GPU or the CPU. On works with any GPU. Off is the 1.4 timing
@@ -2095,6 +2095,10 @@ static HANDLE g_gsmtcStopEvent = nullptr;
 // pair. This is the documented form for a global worker thread.
 [[clang::no_destroy]] static std::optional<std::thread> g_gsmtcThread;
 static std::thread* g_albumArtThread = nullptr;
+// Guards the pointer above: callers arrive from WinRT callbacks, the GSMTC
+// thread and the UI thread, and the worker can clear the pending flag before
+// the caller has stored its new thread.
+static std::mutex g_albumArtThreadMutex;
 
 HMODULE GetCurrentModuleHandle() {
     HMODULE module;
@@ -2902,6 +2906,7 @@ void FetchAlbumArtColorAsync() {
     if (!g_albumArtFetchPending.compare_exchange_strong(expected, true))
         return;
 
+    std::lock_guard<std::mutex> threadLock(g_albumArtThreadMutex);
     if (g_albumArtThread) {
         if (g_albumArtThread->joinable())
             g_albumArtThread->join();
@@ -5263,8 +5268,9 @@ inline std::vector<std::wstring> CandidateDirs(const std::wstring& userPath) {
         std::wstring pf = EnvVar(base);
         for (const auto& d : GlobDirs(pf + L"\\Intel", L"openvino*")) addRoot(d);
     }
-    for (const auto& d : GlobDirs(L"C:\\Intel", L"openvino*")) addRoot(d);
-    for (const auto& d : GlobDirs(L"C:", L"openvino*")) addRoot(d);
+    // Not C:\Intel or C:\openvino*: any user can create folders at the root
+    // of C:, and a DLL loaded from one would run inside Windhawk. An archive
+    // extracted there still works through NPU Runtime Folder.
 
     // pip: per-user and all-users CPython installs, plus `pip install --user`.
     std::wstring localApp = EnvVar(L"LOCALAPPDATA");
@@ -8396,8 +8402,10 @@ void EndDrag() {
     Wh_Log(L"[Drag] END moved=%d finalHV=(%.2f,%.2f) overrideActive=%d",
            (int)g_dragMoved, finalH, finalV, (int)g_dragOverrideActive.load(std::memory_order_relaxed));
 
+    // Deferred like the other hook paths: a WH_MOUSE_LL callback holds up all
+    // input until it returns, so no storage write happens in here.
     if (g_dragMoved) {
-        PersistOverrideState();
+        RequestPositionOverrideSave();
     }
 }
 
@@ -14616,6 +14624,7 @@ void WhTool_ModUninit() {
         g_gsmtcStopEvent = nullptr;
     }
 
+    std::lock_guard<std::mutex> albumThreadLock(g_albumArtThreadMutex);
     if (g_albumArtThread) {
         if (g_albumArtThread->joinable()) {
             HANDLE hThread = g_albumArtThread->native_handle();
