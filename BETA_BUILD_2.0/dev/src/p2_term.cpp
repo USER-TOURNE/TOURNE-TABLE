@@ -25,6 +25,10 @@ struct VizTermGrid {
 };
 VizTermGrid g_termGrid;
 std::vector<float> g_termHistory;  // waterfall: rows x cols levels, row 0 newest
+// Bumped by VizBuildTermGrid whenever the grid's size or any cell changes
+// (Waterfall scrolls included), so the renderer can tell a changed grid from an
+// unchanged one without hashing 65,536 cells every tick.
+uint32_t g_termGridSerial = 0;
 float g_termScrollAcc = 0.f;
 
 // Cell size for the terminal font, in whole pixels so glyphs land 1:1.
@@ -113,7 +117,56 @@ void VizTermMeterLevels(float out[4]) {
     for (int i = 0; i < 4; i++) out[i] = std::clamp(out[i], 0.f, 1.f);
 }
 
+// ---- waterfall scroll: begin (src/tests_features/test_waterfall.cpp compiles this block from v2b.cpp)
+// Scrolls the waterfall history (rows x cols, row 0 newest) down by `steps`
+// rows and writes the current levels (`newest`, clamped at 0) into row 0. The
+// rows a multi-row step opens up between the new row 0 and the previous newest
+// row are moments the frame skipped over: they are filled by interpolating
+// between the two, so a long frame or a fast Scroll Rate leaves neither stale
+// lines nor blank stripes. A step of the whole height or more leaves no older
+// row to keep, so every row starts again from the current levels.
+void VizTermScrollHistory(float* hist, int rows, int cols, int steps, const float* newest) {
+    if (!hist || rows <= 0 || cols <= 0) return;
+    const size_t rowLen = (size_t)cols;
+    if (steps >= rows) {
+        for (int c = 0; c < cols; c++) hist[c] = std::max(0.f, newest[c]);
+        for (int r = 1; r < rows; r++) memcpy(hist + (size_t)r * rowLen, hist, sizeof(float) * rowLen);
+        return;
+    }
+    if (steps > 0) {
+        memmove(hist + (size_t)steps * rowLen, hist, sizeof(float) * (size_t)(rows - steps) * rowLen);
+        const float* prev = hist + (size_t)steps * rowLen;  // the previous newest row
+        for (int r = 1; r < steps; r++) {
+            const float t = (float)r / (float)steps;
+            float* row = hist + (size_t)r * rowLen;
+            for (int c = 0; c < cols; c++) {
+                float now = std::max(0.f, newest[c]);
+                row[c] = now + (prev[c] - now) * t;
+            }
+        }
+    }
+    for (int c = 0; c < cols; c++) hist[c] = std::max(0.f, newest[c]);
+}
+// ---- waterfall scroll: end
+
+void VizBuildTermGridCells();
 void VizBuildTermGrid() {
+    // The previous grid, kept to compare against: a straight memcmp of at most
+    // 256 KB, several times cheaper than hashing it, and the copy is only
+    // taken when something changed.
+    static std::vector<uint32_t> s_prev;
+    static int s_cols = -1, s_rows = -1;
+    VizBuildTermGridCells();
+    const VizTermGrid& g = g_termGrid;
+    if (g.cols != s_cols || g.rows != s_rows || g.cells != s_prev) {
+        g_termGridSerial++;
+        s_cols = g.cols;
+        s_rows = g.rows;
+        s_prev = g.cells;
+    }
+}
+
+void VizBuildTermGridCells() {
     VizTermGrid& g = g_termGrid;
     VizTermGridSize(&g.cols, &g.rows);
     g.cells.assign((size_t)g.cols * g.rows, TermCell(L' ', 0));
@@ -155,11 +208,7 @@ void VizBuildTermGrid() {
         g_termScrollAcc += g_frameDt * (float)std::clamp(g_settings.termScrollRate, 1, 120);
         int steps = std::min((int)g_termScrollAcc, g.rows);
         g_termScrollAcc -= (float)(int)g_termScrollAcc;
-        if (steps > 0) {
-            memmove(&g_termHistory[(size_t)steps * g.cols], &g_termHistory[0],
-                    sizeof(float) * (size_t)(g.rows - steps) * g.cols);
-        }
-        for (int c = 0; c < g.cols; c++) g_termHistory[c] = std::max(0.f, g_vizPeak[c]);
+        VizTermScrollHistory(g_termHistory.data(), g.rows, g.cols, steps, g_vizPeak);
         for (int r = 0; r < g.rows; r++) {
             for (int c = 0; c < g.cols; c++) {
                 float v = g_termHistory[(size_t)r * g.cols + c];

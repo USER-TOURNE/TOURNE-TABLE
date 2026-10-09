@@ -129,8 +129,86 @@ static void AppendLufs(std::wstring& s, const wchar_t* label, double v) {
     s += b;
 }
 
+// The readout as shown. Rebuilt ten times a second, as a hardware meter
+// refreshes its display: momentary loudness only moves every 100 ms anyway
+// (its blocks are 100 ms), while the dominant frequency and the correlation
+// change on every analysis, which used to redraw and re-present the whole
+// text surface on nearly every frame. The frequency also holds within one
+// display step (1 Hz below 1 kHz, 0.1 kHz above) so a tone sitting between
+// two values doesn't flicker; what is shown is never more than one step
+// and 100 ms away from the live value.
+struct VizReadoutCache {
+    std::wstring text;
+    bool wide = false;
+    bool valid = false;
+    int mode = -1;
+    ULONGLONG at = 0;
+    float hzShown = 0.f;
+};
+VizReadoutCache g_readoutCache;
+constexpr ULONGLONG kVizReadoutMs = 100;
+
+static void VizFormatReadout(VizReadoutCache& rc) {
+    float hz = g_dominantFreqHz.load(std::memory_order_relaxed);
+    if (hz <= 0.f) {
+        rc.hzShown = 0.f;
+    } else {
+        float step = (rc.hzShown >= 1000.f) ? 100.f : 1.f;  // one step of the shown format
+        if (rc.hzShown <= 0.f || (hz >= 1000.f) != (rc.hzShown >= 1000.f) || fabsf(hz - rc.hzShown) >= step)
+            rc.hzShown = hz;
+    }
+    wchar_t freq[32] = L"";
+    if (rc.hzShown > 0.f) {
+        if (rc.hzShown >= 1000.f) swprintf_s(freq, L"%.1f kHz", rc.hzShown / 1000.f);
+        else swprintf_s(freq, L"%.0f Hz", rc.hzShown);
+    }
+    VizReadout r = g_settings.readout;
+    std::wstring& s = rc.text;
+    s.clear();
+    if (r == VizReadout::Frequency) {
+        s = freq;
+        rc.wide = false;
+        return;
+    }
+    VizMeterValues m;
+    {
+        std::lock_guard<std::mutex> lock(g_meterMutex);
+        m = g_meters;
+    }
+    if (r == VizReadout::Both && freq[0]) s = freq;
+    AppendLufs(s, L"M", m.momentary);
+    AppendLufs(s, L"S", m.shortTerm);
+    AppendLufs(s, L"I", m.integrated);
+    s += L" LUFS";
+    if (r == VizReadout::LoudnessFull) {
+        wchar_t b[96];
+        double plr = (std::isfinite(m.truePeak) && std::isfinite(m.integrated) && m.integrated > -70.0)
+                         ? m.truePeak - m.integrated
+                         : NAN;
+        if (std::isfinite(m.truePeak) && m.truePeak > -100.0)
+            swprintf_s(b, L"  TP %.1f dBTP", m.truePeak);
+        else
+            swprintf_s(b, L"  TP --");
+        s += b;
+        if (std::isfinite(plr)) swprintf_s(b, L"  PLR %.1f", plr);
+        else swprintf_s(b, L"  PLR --");
+        s += b;
+        swprintf_s(b, L"  r %+.2f", m.correlation);
+        s += b;
+    }
+    rc.wide = true;
+}
+
 void VizBuildTextFrame(VizTextFrame& t) {
-    t = VizTextFrame();
+    // Cleared rather than replaced, so a frame kept from tick to tick (the
+    // Direct3D 11 path) reuses its strings' storage instead of reallocating.
+    t.np.clear();
+    t.npTitle.clear();
+    t.npArtist.clear();
+    t.npAlpha = 0.f;
+    t.progress = -1.f;
+    t.pf.clear();
+    t.pfWide = false;
     if (g_settings.nowPlayingEnabled && g_dwriteTextFormat && g_nowPlayingBrush) {
         ULONGLONG changedAt = g_nowPlayingChangedTick.load(std::memory_order_relaxed);
         ULONGLONG npElapsed = GetTickCount64() - changedAt;
@@ -149,48 +227,18 @@ void VizBuildTextFrame(VizTextFrame& t) {
     }
     if (g_settings.progressEnabled && g_progressBrush) t.progress = VizTrackProgress();
     if (g_settings.peakFreqEnabled && g_dwriteTextFormat && g_nowPlayingBrush) {
-        std::wstring freq;
-        float hz = g_dominantFreqHz.load(std::memory_order_relaxed);
-        if (hz > 0.f) {
-            wchar_t b[32];
-            if (hz >= 1000.f) swprintf_s(b, L"%.1f kHz", hz / 1000.f);
-            else swprintf_s(b, L"%.0f Hz", hz);
-            freq = b;
+        VizReadoutCache& rc = g_readoutCache;
+        ULONGLONG now = GetTickCount64();
+        if (!rc.valid || rc.mode != (int)g_settings.readout || now - rc.at >= kVizReadoutMs) {
+            VizFormatReadout(rc);
+            rc.valid = true;
+            rc.mode = (int)g_settings.readout;
+            rc.at = now;
         }
-        VizReadout r = g_settings.readout;
-        if (r == VizReadout::Frequency) {
-            t.pf = freq;
-        } else {
-            VizMeterValues m;
-            {
-                std::lock_guard<std::mutex> lock(g_meterMutex);
-                m = g_meters;
-            }
-            std::wstring s;
-            if (r == VizReadout::Both && !freq.empty()) s = freq;
-            AppendLufs(s, L"M", m.momentary);
-            AppendLufs(s, L"S", m.shortTerm);
-            AppendLufs(s, L"I", m.integrated);
-            s += L" LUFS";
-            if (r == VizReadout::LoudnessFull) {
-                wchar_t b[96];
-                double plr = (std::isfinite(m.truePeak) && std::isfinite(m.integrated) && m.integrated > -70.0)
-                                 ? m.truePeak - m.integrated
-                                 : NAN;
-                if (std::isfinite(m.truePeak) && m.truePeak > -100.0)
-                    swprintf_s(b, L"  TP %.1f dBTP", m.truePeak);
-                else
-                    swprintf_s(b, L"  TP --");
-                s += b;
-                if (std::isfinite(plr)) swprintf_s(b, L"  PLR %.1f", plr);
-                else swprintf_s(b, L"  PLR --");
-                s += b;
-                swprintf_s(b, L"  r %+.2f", m.correlation);
-                s += b;
-            }
-            t.pf = s;
-            t.pfWide = true;
-        }
+        t.pf = rc.text;
+        t.pfWide = rc.wide;
+    } else {
+        g_readoutCache.valid = false;
     }
 }
 
@@ -288,8 +336,18 @@ void VizDrawTextOverlays(const VizTextFrame& t, const VizLayout& layout, bool sm
         float npOffY = EffectiveNowPlayingOffsetY();
         D2D1_RECT_F npRect;
         if (g_settings.npPlacement == VizNpPlacement::Above) {
-            npRect = D2D1::RectF(blockX - layout.textAnchorSide, blockY - npHeight - npMargin,
-                                 blockX + totalWidth + layout.textAnchorSide, blockY - npMargin);
+            float npBottom = blockY - npMargin;
+            // A progress bar placed Above sits over the panel; Now Playing
+            // then goes above it rather than through it. The layout already
+            // reserves room for both (ComputeVizLayout adds the bar's height
+            // to the space above). Settings-based, so the label doesn't jump
+            // when a track's timeline appears or goes.
+            D2D1_RECT_F pr;
+            if (g_settings.progressEnabled && g_progressBrush &&
+                g_settings.progressPlacement == VizProgressPlacement::Above && VizProgressRect(layout, &pr))
+                npBottom = std::min(npBottom, pr.top - npMargin);
+            npRect = D2D1::RectF(blockX - layout.textAnchorSide, npBottom - npHeight,
+                                 blockX + totalWidth + layout.textAnchorSide, npBottom);
         } else {
             // Inside the panel: in the band of padding above (or below) the
             // bars, as wide as the bars, so Left / Right line up with them.
@@ -379,8 +437,13 @@ void VizDrawTextOverlays(const VizTextFrame& t, const VizLayout& layout, bool sm
 // ---- Direct3D 11 frame ------------------------------------------------------------------
 // Returns false to fall back to the Direct2D path for this frame.
 bool RenderVisualizerD3D(float sceneAlpha) {
+    VizPerfScope perfScope(g_perfRenderTicks);
+    VizPerf(kPerfRenderTicks);
     VizLayout layout;
-    if (!ComputeVizLayout(&layout)) return false;
+    if (!ComputeVizLayout(&layout)) {
+        ttgfx::ShowTextSurface(true);  // the Direct2D path draws this frame, on the text surface
+        return false;
+    }
     VizPublishDrawRect(layout);
     const bool dragPause = g_dragRenderPauseActive.load(std::memory_order_relaxed);
 
@@ -406,16 +469,29 @@ bool RenderVisualizerD3D(float sceneAlpha) {
         in.rainbowBase = VizClockPhase(VizClockSeconds(), (double)g_settings.rainbowSpeed, 360.0);
         memcpy(in.scopeDisp, g_scopeDisp, sizeof(in.scopeDisp));
         VizZoneEnergies(in.zones);
-        {
+        if (g_settings.shape == VizShape::Goniometer) {  // only the correlation bar reads it
             std::lock_guard<std::mutex> lock(g_meterMutex);
             in.correlation = (float)g_meters.correlation;
         }
     }
-    if (!ttgfx::Render(in)) return false;
+    if (!ttgfx::Render(in)) {
+        ttgfx::ShowTextSurface(true);
+        return false;
+    }
 
     // Text surface: redrawn only when what it shows changes.
-    VizTextFrame tf;
-    if (sceneAlpha > 0.001f && !dragPause) VizBuildTextFrame(tf);
+    static VizTextFrame tf;  // kept, so its strings keep their storage
+    if (sceneAlpha > 0.001f && !dragPause) {
+        VizBuildTextFrame(tf);
+    } else {
+        tf.np.clear();
+        tf.npTitle.clear();
+        tf.npArtist.clear();
+        tf.npAlpha = 0.f;
+        tf.progress = -1.f;
+        tf.pf.clear();
+        tf.pfWide = false;
+    }
     uint64_t key = 1469598103934665603ull;
     for (wchar_t c : tf.np) ttgfx::Mix(key, (uint64_t)c);
     ttgfx::MixF(key, tf.npAlpha, 255.f);
@@ -434,6 +510,12 @@ bool RenderVisualizerD3D(float sceneAlpha) {
     if (!ttgfx::g.textForce && key == ttgfx::g.textKey) return true;
     ttgfx::g.textKey = key;
     ttgfx::g.textForce = false;
+    // Nothing to show: take the surface off rather than present a clear one.
+    const bool textEmpty = tf.pf.empty() && tf.progress < 0.f && (tf.np.empty() || tf.npAlpha <= 0.01f);
+    if (textEmpty) {
+        ttgfx::ShowTextSurface(false);
+        return true;
+    }
     g_dc->BeginDraw();
     g_dc->Clear(D2D1::ColorF(0, 0, 0, 0));
     bool fade = sceneAlpha < 0.999f;
@@ -446,5 +528,7 @@ bool RenderVisualizerD3D(float sceneAlpha) {
     HRESULT hrEnd = g_dc->EndDraw();
     HRESULT hrPresent = g_swapChain->Present(0, 0);
     VizCheckDeviceLost(hrEnd, hrPresent);
+    VizPerf(kPerfTextPresents);
+    ttgfx::ShowTextSurface(true);  // after the present, so it comes back with this frame on it
     return true;
 }
