@@ -12,12 +12,15 @@ Beta build, in `BETA_BUILD_2.0/`. Same `@id` as the 1.4 beta, so it upgrades tha
 
 > **Beta fix:** the Direct3D 11 shaders failed to compile on Windows ("unexpected token 'pass'"), so every PC fell back to Direct2D. Windows' own shader compiler (`fxc`) reserves `pass` and doesn't accept a macro with an empty parameter list, and the DXC compiler used for testing accepts both. Both are fixed, and `tests/fxc_lint.py` now checks for anything else in that class before a build goes out.
 
-### ✦ New: eight styles, Reflection, and a Media Card
+### ✦ New: eight styles, Reflection, a Media Card, FX and My Styles
 
 - **Styles in the Shape list:** LED Meter (segmented, green / amber / red, peak segment held), Line Spectrum (a smooth filled curve with a glowing edge), Polar Bloom (Radial as one filled shape), Spectrogram (a scrolling colour history with a legend), VU Needles (two analog L / R meters with IEC VU ballistics: 99 % in 300 ms, 1.5 % overshoot, plus peak LEDs), Stereo Field (left channel above the centre line, right below) and Particles (sparks thrown off the bar tops on each beat). Each rides on an existing shape, so layout, panel, colours and settings work as before. They're also in the right-click menu.
 - **Reflection** (Appearance, 0-100): mirrors the bars onto a floor beneath them, fading out. Horizontal, bottom-anchored bar styles, Direct3D 11 renderer.
 - **Cost:** each style is one draw call on the same instanced quad. Nothing new is uploaded per frame unless the style has its own data: a Spectrogram row (a few hundred bytes, 60 a second), the Stereo Field levels, or live sparks. A resting VU needle leaves the frame unchanged, so it still skips presents. Spectrogram, Stereo Field and Particles keep the analysis on the CPU (Hybrid), like Terminal.
 - **Media Card** (Media Controls > Layout = Card): album art with previous / play / next on hover, a seek bar (click or drag), a speaker button that switches the Windows default output in one click, and a volume slider (drag it, or scroll anywhere on the card). It repaints only when something on it changes.
+- **Card theming** (Media Controls): Card Background, Card Border Color and Size, Card Corner Radius (the art follows it), Card Art Size, and Card Accent taken from the icon colour, a custom colour, the album art, or the Windows accent.
+- **Glow and Bloom** (Appearance, 0-100 each, with a radius): Glow is a soft halo worked out in the same shader pass that draws each bar, so it costs next to nothing. Bloom adds a blurred copy at a quarter of the size back on top, only on frames that change. Direct3D 11 renderer.
+- **My Styles and the Style Editor** (right-click > My Styles): save a look (base style, colours, peak caps, beat flash, bar sizes, corner radius, reflection, glow and bloom) under a name and pick it from the menu later. The editor is a small window where the visualizer itself is the live preview; slider changes apply about 12 times a second while dragging.
 
 ### ✦ Efficiency and fixes pass (review merge)
 

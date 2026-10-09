@@ -1163,6 +1163,14 @@ rep("""      $description: 0-100. Mirrors the bars onto a floor beneath them, fa
       $description: 4-64 pixels. How far the light spreads
 """)
 
+# ================================================================ Style Editor (2.1)
+rep("-luuid -luser32 -ladvapi32", "-luuid -luser32 -ladvapi32 -lcomctl32 -lcomdlg32")
+after("#include <windowsx.h>\n", "#include <commctrl.h>\n#include <commdlg.h>\n")
+before("LRESULT CALLBACK MessageWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {", read("p3_editor.cpp") + "\n")
+before("    if (g_messageWnd) SendMessage(g_messageWnd, WM_APP_CLEANUP, 0, 0);\n    if (g_mediaWnd)",
+       "    if (g_styleEditorWnd) SendMessage(g_styleEditorWnd, WM_CLOSE, 0, 0);\n")
+after("    UnregisterMediaWindowClass();\n", "    UnregisterStyleEditorClass();\n")
+
 out = os.path.join(S, "v2b.cpp")
 open(out, "w", encoding="utf-8", newline="\n").write(src)
 print("wrote", out, src.count("\n"), "lines")
