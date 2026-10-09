@@ -6,6 +6,9 @@
 //   output      the speaker button lists the outputs, one click switches the
 //               Windows default (the visualizer follows if it listens to it)
 //   volume      drag the slider, or scroll anywhere on the card
+// Its look has its own settings: background, border, corner radius, art
+// size, and an accent (for the seek and volume fills) taken from the icon
+// colour, a colour of your own, the album art or the Windows accent.
 // It is the same layered window as the strip, painted in software, and only
 // repainted when something on it changes: hover, a click, a new cover, the
 // volume, or the seek bar moving by a whole pixel (checked once a second
@@ -30,7 +33,7 @@ VizCardGeom VizCardLayout() {
     int s = std::max(1, (int)std::lround(g_settings.mediaIconSize * g.dpi));
     int sp = std::max(0, (int)std::lround(g_settings.mediaIconSpacing * g.dpi));
     g.pad = std::max(GetMediaPlatePaddingPx(), (int)std::lround(8 * g.dpi));
-    g.tile = s * 3 + sp * 2;
+    g.tile = g_settings.cardArtSize > 0 ? std::max(24, (int)std::lround(g_settings.cardArtSize * g.dpi)) : s * 3 + sp * 2;
     g.gap = std::max(4, (int)std::lround(7 * g.dpi));
     g.progH = std::max(3, (int)std::lround(3 * g.dpi));
     g.progY = g.pad + g.tile + g.gap;
@@ -140,16 +143,45 @@ void VizPaintCard(BYTE* buf, int stride, int W, int H) {
     VizCardGeom g = VizCardLayout();
     const float ir = g_settings.mediaIconColorR / 255.f, ig = g_settings.mediaIconColorG / 255.f,
                 ib = g_settings.mediaIconColorB / 255.f, ia = g_settings.mediaIconColorA / 255.f;
-    // Card background: the plate colour if one is set, otherwise dark glass.
-    // Never fully transparent: a layered window lets clicks through pixels
-    // with zero alpha, and the card should take every click inside it.
-    bool plate = g_settings.mediaPlateA > 0;
-    CardFillRound(buf, stride, W, H, 0.f, 0.f, (float)W, (float)H, 10.f * g.dpi,
-                  plate ? g_settings.mediaPlateR / 255.f : 0.04f, plate ? g_settings.mediaPlateG / 255.f : 0.04f,
-                  plate ? g_settings.mediaPlateB / 255.f : 0.05f, plate ? g_settings.mediaPlateA / 255.f : 0.62f);
+    // Accent: the seek and volume fills and their knobs.
+    float ar = ir, ag = ig, ab = ib, aa = ia;
+    if (g_settings.cardAccentSource == 1) {
+        ar = g_settings.cardAccentR / 255.f;
+        ag = g_settings.cardAccentG / 255.f;
+        ab = g_settings.cardAccentB / 255.f;
+        aa = g_settings.cardAccentA / 255.f;
+    } else if (g_settings.cardAccentSource >= 2) {
+        DWORD dw = g_settings.cardAccentSource == 2 ? g_albumArtColor.load(std::memory_order_relaxed)
+                                                    : GetWindowsAccentColor();
+        ar = ((dw >> 16) & 0xFF) / 255.f;
+        ag = ((dw >> 8) & 0xFF) / 255.f;
+        ab = (dw & 0xFF) / 255.f;
+        aa = 1.f;
+    }
+    // Background, then the border drawn as a ring inside the edge. The
+    // background is never fully transparent: a layered window lets clicks
+    // through pixels with zero alpha, and the card should take every click
+    // inside it.
+    const float cardR = g_settings.cardRadius * g.dpi;
+    CardFillRound(buf, stride, W, H, 0.f, 0.f, (float)W, (float)H, cardR, g_settings.cardBgR / 255.f,
+                  g_settings.cardBgG / 255.f, g_settings.cardBgB / 255.f, std::max(1, (int)g_settings.cardBgA) / 255.f);
+    if (g_settings.cardBorderSize > 0 && g_settings.cardBorderA > 0) {
+        float bw = std::min(g_settings.cardBorderSize * g.dpi, std::min(W, H) * 0.5f);
+        for (int y = 0; y < H; y++)
+            for (int x = 0; x < W; x++) {
+                float px = x + 0.5f, py = y + 0.5f;
+                float ring = CardRoundCov(px, py, 0.f, 0.f, (float)W, (float)H, cardR) -
+                             CardRoundCov(px, py, bw, bw, W - bw, H - bw, std::max(0.f, cardR - bw));
+                if (ring > 0.f)
+                    CardBlend(buf + (size_t)y * stride + (size_t)x * 4, g_settings.cardBorderR / 255.f,
+                              g_settings.cardBorderG / 255.f, g_settings.cardBorderB / 255.f,
+                              g_settings.cardBorderA / 255.f * ring);
+            }
+    }
 
     // Album art, scaled bilinearly into the tile with rounded corners.
-    const float tl = (float)g.pad, tt = (float)g.pad, ts = (float)g.tile, rad = 7.f * g.dpi;
+    const float tl = (float)g.pad, tt = (float)g.pad, ts = (float)g.tile;
+    const float rad = std::max(0.f, cardR - g.pad * 0.5f);  // follows the card's corners
     bool art = false;
     {
         std::lock_guard<std::mutex> lock(g_artTileMutex);
@@ -196,10 +228,10 @@ void VizPaintCard(BYTE* buf, int stride, int W, int H) {
     CardFillRound(buf, stride, W, H, tl, py, tl + ts, py + ph, ph * 0.5f, ir, ig, ib, ia * 0.22f);
     if (prog >= 0.f) {
         float px = tl + ts * std::clamp(prog, 0.f, 1.f);
-        CardFillRound(buf, stride, W, H, tl, py, std::max(px, tl + ph), py + ph, ph * 0.5f, ir, ig, ib, ia * 0.9f);
+        CardFillRound(buf, stride, W, H, tl, py, std::max(px, tl + ph), py + ph, ph * 0.5f, ar, ag, ab, aa * 0.9f);
         if (seekHot) {
             float kr = ph * 1.1f;
-            CardFillRound(buf, stride, W, H, px - kr, py + ph * 0.5f - kr, px + kr, py + ph * 0.5f + kr, kr, ir, ig, ib, ia);
+            CardFillRound(buf, stride, W, H, px - kr, py + ph * 0.5f - kr, px + kr, py + ph * 0.5f + kr, kr, ar, ag, ab, aa);
         }
         s_cardProgPx = (int)lroundf(ts * std::clamp(prog, 0.f, 1.f));
     }
@@ -214,9 +246,9 @@ void VizPaintCard(BYTE* buf, int stride, int W, int H) {
         float cy = g.rowY + g.rowH * 0.5f, th = std::max(2.f, 3.f * g.dpi);
         CardFillRound(buf, stride, W, H, l, cy - th * 0.5f, r, cy + th * 0.5f, th * 0.5f, ir, ig, ib, ia * 0.22f);
         float kx = l + (r - l) * s_cardVolume;
-        CardFillRound(buf, stride, W, H, l, cy - th * 0.5f, std::max(kx, l + th), cy + th * 0.5f, th * 0.5f, ir, ig, ib, ia * 0.9f);
+        CardFillRound(buf, stride, W, H, l, cy - th * 0.5f, std::max(kx, l + th), cy + th * 0.5f, th * 0.5f, ar, ag, ab, aa * 0.9f);
         float kr = (s_cardHoverPart == kPartVolume || s_cardDrag == kPartVolume) ? 6.f * g.dpi : 4.5f * g.dpi;
-        CardFillRound(buf, stride, W, H, kx - kr, cy - kr, kx + kr, cy + kr, kr, ir, ig, ib, ia);
+        CardFillRound(buf, stride, W, H, kx - kr, cy - kr, kx + kr, cy + kr, kr, ar, ag, ab, aa);
     }
 }
 

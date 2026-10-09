@@ -1332,6 +1332,32 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
       $options:
         - strip: Strip (three buttons)
         - card: Card (art, seek, output, volume)
+    - cardBackground: '#9E0A0A0D'
+      $name: Card Background
+      $description: 'Card only. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b). Kept just above fully transparent at the least, so the card always takes clicks'
+    - cardBorderColor: '#00FFFFFF'
+      $name: Card Border Color
+      $description: 'Card only. Same formats as Card Background'
+    - cardBorderSize: 0
+      $name: Card Border Size
+      $description: Card only. Pixels, drawn inward from the edge
+    - cardCornerRadius: 12
+      $name: Card Corner Radius
+      $description: Card only. Pixels. The album art's corners follow it
+    - cardArtSize: 0
+      $name: Card Art Size
+      $description: Card only. Width of the album art in pixels, which sets the card's width. 0 sizes it from Icon Size and Icon Spacing
+    - cardAccent: icon
+      $name: Card Accent
+      $description: Card only. Colour of the seek and volume fills and their knobs
+      $options:
+        - icon: Icon Color
+        - custom: Card Accent Color
+        - album: Album art
+        - windows: Windows accent
+    - cardAccentColor: '#FFFFFFFF'
+      $name: Card Accent Color
+      $description: 'Card only, with Card Accent = Card Accent Color. Same formats as Card Background'
   $name: Media Controls
 - background:
     - enabled: true
@@ -1687,6 +1713,11 @@ struct Settings {
     BYTE mediaPlateA = 0, mediaPlateR = 0, mediaPlateG = 0, mediaPlateB = 0;
     int mediaPlatePadding = 0;
     bool mediaCard = false;  // Media Controls > Layout = Card (2.1)
+    BYTE cardBgA = 158, cardBgR = 10, cardBgG = 10, cardBgB = 13;
+    BYTE cardBorderA = 0, cardBorderR = 255, cardBorderG = 255, cardBorderB = 255;
+    int cardBorderSize = 0, cardRadius = 12, cardArtSize = 0;
+    int cardAccentSource = 0;  // 0 icon colour, 1 custom, 2 album art, 3 Windows accent
+    BYTE cardAccentA = 255, cardAccentR = 255, cardAccentG = 255, cardAccentB = 255;
     int mediaPlateCornerRadius = 8;
     int mediaPlateBorderSize = 0;
     BYTE mediaPlateBorderA = 0x40, mediaPlateBorderR = 255, mediaPlateBorderG = 255,
@@ -2240,6 +2271,7 @@ std::mutex g_artTileMutex;
 std::vector<BYTE> g_artTile;
 int g_artTileW = 0, g_artTileH = 0;
 std::atomic<int64_t> g_mediaSeekTicks{0};  // seek target for media command 3, 100 ns units
+inline bool VizCardWantsArt() { return g_settings.mediaControlsEnabled && g_settings.mediaCard; }
 
 void VizStoreArtTile(const BYTE* px, int w, int h) {
     std::vector<BYTE> out;
@@ -3217,6 +3249,7 @@ void FetchAlbumArtColorAsync() {
                     g_albumArtColor.store(col,  std::memory_order_relaxed);
                     g_albumArtColorSecondary.store(col2, std::memory_order_relaxed);
                     g_albumArtColorReady.store(true, std::memory_order_relaxed);
+                    if (g_mediaWnd && g_settings.mediaCard) PostMessage(g_mediaWnd, WM_APP_MEDIA_REPAINT, 0, 0);
                 }
             }
         } catch (...) {}
@@ -3290,7 +3323,7 @@ void SetupGsmtcSessionListener() {
             [](auto const&, auto const&) {
                 if (g_settings.colorMode == VizColorMode::AlbumArt ||
                     g_settings.colorMode == VizColorMode::DynamicAlbum ||
-                    g_settings.nowPlayingEnabled)
+                    g_settings.nowPlayingEnabled || VizCardWantsArt())
                     FetchAlbumArtColorAsync();
             });
         // Pausing / resuming folds the position in (VizTimelineSetPlaying);
@@ -3325,14 +3358,14 @@ void InitGsmtcListener() {
                     SetupGsmtcSessionListener();
                     if (g_settings.colorMode == VizColorMode::AlbumArt ||
                         g_settings.colorMode == VizColorMode::DynamicAlbum ||
-                        g_settings.nowPlayingEnabled)
+                        g_settings.nowPlayingEnabled || VizCardWantsArt())
                         FetchAlbumArtColorAsync();
                 });
 
             SetupGsmtcSessionListener();
             if (g_settings.colorMode == VizColorMode::AlbumArt ||
                 g_settings.colorMode == VizColorMode::DynamicAlbum ||
-                g_settings.nowPlayingEnabled)
+                g_settings.nowPlayingEnabled || VizCardWantsArt())
                 FetchAlbumArtColorAsync();
         } catch (...) {}
 
@@ -3612,6 +3645,9 @@ int GetMediaPlatePaddingPx() {
 //   output      the speaker button lists the outputs, one click switches the
 //               Windows default (the visualizer follows if it listens to it)
 //   volume      drag the slider, or scroll anywhere on the card
+// Its look has its own settings: background, border, corner radius, art
+// size, and an accent (for the seek and volume fills) taken from the icon
+// colour, a colour of your own, the album art or the Windows accent.
 // It is the same layered window as the strip, painted in software, and only
 // repainted when something on it changes: hover, a click, a new cover, the
 // volume, or the seek bar moving by a whole pixel (checked once a second
@@ -3636,7 +3672,7 @@ VizCardGeom VizCardLayout() {
     int s = std::max(1, (int)std::lround(g_settings.mediaIconSize * g.dpi));
     int sp = std::max(0, (int)std::lround(g_settings.mediaIconSpacing * g.dpi));
     g.pad = std::max(GetMediaPlatePaddingPx(), (int)std::lround(8 * g.dpi));
-    g.tile = s * 3 + sp * 2;
+    g.tile = g_settings.cardArtSize > 0 ? std::max(24, (int)std::lround(g_settings.cardArtSize * g.dpi)) : s * 3 + sp * 2;
     g.gap = std::max(4, (int)std::lround(7 * g.dpi));
     g.progH = std::max(3, (int)std::lround(3 * g.dpi));
     g.progY = g.pad + g.tile + g.gap;
@@ -3746,16 +3782,45 @@ void VizPaintCard(BYTE* buf, int stride, int W, int H) {
     VizCardGeom g = VizCardLayout();
     const float ir = g_settings.mediaIconColorR / 255.f, ig = g_settings.mediaIconColorG / 255.f,
                 ib = g_settings.mediaIconColorB / 255.f, ia = g_settings.mediaIconColorA / 255.f;
-    // Card background: the plate colour if one is set, otherwise dark glass.
-    // Never fully transparent: a layered window lets clicks through pixels
-    // with zero alpha, and the card should take every click inside it.
-    bool plate = g_settings.mediaPlateA > 0;
-    CardFillRound(buf, stride, W, H, 0.f, 0.f, (float)W, (float)H, 10.f * g.dpi,
-                  plate ? g_settings.mediaPlateR / 255.f : 0.04f, plate ? g_settings.mediaPlateG / 255.f : 0.04f,
-                  plate ? g_settings.mediaPlateB / 255.f : 0.05f, plate ? g_settings.mediaPlateA / 255.f : 0.62f);
+    // Accent: the seek and volume fills and their knobs.
+    float ar = ir, ag = ig, ab = ib, aa = ia;
+    if (g_settings.cardAccentSource == 1) {
+        ar = g_settings.cardAccentR / 255.f;
+        ag = g_settings.cardAccentG / 255.f;
+        ab = g_settings.cardAccentB / 255.f;
+        aa = g_settings.cardAccentA / 255.f;
+    } else if (g_settings.cardAccentSource >= 2) {
+        DWORD dw = g_settings.cardAccentSource == 2 ? g_albumArtColor.load(std::memory_order_relaxed)
+                                                    : GetWindowsAccentColor();
+        ar = ((dw >> 16) & 0xFF) / 255.f;
+        ag = ((dw >> 8) & 0xFF) / 255.f;
+        ab = (dw & 0xFF) / 255.f;
+        aa = 1.f;
+    }
+    // Background, then the border drawn as a ring inside the edge. The
+    // background is never fully transparent: a layered window lets clicks
+    // through pixels with zero alpha, and the card should take every click
+    // inside it.
+    const float cardR = g_settings.cardRadius * g.dpi;
+    CardFillRound(buf, stride, W, H, 0.f, 0.f, (float)W, (float)H, cardR, g_settings.cardBgR / 255.f,
+                  g_settings.cardBgG / 255.f, g_settings.cardBgB / 255.f, std::max(1, (int)g_settings.cardBgA) / 255.f);
+    if (g_settings.cardBorderSize > 0 && g_settings.cardBorderA > 0) {
+        float bw = std::min(g_settings.cardBorderSize * g.dpi, std::min(W, H) * 0.5f);
+        for (int y = 0; y < H; y++)
+            for (int x = 0; x < W; x++) {
+                float px = x + 0.5f, py = y + 0.5f;
+                float ring = CardRoundCov(px, py, 0.f, 0.f, (float)W, (float)H, cardR) -
+                             CardRoundCov(px, py, bw, bw, W - bw, H - bw, std::max(0.f, cardR - bw));
+                if (ring > 0.f)
+                    CardBlend(buf + (size_t)y * stride + (size_t)x * 4, g_settings.cardBorderR / 255.f,
+                              g_settings.cardBorderG / 255.f, g_settings.cardBorderB / 255.f,
+                              g_settings.cardBorderA / 255.f * ring);
+            }
+    }
 
     // Album art, scaled bilinearly into the tile with rounded corners.
-    const float tl = (float)g.pad, tt = (float)g.pad, ts = (float)g.tile, rad = 7.f * g.dpi;
+    const float tl = (float)g.pad, tt = (float)g.pad, ts = (float)g.tile;
+    const float rad = std::max(0.f, cardR - g.pad * 0.5f);  // follows the card's corners
     bool art = false;
     {
         std::lock_guard<std::mutex> lock(g_artTileMutex);
@@ -3802,10 +3867,10 @@ void VizPaintCard(BYTE* buf, int stride, int W, int H) {
     CardFillRound(buf, stride, W, H, tl, py, tl + ts, py + ph, ph * 0.5f, ir, ig, ib, ia * 0.22f);
     if (prog >= 0.f) {
         float px = tl + ts * std::clamp(prog, 0.f, 1.f);
-        CardFillRound(buf, stride, W, H, tl, py, std::max(px, tl + ph), py + ph, ph * 0.5f, ir, ig, ib, ia * 0.9f);
+        CardFillRound(buf, stride, W, H, tl, py, std::max(px, tl + ph), py + ph, ph * 0.5f, ar, ag, ab, aa * 0.9f);
         if (seekHot) {
             float kr = ph * 1.1f;
-            CardFillRound(buf, stride, W, H, px - kr, py + ph * 0.5f - kr, px + kr, py + ph * 0.5f + kr, kr, ir, ig, ib, ia);
+            CardFillRound(buf, stride, W, H, px - kr, py + ph * 0.5f - kr, px + kr, py + ph * 0.5f + kr, kr, ar, ag, ab, aa);
         }
         s_cardProgPx = (int)lroundf(ts * std::clamp(prog, 0.f, 1.f));
     }
@@ -3820,9 +3885,9 @@ void VizPaintCard(BYTE* buf, int stride, int W, int H) {
         float cy = g.rowY + g.rowH * 0.5f, th = std::max(2.f, 3.f * g.dpi);
         CardFillRound(buf, stride, W, H, l, cy - th * 0.5f, r, cy + th * 0.5f, th * 0.5f, ir, ig, ib, ia * 0.22f);
         float kx = l + (r - l) * s_cardVolume;
-        CardFillRound(buf, stride, W, H, l, cy - th * 0.5f, std::max(kx, l + th), cy + th * 0.5f, th * 0.5f, ir, ig, ib, ia * 0.9f);
+        CardFillRound(buf, stride, W, H, l, cy - th * 0.5f, std::max(kx, l + th), cy + th * 0.5f, th * 0.5f, ar, ag, ab, aa * 0.9f);
         float kr = (s_cardHoverPart == kPartVolume || s_cardDrag == kPartVolume) ? 6.f * g.dpi : 4.5f * g.dpi;
-        CardFillRound(buf, stride, W, H, kx - kr, cy - kr, kx + kr, cy + kr, kr, ir, ig, ib, ia);
+        CardFillRound(buf, stride, W, H, kx - kr, cy - kr, kx + kr, cy + kr, kr, ar, ag, ab, aa);
     }
 }
 
@@ -16888,6 +16953,21 @@ void LoadSettings() {
         g_settings.mediaCard = layout && wcscmp(layout, L"card") == 0;
         Wh_FreeStringSetting(layout);
     }
+    ReadColorSetting(L"media_controls.cardBackground", L"Media Controls", L"Card Background", 158, 10, 10, 13,
+                     &g_settings.cardBgA, &g_settings.cardBgR, &g_settings.cardBgG, &g_settings.cardBgB);
+    ReadColorSetting(L"media_controls.cardBorderColor", L"Media Controls", L"Card Border Color", 0, 255, 255, 255,
+                     &g_settings.cardBorderA, &g_settings.cardBorderR, &g_settings.cardBorderG, &g_settings.cardBorderB);
+    g_settings.cardBorderSize = std::clamp(Wh_GetIntSetting(L"media_controls.cardBorderSize"), 0, 20);
+    g_settings.cardRadius = std::clamp(Wh_GetIntSetting(L"media_controls.cardCornerRadius"), 0, 64);
+    g_settings.cardArtSize = std::clamp(Wh_GetIntSetting(L"media_controls.cardArtSize"), 0, 600);
+    {
+        PCWSTR acc = Wh_GetStringSetting(L"media_controls.cardAccent");
+        g_settings.cardAccentSource = !acc ? 0 : wcscmp(acc, L"custom") == 0 ? 1 : wcscmp(acc, L"album") == 0 ? 2
+                                    : wcscmp(acc, L"windows") == 0 ? 3 : 0;
+        Wh_FreeStringSetting(acc);
+    }
+    ReadColorSetting(L"media_controls.cardAccentColor", L"Media Controls", L"Card Accent Color", 255, 255, 255, 255,
+                     &g_settings.cardAccentA, &g_settings.cardAccentR, &g_settings.cardAccentG, &g_settings.cardAccentB);
     g_settings.mediaIconSpacing = std::clamp(Wh_GetIntSetting(L"media_controls.iconSpacing"), 0, 200);
 
     ReadColorSetting(L"media_controls.plateColor", L"Media Controls", L"Backing Plate Color",
@@ -17386,7 +17466,7 @@ void ApplySettingsChanged() {
         ((oldColorMode != VizColorMode::AlbumArt &&
           oldColorMode != VizColorMode::DynamicAlbum) || !g_albumArtColorReady.load()))
         FetchAlbumArtColorAsync();
-    else if (g_settings.nowPlayingEnabled)
+    else if (g_settings.nowPlayingEnabled || VizCardWantsArt())
         FetchAlbumArtColorAsync();
 
     if (!g_lazyInitialized || !g_initSucceeded) return;

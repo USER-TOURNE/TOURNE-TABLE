@@ -1071,6 +1071,73 @@ rep("""      $description: Distance in from the panel's top or bottom edge, in p
         - card: Card (art, seek, output, volume)
 """)
 
+# ================================================================ Media Card theme (2.1)
+after("    bool mediaCard = false;  // Media Controls > Layout = Card (2.1)\n", """    BYTE cardBgA = 158, cardBgR = 10, cardBgG = 10, cardBgB = 13;
+    BYTE cardBorderA = 0, cardBorderR = 255, cardBorderG = 255, cardBorderB = 255;
+    int cardBorderSize = 0, cardRadius = 12, cardArtSize = 0;
+    int cardAccentSource = 0;  // 0 icon colour, 1 custom, 2 album art, 3 Windows accent
+    BYTE cardAccentA = 255, cardAccentR = 255, cardAccentG = 255, cardAccentB = 255;
+""")
+after("std::atomic<int64_t> g_mediaSeekTicks{0};  // seek target for media command 3, 100 ns units\n",
+      "inline bool VizCardWantsArt() { return g_settings.mediaControlsEnabled && g_settings.mediaCard; }\n")
+# The card shows the cover, so it fetches it whatever the colour mode.
+import re as _re
+_n = len(_re.findall(r"g_settings\.nowPlayingEnabled\)\n(\s*)FetchAlbumArtColorAsync\(\);", src))
+if _n != 4:
+    sys.exit(f"album fetch anchors {_n} != 4")
+src = _re.sub(r"g_settings\.nowPlayingEnabled\)\n(\s*)FetchAlbumArtColorAsync\(\);",
+              r"g_settings.nowPlayingEnabled || VizCardWantsArt())\n\1FetchAlbumArtColorAsync();", src)
+after("                    g_albumArtColorReady.store(true, std::memory_order_relaxed);\n",
+      "                    if (g_mediaWnd && g_settings.mediaCard) PostMessage(g_mediaWnd, WM_APP_MEDIA_REPAINT, 0, 0);\n")
+after("""        g_settings.mediaCard = layout && wcscmp(layout, L"card") == 0;
+        Wh_FreeStringSetting(layout);
+    }
+""", """    ReadColorSetting(L"media_controls.cardBackground", L"Media Controls", L"Card Background", 158, 10, 10, 13,
+                     &g_settings.cardBgA, &g_settings.cardBgR, &g_settings.cardBgG, &g_settings.cardBgB);
+    ReadColorSetting(L"media_controls.cardBorderColor", L"Media Controls", L"Card Border Color", 0, 255, 255, 255,
+                     &g_settings.cardBorderA, &g_settings.cardBorderR, &g_settings.cardBorderG, &g_settings.cardBorderB);
+    g_settings.cardBorderSize = std::clamp(Wh_GetIntSetting(L"media_controls.cardBorderSize"), 0, 20);
+    g_settings.cardRadius = std::clamp(Wh_GetIntSetting(L"media_controls.cardCornerRadius"), 0, 64);
+    g_settings.cardArtSize = std::clamp(Wh_GetIntSetting(L"media_controls.cardArtSize"), 0, 600);
+    {
+        PCWSTR acc = Wh_GetStringSetting(L"media_controls.cardAccent");
+        g_settings.cardAccentSource = !acc ? 0 : wcscmp(acc, L"custom") == 0 ? 1 : wcscmp(acc, L"album") == 0 ? 2
+                                    : wcscmp(acc, L"windows") == 0 ? 3 : 0;
+        Wh_FreeStringSetting(acc);
+    }
+    ReadColorSetting(L"media_controls.cardAccentColor", L"Media Controls", L"Card Accent Color", 255, 255, 255, 255,
+                     &g_settings.cardAccentA, &g_settings.cardAccentR, &g_settings.cardAccentG, &g_settings.cardAccentB);
+""")
+rep("""        - card: Card (art, seek, output, volume)
+""", """        - card: Card (art, seek, output, volume)
+    - cardBackground: '#9E0A0A0D'
+      $name: Card Background
+      $description: 'Card only. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b). Kept just above fully transparent at the least, so the card always takes clicks'
+    - cardBorderColor: '#00FFFFFF'
+      $name: Card Border Color
+      $description: 'Card only. Same formats as Card Background'
+    - cardBorderSize: 0
+      $name: Card Border Size
+      $description: Card only. Pixels, drawn inward from the edge
+    - cardCornerRadius: 12
+      $name: Card Corner Radius
+      $description: Card only. Pixels. The album art's corners follow it
+    - cardArtSize: 0
+      $name: Card Art Size
+      $description: Card only. Width of the album art in pixels, which sets the card's width. 0 sizes it from Icon Size and Icon Spacing
+    - cardAccent: icon
+      $name: Card Accent
+      $description: Card only. Colour of the seek and volume fills and their knobs
+      $options:
+        - icon: Icon Color
+        - custom: Card Accent Color
+        - album: Album art
+        - windows: Windows accent
+    - cardAccentColor: '#FFFFFFFF'
+      $name: Card Accent Color
+      $description: 'Card only, with Card Accent = Card Accent Color. Same formats as Card Background'
+""")
+
 out = os.path.join(S, "v2b.cpp")
 open(out, "w", encoding="utf-8", newline="\n").write(src)
 print("wrote", out, src.count("\n"), "lines")
