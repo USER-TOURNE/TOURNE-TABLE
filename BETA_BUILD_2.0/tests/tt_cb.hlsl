@@ -25,6 +25,17 @@ TT_CBUFFER(FrameCB, b0) {
     float4 fTermGeom;   // origin x, origin y, cell width, cell height
     float4 fTermAtlas;  // atlas width, atlas height, -, -
     uint fTermCols, fTermRows, fTermAtlasCols, fTermPad;
+    // Styles (2.1): which one (0 none, 1 LED, 2 Line, 3 Bloom, 4 Spectrogram,
+    // 5 VU, 6 Stereo Field, 7 Particles), LED segments per bar, Line
+    // subdivisions per bar gap, Spectrogram history rows in use.
+    uint fStyle, fSegs, fSubdiv, fSpecRows;
+    // Reflection: base line y, direction (+1 down), depth px, start opacity.
+    float fReflBase, fReflDir, fReflDepth, fReflAlpha;
+    // LED segment pitch and height, Line glow radius and fill opacity.
+    float fSegStep, fSegH, fGlowR, fFillA;
+    float4 fVu;     // VU needle L, R (0..1 of the scale), peak LED L, R (0..1)
+    float4 fVuBox;  // one meter's width, height, offset of the second meter x, y
+    uint fSpecW, fSpecHead, fSpecTex, fSpecPad;  // bars per row, newest row, rows in the texture
 }
 TT_CBUFFER_END
 

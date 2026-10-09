@@ -21,6 +21,10 @@ struct float4 {
     float4() {}
     float4(float a, float b, float c, float d) : x(a), y(b), z(c), w(d) {}
 };
+struct int3 {
+    int x, y, z;
+    int3(int a, int b, int c) : x(a), y(b), z(c) {}
+};
 struct uint3 {
     uint x = 0, y = 0, z = 0;
 };
@@ -88,6 +92,7 @@ template <typename T>
 struct Texture2D {
     std::vector<T>* data = nullptr;
     int w = 1, h = 1;
+    T Load(int3 p) const { return (*data)[std::clamp(p.y, 0, h - 1) * w + std::clamp(p.x, 0, w - 1)]; }
     T SampleLevel(SamplerState, float2 uv, float) const {
         int x = std::clamp((int)(uv.x * w), 0, w - 1), y = std::clamp((int)(uv.y * h), 0, h - 1);
         return (*data)[y * w + x];
