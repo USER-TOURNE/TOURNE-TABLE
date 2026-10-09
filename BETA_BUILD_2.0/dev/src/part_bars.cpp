@@ -203,7 +203,31 @@ void VizPublishEngineConfig() {
     bool readout = g_settings.peakFreqEnabled;
     c.wantDominant = readout && (g_settings.readout == VizReadout::Frequency || g_settings.readout == VizReadout::Both);
     c.wantLoudness = readout && g_settings.readout != VizReadout::Frequency;
+    // True peak and correlation are only shown by the full loudness readout
+    // (correlation also under the Goniometer), so only then are they measured.
+    c.wantTruePeak = readout && g_settings.readout == VizReadout::LoudnessFull;
     c.wantGonio = g_settings.shape == VizShape::Goniometer;
+    c.wantCorrelation = c.wantTruePeak || c.wantGonio;
+
+    // Oscilloscope and Goniometer draw no bars, but the bands still feed the
+    // colour zones (low < 300 Hz < mid < 2.5 kHz < high, used as ratios), the
+    // beat (< 150 Hz) and, for the Frequency readout, the peak search. 24
+    // bands cover all of that instead of up to 2048: on the user's own scale,
+    // so each zone keeps its share of the bands and the colours mix as before
+    // (IEC and musical layouts, which are logarithmic, become Log; 24 log
+    // bands are 0.4 octave each, 7 of them under 150 Hz for the beat). The
+    // bass tiers are dropped too unless the Frequency readout is on: without
+    // them its resolution in the bass falls to one top-tier bin (fs / FFT
+    // size, 23 Hz at 2048) and it can't report below about 2 bins (47 Hz),
+    // which is why they stay when it's shown. GPU analysis keeps the full
+    // layout (its band buffers follow the bar layout).
+    if (c.precision && c.workload != VizWorkload::Gpu &&
+        (g_settings.shape == VizShape::Oscilloscope || g_settings.shape == VizShape::Goniometer)) {
+        if (s.layout != ttdsp::BandLayout::Scale) s.scale = ttdsp::FreqScale::Log;
+        s.layout = ttdsp::BandLayout::Scale;
+        s.bars = 24;
+        if (!c.wantDominant) s.maxTier = 0;
+    }
     c.beat = g_settings.beatFlashEnabled;
     c.loudnessResetOnTrack = g_settings.loudnessResetOnTrack;
     {
