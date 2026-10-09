@@ -1,0 +1,19 @@
+--- src/test_dsp.py	2026-10-08 11:14:23.924848699 -0400
++++ work_engine/src/test_dsp.py	2026-10-09 03:57:27.064028296 -0400
+@@ -193,6 +193,16 @@
+ v = np.interp(1.0, outs[240][:, 0], outs[240][:, 1])
+ check("analyzer release = 20 dB/s", abs(v - (1 - 10 / 60)) < 0.01, f"{v:.4f}")
+ 
++# ---- Efficiency changes that must not change a reading ----
++err = float(run("fastlog").split()[1])
++check("fast dB (per-band levels) within 1e-4 dB of 10 log10, 1e-32 .. 1e6", err < 1e-4, f"max err {err:.2e} dB")
++_, worst, share = run("tpgate").split()
++check("gated true peak identical to the ungated one at every packet", float(worst) == 0.0, f"max diff {float(worst):.2e} dB, {100*float(share):.1f}% interpolated")
++_, tpdb, ev, same = run("tpoff").split()
++check("true peak off: no interpolation, loudness unchanged", int(ev) == 0 and same == "1" and float(tpdb) <= -199, f"{tpdb} dB, {ev} evals")
++bad = int(run("ballcoef").split()[1])
++check("per-frame ballistics coefficients bit-identical to per-band", bad == 0, f"{bad} mismatches")
++
+ print()
+ print("FAILED: " + ", ".join(fails) if fails else "ALL PASSED")
+ sys.exit(1 if fails else 0)

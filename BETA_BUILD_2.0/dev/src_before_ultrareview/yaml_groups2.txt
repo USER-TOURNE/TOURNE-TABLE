@@ -1,0 +1,81 @@
+- audio:
+    - source: default_output
+      $name: Audio Source
+      $description: What the visualizer listens to. The default output is what you hear (as before). An input is a microphone, a line-in or the recording side of a virtual cable. Or pick a device by name, which covers any output or input, virtual ones included (VB-Audio Cable / Matrix, Voicemeeter, an Ableton return routed to its own device). The right-click menu lists every active device and switches live
+      $options:
+        - default_output: Default output (what you hear)
+        - default_input: Default input
+        - named: A device by name (below)
+    - deviceName: ''
+      $name: Device Name
+      $description: 'Part of the device''s name, as Windows Sound settings show it, e.g. "VB-Audio Matrix" or "CABLE Output". Outputs are captured by loopback, inputs recorded directly. If it isn''t connected the default output stands in, with a heads-up, until it is. Only used when Audio Source is "A device by name"'
+  $name: Audio Source
+- progress:
+    - enabled: false
+      $name: Track Progress Bar
+      $description: A thin bar showing how far into the current track you are, from the same Windows media session as Now Playing. Works with players that report their position (Spotify, most browsers, foobar2000, MusicBee and more)
+    - placement: below
+      $name: Placement
+      $options:
+        - below: Below the panel
+        - above: Above the panel
+        - panel_bottom: Inside the panel, under the bars
+    - height: 2
+      $name: Height
+      $description: In pixels
+    - gap: 6
+      $name: Gap
+      $description: Distance from the panel (or, inside it, from the bars), in pixels
+    - color: '#FFFFFFFF'
+      $name: Color
+      $description: 'The played part. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b)'
+    - trackColor: '#40FFFFFF'
+      $name: Track Color
+      $description: 'The rest of the bar. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b)'
+  $name: Track Progress
+- terminal:
+    - style: columns
+      $name: Terminal Style
+      $description: Only used when Shape is Terminal. Columns draws every bar as a column of characters. Waterfall is a spectrogram in characters, newest line on top. Meters prints Bass, Mid, Treble and Volume as text meters
+      $options:
+        - columns: Columns
+        - waterfall: Waterfall
+        - meters: Meters
+    - font: Consolas
+      $name: Font
+      $description: A monospace font installed in Windows (Consolas, Cascadia Mono, a Nerd Font, a pixel font)
+    - fontSize: 14
+      $name: Font Size
+      $description: In points. Sets the cell size, and with it the size of the whole grid; Bar Width, Gap and Max Size don't apply to this shape
+    - rows: 16
+      $name: Rows
+      $description: Height of Columns and Waterfall, in lines. Columns are one per bar (Bar Count, or the band layout)
+    - meterColumns: 40
+      $name: Meter Width
+      $description: Width of the Meters style, in characters
+    - hotThreshold: 75
+      $name: Hot Threshold (%)
+      $description: Above this share of full height a character turns the Hot Color
+    - columnGlyph: '#'
+      $name: Column Glyph
+      $description: The character columns and meters are built from. One printable ASCII character
+    - peakGlyph: '-'
+      $name: Peak Glyph
+      $description: The peak cap in Columns (with Peak Hold on). One printable ASCII character
+    - ramp: ' .:-=+*#%@'
+      $name: Waterfall Ramp
+      $description: Characters from quiet to loud for the Waterfall. Printable ASCII
+    - scrollRate: 20
+      $name: Waterfall Speed
+      $description: Lines per second
+    - lowColor: '#FF33FF66'
+      $name: Color
+    - highColor: '#FFFF3B3B'
+      $name: Hot Color
+    - dimColor: '#FF1E6B34'
+      $name: Dim Color
+      $description: The faintest level of the Waterfall
+    - labelColor: '#FFB8FFB8'
+      $name: Label Color
+      $description: The Meters labels
+  $name: Terminal
