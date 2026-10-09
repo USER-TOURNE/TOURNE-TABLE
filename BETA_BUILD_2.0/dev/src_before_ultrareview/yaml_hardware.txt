@@ -1,0 +1,40 @@
+- hardware:
+    - workload: hybrid
+      $name: Workload
+      $description: Where the work runs. Hybrid analyses on the CPU, which is a fraction of a percent of one core, and draws on the GPU, the cheapest split on almost every PC. GPU moves the analysis onto the graphics chip too, so the CPU only copies audio. CPU does everything on the processor, drawing included (software rendering), leaving the GPU nothing but Windows' own compositing. NPU runs the FFTs on an Intel AI Boost NPU and is experimental; see the readme for why it rarely saves power
+      $options:
+        - hybrid: Hybrid - CPU analysis, GPU drawing (recommended)
+        - gpu: GPU - analysis and drawing on the GPU
+        - cpu: CPU - everything on the processor
+        - npu: NPU analysis, GPU drawing (experimental)
+    - renderDevice: auto
+      $name: Drawing Device
+      $description: Which GPU draws. Auto uses the one your chosen monitor is plugged into, which avoids copying every frame from one GPU to another and is the right answer almost everywhere. Integrated and Discrete force a GPU type, and fall back to Auto (with a warning) if this PC does not have one. CPU draws in software, the same as Workload = CPU
+      $options:
+        - auto: Auto (GPU driving the monitor)
+        - integrated: Integrated GPU (lowest power)
+        - discrete: Discrete GPU (highest performance)
+        - cpu: CPU (software rendering)
+    - renderer: d3d11
+      $name: Renderer
+      $description: Direct3D 11 draws everything with one tiny shader from a buffer of bar heights, skips any frame where nothing moved, keeps the text on its own surface that only redraws when the text changes, and tells Windows when the panel is opaque so it copies instead of blending. Direct2D is the 1.5 path, unchanged, including Smooth Mode's batching; it is kept for comparison and as the automatic fallback
+      $options:
+        - d3d11: Direct3D 11 (recommended)
+        - direct2d: Direct2D (1.5 path)
+    - opaquePanel: auto
+      $name: Opaque Panel
+      $description: When the background panel can't show anything behind it (Blur on, or a fully opaque colour) and Auto-Hide is off, the Direct3D 11 renderer marks it opaque so Windows composes it without blending, with the rounded corners cut by the compositor. Off always blends, for comparison
+      $options:
+        - auto: Auto
+        - 'off': 'Off'
+    - npuRuntimePath: ''
+      $name: NPU Runtime Folder
+      $description: The folder that contains openvino_c.dll, or the root of an extracted OpenVINO archive. Leave blank to search the usual places - INTEL_OPENVINO_DIR, Program Files\Intel\openvino*, C:\Intel\openvino*, a pip-installed openvino package, and PATH. Only used when Workload is NPU
+    - smoothMode: auto
+      $name: Smooth Mode
+      $description: Frame timing locked to the display's refresh so every frame lands on its own refresh, and motion that scales with real elapsed time. Target FPS is rounded to an even fraction of the refresh rate (60 on a 144 Hz screen runs at 72) because that is what makes motion even. With the Direct2D renderer it also bakes the panel and batches the bars. Auto turns it on when drawing runs on an integrated GPU or the CPU. On works with any GPU. Off is the 1.4 timing
+      $options:
+        - auto: Auto (integrated GPU or CPU drawing)
+        - 'on': 'On'
+        - 'off': Off (1.4 timing)
+  $name: Hardware

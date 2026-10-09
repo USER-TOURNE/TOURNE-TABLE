@@ -1,0 +1,450 @@
+--- src/part_gfx.cpp	2026-10-09 02:59:09.425015692 -0400
++++ work_render/src/part_gfx.cpp	2026-10-09 03:55:49.727273423 -0400
+@@ -102,7 +102,8 @@
+     ComPtr<ID3D11Buffer> barsDyn, globalsDyn, waveDyn, pointsDyn;
+     ComPtr<ID3D11ShaderResourceView> barsDynSRV, globalsDynSRV, waveSRV, pointsSRV;
+     ComPtr<ID3D11SamplerState> sampler;
+-    ComPtr<ID3D11BlendState> blend;
++    ComPtr<ID3D11BlendState> blend;       // premultiplied over
++    ComPtr<ID3D11BlendState> blendCopy;   // no blending: the plate pass replaces the target
+     ComPtr<ID3D11RasterizerState> raster;
+ 
+     // Panel surface.
+@@ -114,6 +115,13 @@
+     int offX = 0, offY = 0;  // in layout-local pixels
+     bool opaque = false;
+     bool visualAttached = false;
++    // The DirectComposition properties last set on `visual`, so a frame whose
++    // offset and clip haven't moved sets nothing and commits nothing.
++    bool dcValid = false;
++    float dcOffX = 0.f, dcOffY = 0.f;
++    bool dcClip = false;
++    D2D1_RECT_F dcClipRect = {};
++    float dcRadii[4] = {};
+ 
+     // Baked background, the size of the panel surface.
+     ComPtr<ID3D11Texture2D> plateTex;
+@@ -140,6 +148,9 @@
+     uint64_t textKey = 0;
+     bool textForce = true;
+     bool blankPresented = false;
++    // The text visual with its content taken away because nothing is shown on
++    // it (null when attached). See TextDetach.
++    IDCompositionVisual* textDetachedOn = nullptr;
+ 
+     // Terminal shape: the cell grid and the baked glyph atlas, created on
+     // first use so nobody who never picks the shape pays for them.
+@@ -149,11 +160,23 @@
+     ComPtr<ID3D11ShaderResourceView> glyphSRV;
+     uint64_t glyphKey = 0;
+     UINT glyphW = 0, glyphH = 0;
++    // The grid last uploaded to cellsDyn; a change bumps cellsGen, which is
++    // all the frame hash needs.
++    std::vector<uint32_t> cellsShadow;
++    uint64_t cellsGen = 0;
++    bool cellsDirty = true;
+ 
+     // Goniometer persistence.
+     std::vector<float> gonioHist[kGonioFrames];
+     uint32_t gonioSerial = 0;
+     int gonioHead = 0;
++    // This frame's points on the CPU, rebuilt only when the history advances,
++    // and uploaded only when a frame is drawn and they changed.
++    std::vector<float> gonioPts;
++    int gonioCount = 0;
++    uint32_t gonioCacheSerial = 0;
++    int gonioCacheHead = -1;
++    bool pointsDirty = true;
+ 
+     bool warned = false;
+ };
+@@ -290,6 +313,14 @@
+     bd.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+     bd.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+     if (FAILED(g_d3dDevice->CreateBlendState(&bd, &g.blend))) return false;
++    // The plate is the first thing drawn and covers every pixel, so it can
++    // replace the target instead of being blended over a cleared one: the
++    // same result (src + 0 * (1 - a) = src), without reading the target or
++    // clearing it first.
++    D3D11_BLEND_DESC bdCopy = {};
++    bdCopy.RenderTarget[0].BlendEnable = FALSE;
++    bdCopy.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
++    if (FAILED(g_d3dDevice->CreateBlendState(&bdCopy, &g.blendCopy))) return false;
+ 
+     D3D11_RASTERIZER_DESC rd = {};
+     rd.FillMode = D3D11_FILL_SOLID;
+@@ -297,6 +328,9 @@
+     rd.DepthClipEnable = TRUE;
+     if (FAILED(g_d3dDevice->CreateRasterizerState(&rd, &g.raster))) return false;
+ 
++    // New buffers hold nothing yet.
++    g.pointsDirty = true;
++    g.gonioCacheHead = -1;
+     g.deviceReady = true;
+     Wh_Log(L"[D3D11] renderer ready (feature level %X)", (unsigned)g_d3dDevice->GetFeatureLevel());
+     return true;
+@@ -315,14 +349,44 @@
+     g.statsUAV.Reset();
+ }
+ 
++// ---- Text surface attachment -------------------------------------------------------
++// With nothing on the text surface (no Now Playing, readout or progress bar
++// showing) its content is taken off the text visual, so DWM doesn't blend a
++// transparent layer the size of the whole widget every time the bars present.
++// It goes back before anything is shown on it again: by RenderVisualizerD3D
++// after drawing text, and by every way into the Direct2D path (ReleaseSurface
++// runs on every Direct2D frame, and RenderVisualizerD3D reattaches before it
++// falls back), because that path draws the whole scene on g_swapChain.
++bool TextIsDetached() { return g.textDetachedOn && g.textDetachedOn == g_compositionVisual.Get(); }
++
++void TextDetach() {
++    if (TextIsDetached() || !g_compositionVisual || !g_compositionDevice) return;
++    if (FAILED(g_compositionVisual->SetContent(nullptr))) return;
++    g_compositionDevice->Commit();
++    g.textDetachedOn = g_compositionVisual.Get();
++}
++
++void TextAttach() {
++    if (!g.textDetachedOn) return;
++    // A visual rebuilt since was created with its content already set.
++    if (TextIsDetached() && g_swapChain && g_compositionDevice) {
++        g_compositionVisual->SetContent(g_swapChain.Get());
++        g_compositionDevice->Commit();
++    }
++    g.textDetachedOn = nullptr;
++    g.textForce = true;
++}
++
+ // The panel surface and its visual. Called before the composition device goes.
+ void ReleaseSurface() {
++    TextAttach();
+     if (!g.sc && !g.visual && !g.plateTex) return;  // nothing to release (called every Direct2D frame)
+     if (g.visual && g.visualAttached && g_rootVisual) {
+         g_rootVisual->RemoveVisual(g.visual.Get());
+         if (g_compositionDevice) g_compositionDevice->Commit();
+     }
+     g.visualAttached = false;
++    g.dcValid = false;
+     g.rtv.Reset();
+     g.sc.Reset();
+     g.clip.Reset();
+@@ -348,7 +412,7 @@
+     g.barsDynSRV.Reset(); g.globalsDynSRV.Reset(); g.waveSRV.Reset(); g.pointsSRV.Reset();
+     g.cellsDyn.Reset(); g.cellsSRV.Reset(); g.glyphTex.Reset(); g.glyphSRV.Reset();
+     g.glyphKey = 0;
+-    g.sampler.Reset(); g.blend.Reset(); g.raster.Reset();
++    g.sampler.Reset(); g.blend.Reset(); g.blendCopy.Reset(); g.raster.Reset();
+     if (g.ctx) g.ctx->ClearState();
+     g.ctx.Reset();
+     g.deviceReady = false;
+@@ -384,6 +448,10 @@
+     if (!g_compositionDevice || !g_rootVisual) return false;
+     w = std::max(1u, w);
+     h = std::max(1u, h);
++    // Called every frame, before the unchanged-frame test, so it only touches
++    // DirectComposition (and only commits) when something actually changed:
++    // a new or resized surface, the visual's offset, or its clip.
++    bool commit = false;
+     bool recreate = !g.sc || opaque != g.opaque;
+     if (recreate) {
+         g.rtv.Reset();
+@@ -402,14 +470,19 @@
+         g.w = w;
+         g.h = h;
+         g.opaque = opaque;
+-        if (!g.visual && FAILED(g_compositionDevice->CreateVisual(&g.visual))) return false;
++        if (!g.visual) {
++            if (FAILED(g_compositionDevice->CreateVisual(&g.visual))) return false;
++            g.dcValid = false;
++        }
+         g.visual->SetContent(g.sc.Get());
+         g.visual->SetBorderMode(DCOMPOSITION_BORDER_MODE_SOFT);
++        commit = true;
+     } else if (w != g.w || h != g.h) {
+         g.rtv.Reset();
+         if (FAILED(g.sc->ResizeBuffers(0, w, h, DXGI_FORMAT_UNKNOWN, 0))) return false;
+         g.w = w;
+         g.h = h;
++        commit = true;
+     }
+     if (!g.rtv) {
+         ComPtr<ID3D11Texture2D> back;
+@@ -422,37 +495,64 @@
+         // Below the text surface, so readouts placed over the bars stay on top.
+         if (FAILED(g_rootVisual->AddVisual(g.visual.Get(), FALSE, g_compositionVisual.Get()))) return false;
+         g.visualAttached = true;
++        commit = true;
++    }
++    const float ox = layoutOriginX + (float)offX, oy = layoutOriginY + (float)offY;
++    if (!g.dcValid || ox != g.dcOffX || oy != g.dcOffY) {
++        g.visual->SetOffsetX(ox);
++        g.visual->SetOffsetY(oy);
++        g.dcOffX = ox;
++        g.dcOffY = oy;
++        commit = true;
+     }
+-    g.visual->SetOffsetX(layoutOriginX + (float)offX);
+-    g.visual->SetOffsetY(layoutOriginY + (float)offY);
+     if (opaque) {
+-        if (!g.clip && FAILED(g_compositionDevice->CreateRectangleClip(&g.clip))) return false;
+-        g.clip->SetLeft(clipRect.left);
+-        g.clip->SetTop(clipRect.top);
+-        g.clip->SetRight(clipRect.right);
+-        g.clip->SetBottom(clipRect.bottom);
+-        g.clip->SetTopLeftRadiusX(clipRadii[0]);
+-        g.clip->SetTopLeftRadiusY(clipRadii[0]);
+-        g.clip->SetTopRightRadiusX(clipRadii[1]);
+-        g.clip->SetTopRightRadiusY(clipRadii[1]);
+-        g.clip->SetBottomRightRadiusX(clipRadii[2]);
+-        g.clip->SetBottomRightRadiusY(clipRadii[2]);
+-        g.clip->SetBottomLeftRadiusX(clipRadii[3]);
+-        g.clip->SetBottomLeftRadiusY(clipRadii[3]);
+-        g.visual->SetClip(g.clip.Get());
+-    } else {
++        if (!g.clip) {
++            if (FAILED(g_compositionDevice->CreateRectangleClip(&g.clip))) return false;
++            g.dcClip = false;  // a new clip object: set it up and on the visual
++        }
++        bool same = g.dcValid && g.dcClip && clipRect.left == g.dcClipRect.left &&
++                    clipRect.top == g.dcClipRect.top && clipRect.right == g.dcClipRect.right &&
++                    clipRect.bottom == g.dcClipRect.bottom;
++        for (int i = 0; i < 4 && same; i++) same = clipRadii[i] == g.dcRadii[i];
++        if (!same) {
++            g.clip->SetLeft(clipRect.left);
++            g.clip->SetTop(clipRect.top);
++            g.clip->SetRight(clipRect.right);
++            g.clip->SetBottom(clipRect.bottom);
++            g.clip->SetTopLeftRadiusX(clipRadii[0]);
++            g.clip->SetTopLeftRadiusY(clipRadii[0]);
++            g.clip->SetTopRightRadiusX(clipRadii[1]);
++            g.clip->SetTopRightRadiusY(clipRadii[1]);
++            g.clip->SetBottomRightRadiusX(clipRadii[2]);
++            g.clip->SetBottomRightRadiusY(clipRadii[2]);
++            g.clip->SetBottomLeftRadiusX(clipRadii[3]);
++            g.clip->SetBottomLeftRadiusY(clipRadii[3]);
++            g.visual->SetClip(g.clip.Get());
++            g.dcClip = true;
++            g.dcClipRect = clipRect;
++            for (int i = 0; i < 4; i++) g.dcRadii[i] = clipRadii[i];
++            commit = true;
++        }
++    } else if (!g.dcValid || g.dcClip) {
+         g.visual->SetClip((IDCompositionClip*)nullptr);
++        g.dcClip = false;
++        commit = true;
+     }
++    g.dcValid = true;
+     if (offX != g.offX || offY != g.offY) g.forcePresent = true;
+     g.offX = offX;
+     g.offY = offY;
+-    g_compositionDevice->Commit();
++    if (commit) g_compositionDevice->Commit();
+     return true;
+ }
+ 
+ // Presents one transparent frame on the panel surface (auto-hide, wallpaper
+ // capture). Cheap, and only ever done once per state change.
+ void PresentBlank() {
++    // Callers outside the renderer (wallpaper capture, fullscreen pause) clear
++    // the text surface too, so its next frame has to be drawn even if the
++    // text is the same.
++    g.textForce = true;
+     if (!g.sc || !g.rtv || !g.ctx) return;
+     const float zero[4] = {0, 0, 0, 0};
+     g.ctx->ClearRenderTargetView(g.rtv.Get(), zero);
+@@ -803,9 +903,11 @@
+ constexpr UINT kAtlasCols = 16, kAtlasRows = 6;
+ 
+ bool EnsureTermResources() {
+-    if (!g.cellsDyn &&
+-        FAILED(MakeStructured(4, VIZ_TERM_MAX_CELLS, true, false, nullptr, g.cellsDyn, &g.cellsSRV, nullptr)))
+-        return false;
++    if (!g.cellsDyn) {
++        if (FAILED(MakeStructured(4, VIZ_TERM_MAX_CELLS, true, false, nullptr, g.cellsDyn, &g.cellsSRV, nullptr)))
++            return false;
++        g.cellsDirty = true;  // a new buffer holds nothing yet
++    }
+     if (!VizTermEnsureFormat() || !g_d2dDevice) return false;
+     uint64_t key = 1469598103934665603ull;
+     for (wchar_t c : g_termFormatFont) Mix(key, (uint64_t)c);
+@@ -1056,7 +1158,9 @@
+     f.plateRect[2] = (float)g.w;
+     f.plateRect[3] = (float)g.h;
+ 
+-    // ---- Uploads (CPU paths) --------------------------------------------------------
++    // ---- Has anything changed? -----------------------------------------------------
++    // Hashed from the CPU-side data, before anything is mapped: a frame that
++    // turns out unchanged costs no Map, no upload and no driver call at all.
+     const float rangePx = std::max(0.f, maxSize - idleSize);
+     float pulse = g_beatPulse.load(std::memory_order_relaxed);
+     uint64_t hash = 1469598103934665603ull;
+@@ -1079,22 +1183,11 @@
+ 
+     D3D11_MAPPED_SUBRESOURCE ms;
+     const bool drawBars = !in.dragPause;
+-    if (!gpuOk && drawBars) {
+-        if (SUCCEEDED(g.ctx->Map(g.barsDyn.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
+-            float* p = (float*)ms.pData;
+-            for (int i = 0; i < bars; i++) {
+-                float lv = std::max(0.f, g_vizPeak[i]), pk = g_vizPeakHold[i];
+-                p[2 * i] = lv;
+-                p[2 * i + 1] = pk;
+-                MixF(hash, lv * rangePx, 4.f);
+-                if (g_settings.peakHoldEnabled) MixF(hash, pk * rangePx, 4.f);
+-            }
+-            g.ctx->Unmap(g.barsDyn.Get(), 0);
+-        }
+-        if (SUCCEEDED(g.ctx->Map(g.globalsDyn.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
+-            float gl[16] = {pulse, 0, 0, 0, in.zones[0], in.zones[1], in.zones[2], 0};
+-            memcpy(ms.pData, gl, sizeof(gl));
+-            g.ctx->Unmap(g.globalsDyn.Get(), 0);
++    const bool cpuBars = !gpuOk && drawBars;
++    if (cpuBars) {
++        for (int i = 0; i < bars; i++) {
++            MixF(hash, std::max(0.f, g_vizPeak[i]) * rangePx, 4.f);
++            if (g_settings.peakHoldEnabled) MixF(hash, g_vizPeakHold[i] * rangePx, 4.f);
+         }
+         if (g_settings.oscilloscopeMultibandEnabled)
+             for (int z = 0; z < 3; z++) MixF(hash, in.zones[z], 64.f);
+@@ -1103,53 +1196,110 @@
+         // last frames moved, two frames late.
+         Mix(hash, g.lastMaxDeltaPx >= 0.25f ? (uint64_t)g.frameNo : 0ull);
+     }
+-    if (shape == VizShape::Oscilloscope && drawBars) {
+-        if (SUCCEEDED(g.ctx->Map(g.waveDyn.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
+-            memcpy(ms.pData, in.scopeDisp, sizeof(float) * VIZ_WAVE_SAMPLES);
+-            g.ctx->Unmap(g.waveDyn.Get(), 0);
+-        }
++    const bool scope = shape == VizShape::Oscilloscope && drawBars;
++    if (scope)
+         for (int i = 0; i < VIZ_WAVE_SAMPLES; i++) MixF(hash, in.scopeDisp[i] * f.ampScale, 4.f);
+-    }
++    size_t termCells = 0;
+     if (termReady) {
+-        size_t n = std::min(g_termGrid.cells.size(), (size_t)VIZ_TERM_MAX_CELLS);
+-        if (SUCCEEDED(g.ctx->Map(g.cellsDyn.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
+-            memcpy(ms.pData, g_termGrid.cells.data(), n * sizeof(uint32_t));
+-            g.ctx->Unmap(g.cellsDyn.Get(), 0);
++        // Up to 65,536 cells: compared with the grid last seen (a memcmp,
++        // memory-speed) instead of hashed cell by cell, and only a change
++        // marks it for upload.
++        termCells = std::min(g_termGrid.cells.size(), (size_t)VIZ_TERM_MAX_CELLS);
++        if (termCells != g.cellsShadow.size() ||
++            (termCells && memcmp(g.cellsShadow.data(), g_termGrid.cells.data(), termCells * sizeof(uint32_t)) != 0)) {
++            g.cellsShadow.assign(g_termGrid.cells.begin(), g_termGrid.cells.begin() + termCells);
++            g.cellsGen++;
++            g.cellsDirty = true;
+         }
+         Mix(hash, g.glyphKey);
+         Mix(hash, (uint64_t)g_termGrid.cols * 65536u + (uint64_t)g_termGrid.rows);
+-        for (size_t i = 0; i < n; i++) Mix(hash, g_termGrid.cells[i]);
++        Mix(hash, g.cellsGen);
+         for (int c = 0; c < 5; c++)
+             for (int k = 0; k < 4; k++) MixF(hash, f.termColors[c][k], 255.f);
+     }
+     int points = 0;
+-    if (shape == VizShape::Goniometer && drawBars) {
+-        if (SUCCEEDED(g.ctx->Map(g.pointsDyn.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
+-            points = BuildGonioPoints((float*)ms.pData, kMaxPoints);
+-            g.ctx->Unmap(g.pointsDyn.Get(), 0);
++    const bool gonio = shape == VizShape::Goniometer && drawBars;
++    if (gonio) {
++        // The points only change when the history advances (new samples), or
++        // when the Direct2D path advanced it since; persistence is unchanged.
++        if (g.gonioPts.empty()) g.gonioPts.assign((size_t)kMaxPoints * 4, 0.f);
++        if (g_gonioSerial.load(std::memory_order_acquire) != g.gonioSerial || g.gonioCacheHead != g.gonioHead ||
++            g.gonioCacheSerial != g.gonioSerial) {
++            g.gonioCount = BuildGonioPoints(g.gonioPts.data(), kMaxPoints);
++            g.gonioCacheSerial = g.gonioSerial;
++            g.gonioCacheHead = g.gonioHead;
++            g.pointsDirty = true;
+         }
++        points = g.gonioCount;
+         Mix(hash, g.gonioSerial);
+         MixF(hash, in.correlation, 256.f);
+     }
+ 
+-    if (!g.forcePresent && hash == g.lastHash) return true;  // nothing changed: no draw, no present
++    if (!g.forcePresent && hash == g.lastHash) return true;  // nothing changed: no upload, no draw, no present
+     g.lastHash = hash;
+     g.forcePresent = false;
+ 
++    // ---- Uploads: only for a frame that is drawn ---------------------------------------
++    if (cpuBars) {
++        if (SUCCEEDED(g.ctx->Map(g.barsDyn.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
++            float* p = (float*)ms.pData;
++            for (int i = 0; i < bars; i++) {
++                p[2 * i] = std::max(0.f, g_vizPeak[i]);
++                p[2 * i + 1] = g_vizPeakHold[i];
++            }
++            g.ctx->Unmap(g.barsDyn.Get(), 0);
++        }
++        if (SUCCEEDED(g.ctx->Map(g.globalsDyn.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
++            float gl[16] = {pulse, 0, 0, 0, in.zones[0], in.zones[1], in.zones[2], 0};
++            memcpy(ms.pData, gl, sizeof(gl));
++            g.ctx->Unmap(g.globalsDyn.Get(), 0);
++        }
++    }
++    if (scope && SUCCEEDED(g.ctx->Map(g.waveDyn.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
++        memcpy(ms.pData, in.scopeDisp, sizeof(float) * VIZ_WAVE_SAMPLES);
++        g.ctx->Unmap(g.waveDyn.Get(), 0);
++    }
++    // A dynamic buffer keeps its contents until it is next mapped, so the
++    // cells and points go up only when they changed.
++    if (termReady && g.cellsDirty) {
++        if (termCells == 0) {
++            g.cellsDirty = false;
++        } else if (SUCCEEDED(g.ctx->Map(g.cellsDyn.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
++            memcpy(ms.pData, g.cellsShadow.data(), termCells * sizeof(uint32_t));
++            g.ctx->Unmap(g.cellsDyn.Get(), 0);
++            g.cellsDirty = false;
++        }
++    }
++    if (gonio && g.pointsDirty) {
++        if (points == 0) {
++            g.pointsDirty = false;
++        } else if (SUCCEEDED(g.ctx->Map(g.pointsDyn.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
++            memcpy(ms.pData, g.gonioPts.data(), (size_t)points * 4 * sizeof(float));
++            g.ctx->Unmap(g.pointsDyn.Get(), 0);
++            g.pointsDirty = false;
++        }
++    }
++
+     if (SUCCEEDED(g.ctx->Map(g.frameCB.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
+         memcpy(ms.pData, &f, sizeof(f));
+         g.ctx->Unmap(g.frameCB.Get(), 0);
+     }
+ 
+     // ---- Draw -----------------------------------------------------------------------
++    // The plate quad is the whole surface (plateRect = 0, 0, w, h) and its
++    // pixel shader never discards, so drawn without blending it writes every
++    // pixel exactly what clear + blend would have: no clear needed under it.
++    const bool plate = in.hasPanel && g.plateValid;
+     ID3D11RenderTargetView* rtv = g.rtv.Get();
+     g.ctx->OMSetRenderTargets(1, &rtv, nullptr);
+-    const float zero[4] = {0, 0, 0, 0};
+-    g.ctx->ClearRenderTargetView(rtv, zero);
++    if (!plate) {
++        const float zero[4] = {0, 0, 0, 0};
++        g.ctx->ClearRenderTargetView(rtv, zero);
++    }
+     D3D11_VIEWPORT vp = {0, 0, (float)g.w, (float)g.h, 0, 1};
+     g.ctx->RSSetViewports(1, &vp);
+     g.ctx->RSSetState(g.raster.Get());
+-    g.ctx->OMSetBlendState(g.blend.Get(), nullptr, 0xffffffff);
++    g.ctx->OMSetBlendState(plate ? g.blendCopy.Get() : g.blend.Get(), nullptr, 0xffffffff);
+     g.ctx->OMSetDepthStencilState(nullptr, 0);
+     g.ctx->IASetInputLayout(nullptr);
+     g.ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+@@ -1178,7 +1328,10 @@
+         g.ctx->VSSetConstantBuffers(1, 1, &pcb);
+         g.ctx->DrawInstanced(4, count, 0, 0);
+     };
+-    if (in.hasPanel && g.plateValid) draw(kPlate, 1);
++    if (plate) {
++        draw(kPlate, 1);
++        g.ctx->OMSetBlendState(g.blend.Get(), nullptr, 0xffffffff);
++    }
+     if (drawBars) {
+         switch (shape) {
+             case VizShape::Dots: draw(kDots, (UINT)bars * f.dotSlots); break;

@@ -1,0 +1,128 @@
+- analysis:
+    - engine: precision
+      $name: Analysis Engine
+      $description: Precision gives every bar its own frequency band, measured straight from the spectrum, with bass from long high-resolution windows and treble from short fast ones. Classic is the 1.4 analysis, 7 bands that the bars interpolate between, kept for comparison and for anyone who prefers its look. Everything else in this section only applies to Precision
+      $options:
+        - precision: Precision (every bar its own band)
+        - classic: Classic (1.4, 7 bands)
+    - bandLayout: scale
+      $name: Band Layout
+      $description: How the spectrum is cut into bars. Frequency Scale spreads Bar Count bars across Min to Max Frequency on the Frequency Scale chosen above. IEC 61260 uses the standard fractional-octave bands every RTA uses (Octave Fraction picks 1/1 to 1/24), and Musical gives one bar per note of equal temperament. Both of those decide the number of bars themselves, so Bar Count is ignored for them
+      $options:
+        - scale: Frequency Scale (uses Bar Count)
+        - iec: IEC 61260 fractional-octave bands
+        - musical: Musical notes (equal temperament)
+    - octaveFraction: '6'
+      $name: Octave Fraction
+      $description: Bandwidth for the IEC 61260 and Musical layouts. 1/3 is the classic RTA; 1/12 is one bar per semitone; 1/24 is a quarter tone, about 240 bars from 20 Hz to 20 kHz. Musical only offers 1/12 and 1/24; anything coarser counts as 1/12 there
+      $options:
+        - '1': 1/1 octave
+        - '3': 1/3 octave
+        - '6': 1/6 octave
+        - '12': 1/12 octave (semitone)
+        - '24': 1/24 octave (quarter tone)
+    - minFrequency: 20
+      $name: Min Frequency (Hz)
+      $description: Bottom of the analysed range. Range 10 to 1000
+    - maxFrequency: 20000
+      $name: Max Frequency (Hz)
+      $description: Top of the analysed range. Range 1000 to 21000; anything above the device's Nyquist limit is trimmed automatically
+    - tuningA4: 440
+      $name: Tuning (A4, Hz)
+      $description: Reference pitch for the Musical layout. Range 400 to 480
+    - weighting: z
+      $name: Weighting
+      $description: Frequency weighting from IEC 61672-1, added per band. Z is flat, the honest view of the signal. A follows the ear's sensitivity at quiet listening levels and pulls the bass right down; C is the gentler loud-level curve. Costs nothing
+      $options:
+        - z: Z (flat)
+        - a: A (IEC 61672)
+        - c: C (IEC 61672)
+    - tilt: '1.5'
+      $name: Tilt (dB per octave)
+      $description: A slope around 1 kHz. Bars are referenced to a 1/3-octave band (see Level Reference), so pink noise already reads flat at 0. Most music falls a little faster than pink, and 1.5 makes a typical modern mix look level, the same thing SPAN's 4.5 dB/oct default does on a plain FFT display
+      $options:
+        - '0': 0 (pink noise flat)
+        - '1.5': 1.5 (typical mix flat)
+        - '3': '3'
+        - '4.5': '4.5'
+        - '6': '6'
+    - detector: rms
+      $name: Detector
+      $description: RMS adds up the power of every frequency in the band, the right reading for music and noise. Peak shows the band's loudest single frequency, closer to what a tone measures
+      $options:
+        - rms: RMS (band power)
+        - peak: Peak (loudest bin)
+    - levelReference: third_octave
+      $name: Level Reference
+      $description: Third-octave scales every band to the power a 1/3-octave band at the same centre would hold, so bar heights don't change when you change Bar Count or Band Layout, and pink noise reads flat. Band shows each band's true power, so wide bars read higher than narrow ones
+      $options:
+        - third_octave: Third-octave (independent of bar count)
+        - band: Band (true band power)
+    - window: hann
+      $name: FFT Window
+      $description: Hann is the general-purpose choice. Blackman-Harris trades a little resolution for 92 dB of dynamic range, so quiet detail next to loud tones stays visible. Flat-top reads the exact level of a tone wherever it falls, at the cost of resolution. Hamming has a narrower peak and more leakage
+      $options:
+        - hann: Hann
+        - hamming: Hamming
+        - blackman_harris: Blackman-Harris (high dynamic range)
+        - flat_top: Flat-top (accurate tone levels)
+    - bassDetail: '2'
+      $name: Bass Detail
+      $description: The resolution tiers. Each bar is measured from the fastest tier that can resolve it. High adds a tier decimated by 16, which is what makes 1/12 and 1/24-octave bass bars real measurements; Standard stops at 4; Off is a single FFT, like the classic engine
+      $options:
+        - '2': High (3 tiers)
+        - '1': Standard (2 tiers)
+        - '0': Off (single FFT)
+    - channel: mix
+      $name: Channel
+      $description: Which signal the spectrum is taken from. Mix is all channels averaged, as before. Mid is what both speakers share, Side is the difference between them, which shows exactly where the stereo width in a mix lives
+      $options:
+        - mix: Mix (all channels)
+        - left: Left
+        - right: Right
+        - mid: Mid (L+R)
+        - side: Side (L-R)
+    - dbFloor: -72
+      $name: Display Floor (dBFS)
+      $description: The level that draws as an empty bar. Range -120 to -20. Lower shows quieter detail, at the cost of noise and hiss showing too
+    - dbCeiling: -12
+      $name: Display Ceiling (dBFS)
+      $description: The level that draws as a full bar, before Sensitivity. Range -60 to 0. A full-scale sine is 0 dBFS; loud modern music sits around -20 per third-octave band
+    - ballistics: snappy
+      $name: Ballistics
+      $description: How bars rise and fall, all on real time, so they move the same at any frame rate. Snappy is closest to the 1.4 feel. Analyzer falls a steady 20 dB per second like a hardware RTA. VU integrates over 300 ms. The two PPMs follow IEC 60268-10 Type I (DIN) and Type II (EBU) return rates. Custom uses the two settings below. Motion Smoothing above slows whichever you pick
+      $options:
+        - snappy: Snappy
+        - smooth: Smooth
+        - analyzer: Analyzer (20 dB/s)
+        - vu: VU
+        - ppm_ebu: PPM, EBU (Type II)
+        - ppm_din: PPM, DIN (Type I)
+        - custom: Custom
+    - attackMs: 10
+      $name: Custom Attack (ms)
+      $description: Rise time constant for Ballistics = Custom. Range 1 to 500
+    - releaseDbPerSecond: 20
+      $name: Custom Release (dB/s)
+      $description: Fall rate for Ballistics = Custom. Range 1 to 200
+    - peakHoldMs: 500
+      $name: Peak Hold Time (ms)
+      $description: How long a peak cap hangs before it falls. Range 0 to 5000. Only used with Peak Hold Caps on
+    - peakFall: gravity
+      $name: Peak Fall
+      $description: Gravity accelerates like a dropped object, the classic analyzer look. Linear falls at a steady rate
+      $options:
+        - gravity: Gravity
+        - linear: Linear
+    - readout: frequency
+      $name: Readout Content
+      $description: What the readout set up under Peak Frequency Readout shows. Loudness is ITU-R BS.1770-5 / EBU R128 momentary (400 ms), short-term (3 s) and gated integrated loudness. Full adds 4x-oversampled true peak, PLR (true peak minus integrated loudness) and stereo correlation (+1 mono, 0 wide, -1 out of phase). The loudness meters only run while they are shown
+      $options:
+        - frequency: Peak frequency
+        - loudness: Loudness (LUFS M / S / I)
+        - loudness_full: Loudness, true peak, PLR, correlation
+        - both: Peak frequency and loudness
+    - loudnessResetOnTrack: true
+      $name: Reset Integrated Loudness On Track Change
+      $description: Starts a new integrated measurement whenever the playing track changes, so the figure is per track. Off measures from when the mod started
+  $name: Analysis (Precision Engine)

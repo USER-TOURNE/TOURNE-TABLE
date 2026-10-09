@@ -1,0 +1,219 @@
+--- src/ttdsp.h	2026-10-08 11:13:44.218877628 -0400
++++ wB/src/ttdsp.h	2026-10-09 13:06:39.942667251 -0400
+@@ -43,6 +43,31 @@
+ }
+ inline float DbFromPower(double p) { return (float)(10.0 * log10(p > 1e-30 ? p : 1e-30)); }
+ 
++// The same figure without a libm call, for the per-band loop (one per band per
++// analysis, up to 2048 of them per frame). The power is split into 2^e * m with
++// m in [sqrt(1/2), sqrt(2)), and ln m = 2 atanh(s), s = (m - 1) / (m + 1),
++// |s| <= 0.1716, is summed to s^9: the first term left out is under 3e-9, so
++// the error is set by the float conversion of p, about 3e-7 dB. test_dsp
++// checks it against log10 over 1e-30 .. 1e12.
++inline float FastDbFromPower(double p) {
++    float x = (float)(p > 1e-30 ? p : 1e-30);
++    uint32_t bits;
++    memcpy(&bits, &x, 4);
++    int e = (int)((bits >> 23) & 0xFF) - 127;
++    bits = (bits & 0x007FFFFFu) | 0x3F800000u;  // mantissa as a float in [1, 2)
++    float m;
++    memcpy(&m, &bits, 4);
++    if (m > 1.41421356f) {
++        m *= 0.5f;
++        e++;
++    }
++    double s = (double)(m - 1.f) / (double)(m + 1.f);
++    double s2 = s * s;
++    double ln = 2.0 * s * (1.0 + s2 * (1.0 / 3 + s2 * (1.0 / 5 + s2 * (1.0 / 7 + s2 * (1.0 / 9)))));
++    // 10 log10(2^e m) = 10 / ln 10 * (e ln 2 + ln m)
++    return (float)(4.3429448190325182 * (e * 0.69314718055994531 + ln));
++}
++
+ // Newest-first audio history. Push is one store; Latest copies the newest n
+ // samples, oldest first, into a linear buffer for windowing.
+ class Ring {
+@@ -596,10 +621,12 @@
+         if (!configured_) return false;
+         const int n = cfg_.fftSize;
+         bool any = false;
++        lastFfts_ = 0;
+         for (int t = 0; t < 3; t++) {
+             if (!tierUsed_[t]) continue;
+             if (!force && fresh_[t] < hop_[t]) continue;
+             fresh_[t] = 0;
++            lastFfts_++;
+             ring_[t].Latest(scratch_.data(), n);
+             for (int i = 0; i < n; i++) scratch_[i] *= window_[i];
+             if (!fftOverride(scratch_.data(), n, re_.data(), im_.data()))
+@@ -618,7 +645,7 @@
+             if (peakDet) {
+                 float mx = 0.f;
+                 for (int k = m.k0; k <= m.k1; k++) mx = std::max(mx, p[k]);
+-                v = (double)DbFromPower(mx) + m.peakOffsetDb;  // 10log10(|X|^2) = 20log10|X|
++                v = (double)FastDbFromPower(mx) + m.peakOffsetDb;  // 10log10(|X|^2) = 20log10|X|
+             } else {
+                 double s;
+                 if (m.k0 == m.k1) {
+@@ -627,7 +654,7 @@
+                     s = p[m.k0] * m.w0 + p[m.k1] * m.w1;
+                     for (int k = m.k0 + 1; k < m.k1; k++) s += p[k];
+                 }
+-                v = (double)DbFromPower(s) + m.offsetDb;
++                v = (double)FastDbFromPower(s) + m.offsetDb;
+             }
+             levelsDb_[i] = (float)v;
+         }
+@@ -673,6 +700,7 @@
+     const std::vector<BandMap>& Maps() const { return maps_; }
+     const float* LevelsDb() const { return levelsDb_.data(); }
+     const Config& Cfg() const { return cfg_; }
++    int LastFftCount() const { return lastFfts_; }  // FFTs the last Analyze() ran
+     bool TierUsed(int t) const { return tierUsed_[t]; }
+     const Ring& TierRing(int t) const { return ring_[t]; }
+     const float* Window() const { return window_.data(); }
+@@ -702,6 +730,7 @@
+     HalfBand dec_[4];
+     int fresh_[3] = {0, 0, 0};
+     int hop_[3] = {1, 1, 1};
++    int lastFfts_ = 0;
+     bool valid_[3] = {false, false, false};
+     bool tierUsed_[3] = {true, false, false};
+     RealFft fft_;
+@@ -781,6 +810,30 @@
+     return (float)(y + (x - y) * a);
+ }
+ 
++// BallisticsStep with its coefficients worked out once per frame instead of
++// once per band: dt, the preset and the range are the same for every band, so
++// this does two exp() per frame where the per-band form did one per band.
++// Same expressions in the same precision, so the output is bit-identical
++// (test_dsp checks it).
++struct BallisticsCoef {
++    double att = 0.0, rel = 0.0;  // 1 - exp(-dt / tau)
++    float fall = 0.f;             // linear release, in display units per step
++    bool linear = false;
++};
++inline BallisticsCoef BallisticsCoefs(double dt, const Ballistics& b, float rangeDb) {
++    BallisticsCoef c;
++    c.att = 1.0 - exp(-dt * 1000.0 / std::max(0.1, b.attackMs));
++    c.linear = b.release == ReleaseKind::Linear;
++    if (c.linear) c.fall = (float)(b.releaseDbPerSec * dt / std::max(1.f, rangeDb));
++    else c.rel = 1.0 - exp(-dt * 1000.0 / std::max(0.1, b.releaseMs));
++    return c;
++}
++inline float BallisticsApply(float y, float x, const BallisticsCoef& c) {
++    if (x > y) return (float)(y + (x - y) * c.att);
++    if (c.linear) return std::max(x, y - c.fall);
++    return (float)(y + (x - y) * c.rel);
++}
++
+ // Peak hold per bar: hangs for holdMs, then falls with gravity (accelerating,
+ // like a dropped object) or at a constant rate.
+ struct PeakHold {
+@@ -897,13 +950,26 @@
+             // Phase p uses taps i = p + L j.
+             tp_[i % L][i / L] = (float)h;
+         }
++        // Largest gain any phase can apply: |sum h x| <= sum |h| * max |x|.
++        // Padded a little for float rounding in the dot product, so the skip
++        // test in Process can only ever be conservative.
++        tpGain_ = 0.f;
++        for (int p = 0; p < L; p++) {
++            float g = 0.f;
++            for (int j = 0; j < kTpTaps; j++) g += fabsf(tp_[p][j]);
++            tpGain_ = std::max(tpGain_, g);
++        }
++        tpGain_ *= 1.0001f;
++        for (int p = 0; p < L; p++)
++            for (int j = 0; j < kTpTaps; j++) tpT_[j][p] = tp_[p][j];
+         Reset();
+     }
+     void Reset() {
+         for (int c = 0; c < ch_; c++) {
+             shelf_[c].Reset();
+             hp_[c].Reset();
+-            for (int j = 0; j < kTpTaps; j++) tpHist_[c][j] = 0.f;
++            for (int j = 0; j < 2 * kTpTaps; j++) tpHist_[c][j] = 0.f;
++            tpHot_[c] = 0;
+         }
+         tpPos_ = 0;
+         subAcc_ = 0.0;
+@@ -918,7 +984,26 @@
+         truePeak_ = 0.f;
+         blocks_ = 0;
+     }
++    // True peak is only shown in one readout mode and is most of this
++    // meter's cost, so it can be switched off (on by default; Configure()
++    // and Reset() leave the setting alone).
++    void SetTruePeak(bool on) { tpOn_ = on; }
++    bool TruePeakOn() const { return tpOn_; }
++
+     // Interleaved frames.
++    //
++    // True peak, made cheaper without changing a single result:
++    //   * the history is stored twice over (newest first), so the 16 taps of
++    //     every phase are one contiguous run and the four phases are summed
++    //     side by side, which the compiler vectorises -- each phase still adds
++    //     its taps in the same order as before, so every sum is bit-identical;
++    //   * an interpolated value is at most tpGain_ * (largest |sample| in the
++    //     16-sample window). A sample that, times tpGain_, can't beat the peak
++    //     already held can't raise it in any window it sits in, so the four
++    //     dot products only run while such a sample is in the window
++    //     (tpHot_). Once a track has reached its loudest point that skips
++    //     nearly all of them. It is a bound, not an estimate: the maximum
++    //     found is exactly the one the full computation finds.
+     void Process(const float* x, int frames, int stride) {
+         for (int f = 0; f < frames; f++) {
+             const float* s = x + (size_t)f * stride;
+@@ -926,22 +1011,24 @@
+             for (int c = 0; c < ch_; c++) {
+                 double v = hp_[c].Run(shelf_[c].Run(s[c]));
+                 e += w_[c] * v * v;
+-                // True peak: shift in the original sample, evaluate 4 phases.
+-                tpHist_[c][tpPos_] = s[c];
+             }
+-            for (int c = 0; c < ch_; c++) {
+-                truePeak_ = std::max(truePeak_, fabsf(s[c]));
+-                for (int p = 0; p < 4; p++) {
+-                    float acc = 0.f;
+-                    int idx = tpPos_;
+-                    for (int j = 0; j < kTpTaps; j++) {
+-                        acc += tp_[p][j] * tpHist_[c][idx];
+-                        idx = (idx == 0) ? kTpTaps - 1 : idx - 1;
+-                    }
+-                    truePeak_ = std::max(truePeak_, fabsf(acc));
++            if (tpOn_) {
++                tpPos_ = (tpPos_ == 0) ? kTpTaps - 1 : tpPos_ - 1;
++                for (int c = 0; c < ch_; c++) {
++                    float a = fabsf(s[c]);
++                    float* h = tpHist_[c];
++                    h[tpPos_] = h[tpPos_ + kTpTaps] = s[c];
++                    truePeak_ = std::max(truePeak_, a);
++                    if (a * tpGain_ > truePeak_) tpHot_[c] = kTpTaps;
++                    if (tpHot_[c] == 0) continue;
++                    tpHot_[c]--;
++                    const float* w = h + tpPos_;  // w[j] = sample j steps old
++                    float acc[4] = {0.f, 0.f, 0.f, 0.f};
++                    for (int j = 0; j < kTpTaps; j++)
++                        for (int p = 0; p < 4; p++) acc[p] += tpT_[j][p] * w[j];
++                    for (int p = 0; p < 4; p++) truePeak_ = std::max(truePeak_, fabsf(acc[p]));
+                 }
+             }
+-            tpPos_ = (tpPos_ + 1 == kTpTaps) ? 0 : tpPos_ + 1;
+             subAcc_ += e;
+             if (++subCount_ >= subLen_) EndSubBlock();
+         }
+@@ -1008,8 +1095,12 @@
+     float w_[kMaxCh] = {};
+     Biquad shelf_[kMaxCh], hp_[kMaxCh];
+     float tp_[4][kTpTaps] = {};
+-    float tpHist_[kMaxCh][kTpTaps] = {};
++    float tpT_[kTpTaps][4] = {};             // tp_ transposed, for the side-by-side sums
++    float tpHist_[kMaxCh][2 * kTpTaps] = {};  // each sample twice, newest at tpPos_
++    int tpHot_[kMaxCh] = {};
+     int tpPos_ = 0;
++    float tpGain_ = 4.f;
++    bool tpOn_ = true;
+     float truePeak_ = 0.f;
+     double subAcc_ = 0.0;
+     int subCount_ = 0;

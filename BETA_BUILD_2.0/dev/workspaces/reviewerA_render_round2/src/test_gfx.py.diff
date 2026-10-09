@@ -1,0 +1,68 @@
+--- src/test_gfx.py	2026-10-08 11:58:40.930555044 -0400
++++ wA/src/test_gfx.py	2026-10-09 12:53:56.963831831 -0400
+@@ -260,28 +260,51 @@
+ compare("radial capsules", got, ref_render(320, 320, ref_radial(cfg)), tol_max=0.15, tol_area=0.01)
+ 
+ # ---- Terminal glyph pass ----------------------------------------------------------
++# The renderer uploads only the cells with a glyph, each packed as
++# char | colour << 8 | grid index << 16, and draws that many instances.
++def term_pack(cells):
++    return [(c & 0xFFFF) | (i << 16) for i, c in enumerate(cells) if (c & 127) > 32]
++
++def term_ref(cells, cols, cw, chh, tx, ty, size=80):
++    ref = np.zeros((size, size, 4))
++    for i, cell in enumerate(cells):
++        ch, ci = cell & 127, (cell >> 8) & 7
++        if ch <= 32:
++            continue
++        g = ch - 32
++        col = (0.2 * (ci + 1), 1.0 - 0.15 * ci, 0.5, 1.0)
++        x0, y0 = tx + (i % cols) * cw, ty + (i // cols) * chh
++        for y in range(chh):
++            for x in range(cw):
++                a = ((g * 7 + x * 3 + y * 5) % 11) / 10.0
++                ref[y0 + y, x0 + x] = [col[0] * a, col[1] * a, col[2] * a, a]
++    return ref
++
+ cw, chh, cols, rows, tx, ty = 7, 12, 9, 5, 3, 5
+ cells = []
+ for i in range(cols * rows):
+     ch = int(rng.integers(32, 127))
+     cells.append(ch | (int(rng.integers(0, 5)) << 8))
++packed = term_pack(cells)
+ img = raster(dict(vw=80, vh=80, termCols=cols, termRows=rows, cellW=cw, cellH=chh, tx=tx, ty=ty, sceneAlpha=1,
+-                  cells=cells, passes=[8, cols * rows]))
+-ref = np.zeros((80, 80, 4))
+-for i, cell in enumerate(cells):
+-    ch, ci = cell & 127, (cell >> 8) & 7
+-    if ch <= 32:
+-        continue
+-    g = ch - 32
+-    col = (0.2 * (ci + 1), 1.0 - 0.15 * ci, 0.5, 1.0)
+-    x0, y0 = tx + (i % cols) * cw, ty + (i // cols) * chh
+-    for y in range(chh):
+-        for x in range(cw):
+-            a = ((g * 7 + x * 3 + y * 5) % 11) / 10.0
+-            ref[y0 + y, x0 + x] = [col[0] * a, col[1] * a, col[2] * a, a]
+-err = np.max(np.abs(img - ref))
++                  cells=packed, passes=[8, len(packed)]))
++err = np.max(np.abs(img - term_ref(cells, cols, cw, chh, tx, ty)))
+ check("terminal glyphs: every cell, UV and colour exact", err < 1e-5, f"max err {err:.2e}")
+ 
++# Mostly blank (a Columns grid): the compact list draws the same picture with
++# a fraction of the instances.
++sparse = [32] * (cols * rows)
++for c in range(cols):
++    h = int(rng.integers(0, rows + 1))
++    for k in range(h):
++        sparse[(rows - 1 - k) * cols + c] = ord('|') | ((2 if k > 2 else 1) << 8)
++packed = term_pack(sparse)
++img = raster(dict(vw=80, vh=80, termCols=cols, termRows=rows, cellW=cw, cellH=chh, tx=tx, ty=ty, sceneAlpha=1,
++                  cells=packed, passes=[8, len(packed)]))
++err = np.max(np.abs(img - term_ref(sparse, cols, cw, chh, tx, ty)))
++check(f"terminal compact list: {len(packed)} of {cols * rows} cells drawn, picture exact", err < 1e-5,
++      f"max err {err:.2e}")
++
+ # ---- Colours: Color Mode rules vs the 1.5 code ------------------------------------
+ def hsv(h, s, v, a):
+     h = h % 360
