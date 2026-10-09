@@ -11135,7 +11135,9 @@ bool EnsureTermResources() {
     dc->Clear(D2D1::ColorF(0, 0, 0, 0));
     for (wchar_t c = 33; c < 127; c++) {
         UINT i = (UINT)(c - 32);
-        float x = (float)((i % kAtlasCols) * g_termCellW), y = (float)((i / kAtlasCols) * g_termCellH);
+        // Cell column and row in the atlas (whole numbers on purpose), then pixels.
+        UINT col = i % kAtlasCols, row = i / kAtlasCols;
+        float x = (float)(col * (UINT)g_termCellW), y = (float)(row * (UINT)g_termCellH);
         dc->DrawText(&c, 1, g_termFormat.Get(), D2D1::RectF(x, y, x + g_termCellW, y + g_termCellH), white.Get(),
                      D2D1_DRAW_TEXT_OPTIONS_CLIP);
     }
