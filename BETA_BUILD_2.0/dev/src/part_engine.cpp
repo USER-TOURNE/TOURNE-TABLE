@@ -16,15 +16,35 @@
 //
 // Idle has three steps now:
 //   playing       one wake per frame, as above.
-//   trickle       Pause When Silent reached: wake on audio or every 250 ms,
-//                 and the renderer's skip-unchanged-frames test means nothing
-//                 is presented, so DWM has nothing to compose.
-//   deep idle     5 s after that: the loopback stream itself is stopped and
-//                 the endpoint's peak meter is read 4 times a second instead.
-//                 A running capture stream registers an audio power request,
-//                 which can hold the PC out of sleep; a stopped one doesn't.
+//   trickle       Pause When Silent reached. Loopback: the audio event wakes
+//                 the thread, which only drains the packet unless it is
+//                 louder than the audible level (then it analyses and draws
+//                 at once, so waking up costs no latency); otherwise one
+//                 analysis + render tick every 250 ms. An app holding a silent
+//                 stream open signals the event 100 times a second, and those
+//                 wakes now cost a drain each instead of a full frame. An
+//                 input device signals every device period whatever it hears,
+//                 so for one the thread just polls every 250 ms.
+//   deep idle     5 s after that, loopback only and only with a working peak
+//                 meter: the stream is stopped and the endpoint's peak meter
+//                 is read 4 times a second instead. A running capture stream
+//                 registers an audio power request, which can hold the PC out
+//                 of sleep; a stopped one doesn't. A meter reading above the
+//                 audible level (the same -70 dBFS the engine uses, Input Gain
+//                 included) only restarts the stream and goes back to trickle
+//                 for a 1 s look; the engine's own test then decides whether
+//                 it is playing. An input device stays in trickle: once its
+//                 stream is stopped, its peak meter can read 0 for good.
 
 enum class VizIdleState { Playing, Trickle, Deep };
+
+// The one "is anything playing" level, -70 dBFS on the mono mix after Input
+// Gain. The engine needs this and a bar above 2% to call audio audible; deep
+// idle wakes on the endpoint meter crossing it. The meter reads the loudest
+// channel before Input Gain, and |mono mix| <= the loudest channel, so meter
+// x gain is never below what the engine sees: nothing the engine would call
+// audible can sleep through deep idle.
+constexpr float kVizAudibleLin = 0.000316f;
 
 // IAudioMeterInformation (endpointvolume.h), declared here because the mingw
 // headers only forward-declare it. Methods in vtable order, from the Windows
@@ -87,6 +107,8 @@ struct VizEngineConfig {
     VizChannel channel = VizChannel::Mix;
     bool wantDominant = false;
     bool wantLoudness = false;
+    bool wantTruePeak = false;     // Loudness (full) readout: the 4x oversampler
+    bool wantCorrelation = false;  // Loudness (full) readout or the Goniometer
     bool wantGonio = false;
     bool beat = false;
     bool loudnessResetOnTrack = true;
@@ -137,38 +159,27 @@ std::atomic<int> g_idleState{(int)VizIdleState::Playing};
 // device by loopback, as 1.5 always did with the default one, or an input
 // device as a plain recording stream. Same buffer and outputs as before: the
 // channel mask for loudness weighting, and the device itself for the
-// deep-idle peak meter. *fellBack says the chosen device wasn't there.
-bool VizInitAudioClient(IMMDeviceEnumerator* pEnum, ComPtr<IMMDevice>& pDevOut,
-                        ComPtr<IAudioClient>& pClient, ComPtr<IAudioCaptureClient>& pCapture,
-                        UINT32& sampleRate, UINT32& channels, bool& isFloat, DWORD& channelMask,
-                        HANDLE hEvent, bool* loopbackOut, bool* fellBack) {
-    pClient.Reset();
-    pCapture.Reset();
-    pDevOut.Reset();
-
-    bool loopback = true;
-    ComPtr<IMMDevice> pDev = VizResolveAudioDevice(pEnum, VizAudioSourceKey(), &loopback, fellBack);
-    if (!pDev) return false;
-    *loopbackOut = loopback;
-
+// deep-idle peak meter. *fellBack says the chosen device wasn't there, or was
+// there but couldn't be opened (*openFailed: typically a DAW holding it in
+// exclusive mode); either way the default output stands in for it.
+static bool VizOpenAudioClientOn(IMMDevice* pDev, bool loopback, ComPtr<IAudioClient>& pClient,
+                                 ComPtr<IAudioCaptureClient>& pCapture, UINT32& sampleRate, UINT32& channels,
+                                 bool& isFloat, DWORD& channelMask, HANDLE hEvent) {
     ComPtr<IAudioClient> pC;
-    if (FAILED(pDev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
-                              (void**)pC.GetAddressOf())))
+    if (FAILED(pDev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, (void**)pC.GetAddressOf())))
         return false;
 
     WAVEFORMATEX* pwfx = nullptr;
     pC->GetMixFormat(&pwfx);
     if (!pwfx) return false;
 
-    sampleRate = pwfx->nSamplesPerSec;
-    channels = pwfx->nChannels;
-    isFloat = (pwfx->wFormatTag == WAVE_FORMAT_IEEE_FLOAT) ||
+    UINT32 sr = pwfx->nSamplesPerSec, ch = pwfx->nChannels;
+    bool fl = (pwfx->wFormatTag == WAVE_FORMAT_IEEE_FLOAT) ||
               (pwfx->wFormatTag == WAVE_FORMAT_EXTENSIBLE &&
-               reinterpret_cast<WAVEFORMATEXTENSIBLE*>(pwfx)->SubFormat ==
-                   KSDATAFORMAT_SUBTYPE_IEEE_FLOAT);
-    channelMask = (pwfx->wFormatTag == WAVE_FORMAT_EXTENSIBLE)
-                      ? reinterpret_cast<WAVEFORMATEXTENSIBLE*>(pwfx)->dwChannelMask
-                      : 0;
+               reinterpret_cast<WAVEFORMATEXTENSIBLE*>(pwfx)->SubFormat == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT);
+    DWORD mask = (pwfx->wFormatTag == WAVE_FORMAT_EXTENSIBLE)
+                     ? reinterpret_cast<WAVEFORMATEXTENSIBLE*>(pwfx)->dwChannelMask
+                     : 0;
 
     // 500 ms, in 100 ns units.
     HRESULT hr = pC->Initialize(AUDCLNT_SHAREMODE_SHARED,
@@ -180,15 +191,72 @@ bool VizInitAudioClient(IMMDeviceEnumerator* pEnum, ComPtr<IMMDevice>& pDevOut,
     if (hEvent) pC->SetEventHandle(hEvent);
 
     ComPtr<IAudioCaptureClient> pCap;
-    if (FAILED(pC->GetService(__uuidof(IAudioCaptureClient), (void**)pCap.GetAddressOf())))
-        return false;
+    if (FAILED(pC->GetService(__uuidof(IAudioCaptureClient), (void**)pCap.GetAddressOf()))) return false;
 
     if (FAILED(pC->Start())) return false;
 
+    sampleRate = sr;
+    channels = ch;
+    isFloat = fl;
+    channelMask = mask;
     pClient = pC;
     pCapture = pCap;
-    pDevOut = pDev;
     return true;
+}
+
+bool VizInitAudioClient(IMMDeviceEnumerator* pEnum, ComPtr<IMMDevice>& pDevOut,
+                        ComPtr<IAudioClient>& pClient, ComPtr<IAudioCaptureClient>& pCapture,
+                        UINT32& sampleRate, UINT32& channels, bool& isFloat, DWORD& channelMask,
+                        HANDLE hEvent, bool* loopbackOut, bool* fellBack, bool* openFailed) {
+    pClient.Reset();
+    pCapture.Reset();
+    pDevOut.Reset();
+    *openFailed = false;
+
+    bool loopback = true;
+    std::wstring key = VizAudioSourceKey();
+    ComPtr<IMMDevice> pDev = VizResolveAudioDevice(pEnum, key, &loopback, fellBack);
+    if (!pDev) return false;
+    if (VizOpenAudioClientOn(pDev.Get(), loopback, pClient, pCapture, sampleRate, channels, isFloat, channelMask,
+                             hEvent)) {
+        *loopbackOut = loopback;
+        pDevOut = pDev;
+        return true;
+    }
+    // The chosen device is there but won't open. This used to retry the
+    // same device every 500 ms for as long as it stayed busy, showing
+    // nothing; now the default output stands in (once per attempt), and the
+    // caller says so and checks back on the chosen one now and then.
+    if (*fellBack || key.empty() || key == L"default_output") return false;
+    ComPtr<IMMDevice> def;
+    if (FAILED(pEnum->GetDefaultAudioEndpoint(eRender, eConsole, &def)) || !def) return false;
+    if (!VizOpenAudioClientOn(def.Get(), true, pClient, pCapture, sampleRate, channels, isFloat, channelMask,
+                              hEvent))
+        return false;
+    Wh_Log(L"[Audio] %s would not open; using the default output instead", VizDeviceName(pDev.Get()).c_str());
+    *fellBack = true;
+    *openFailed = true;
+    *loopbackOut = true;
+    pDevOut = def;
+    return true;
+}
+
+// Whether the chosen source can be opened now, without disturbing the stream
+// that is standing in for it: a shared-mode Initialize on a client that is
+// released straight away (it is never started, so nothing is captured).
+static bool VizProbeAudioSource(IMMDeviceEnumerator* pEnum) {
+    bool loopback = true, fellBack = false;
+    ComPtr<IMMDevice> d = VizResolveAudioDevice(pEnum, VizAudioSourceKey(), &loopback, &fellBack);
+    if (!d || fellBack) return false;
+    ComPtr<IAudioClient> c;
+    if (FAILED(d->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, (void**)c.GetAddressOf()))) return false;
+    WAVEFORMATEX* pwfx = nullptr;
+    c->GetMixFormat(&pwfx);
+    if (!pwfx) return false;
+    HRESULT hr = c->Initialize(AUDCLNT_SHAREMODE_SHARED, loopback ? AUDCLNT_STREAMFLAGS_LOOPBACK : 0u, 5000000, 0,
+                               pwfx, nullptr);
+    CoTaskMemFree(pwfx);
+    return SUCCEEDED(hr);
 }
 
 class VizEngine {
@@ -220,14 +288,30 @@ public:
     HANDLE AudioEvent() const { return audioEvent_; }
     bool IsOpen() const { return (bool)client_; }
     bool IsStopped() const { return stopped_; }
+    // Loopback (an output device) or a recording stream (an input device),
+    // as opened. The idle ladder treats the two differently.
+    bool IsLoopback() const { return loopback_; }
+    // A peak meter that answered its last read. Deep idle needs one.
+    bool MeterOk() const { return meter_ && meterOk_; }
 
-    // Opens the stream if it isn't, or reopens it after a device change. Rate
-    // limited the way 1.5 was, so a device that keeps failing can't spin.
+    // Opens the stream if it isn't, or reopens it after a device change. A
+    // source that won't open is retried after 0.5 s, then 1, 2, 4 ... up to
+    // 30 s, and straight away again after any device change. While the
+    // default output is standing in for a chosen device that wouldn't open,
+    // the chosen one is probed every 30 s and taken back when it's free.
     void EnsureOpen() {
         bool changed = g_deviceChanged.exchange(false, std::memory_order_relaxed);
-        if (client_ && !changed) return;
         ULONGLONG now = GetTickCount64();
-        if (now - lastReinit_ < 500) {
+        if (changed) retryMs_ = kRetryMinMs;
+        if (client_ && !changed) {
+            if (!openFallback_ || now - lastProbe_ < kProbeMs) return;
+            lastProbe_ = now;
+            if (!VizProbeAudioSource(enum_.Get())) return;
+            Wh_Log(L"[Audio] the chosen source opens again; switching back to it");
+            retryMs_ = kRetryMinMs;
+            lastReinit_ = 0;
+        }
+        if (now - lastReinit_ < retryMs_) {
             if (changed) g_deviceChanged.store(true, std::memory_order_relaxed);
             return;
         }
@@ -237,17 +321,23 @@ public:
         UINT32 sr = 48000, ch = 2;
         bool fl = true;
         DWORD mask = 0;
-        bool loopback = true, fellBack = false;
+        bool loopback = true, fellBack = false, openFailed = false;
         std::wstring source = VizAudioSourceKey();
         if (VizInitAudioClient(enum_.Get(), device_, client_, capture_, sr, ch, fl, mask, audioEvent_, &loopback,
-                               &fellBack)) {
+                               &fellBack, &openFailed)) {
             sampleRate_ = sr;
             channels_ = ch;
             isFloat_ = fl;
             channelMask_ = mask;
+            loopback_ = loopback;
             stopped_ = false;
+            retryMs_ = kRetryMinMs;
+            openFallback_ = openFailed;
+            lastProbe_ = now;
             meter_.Reset();
             device_->Activate(kIID_IAudioMeterInformation, CLSCTX_ALL, nullptr, (void**)meter_.GetAddressOf());
+            float probe = 0.f;
+            meterOk_ = meter_ && SUCCEEDED(meter_->GetPeakValue(&probe));
             ResetAnalysis();
             configuredGen_ = 0;  // sample rate may have changed: rebuild the precision engine
             g_audioOpen.store(true);
@@ -258,13 +348,23 @@ public:
             // not one per reconnect attempt.
             if (fellBack && source != warnedSource_) {
                 warnedSource_ = source;
-                VizPostAudioNotice(L"The chosen audio source (" + VizAudioSourceLabel(source) +
-                                   L") isn't connected or enabled, so the visualizer is listening to the "
-                                   L"default output until it comes back.");
+                if (openFailed)
+                    VizPostAudioNotice(L"The chosen audio source (" + VizAudioSourceLabel(source) +
+                                       L") is connected but couldn't be opened (another app may be using it in "
+                                       L"exclusive mode), so the visualizer is listening to the default output "
+                                       L"until it can.");
+                else
+                    VizPostAudioNotice(L"The chosen audio source (" + VizAudioSourceLabel(source) +
+                                       L") isn't connected or enabled, so the visualizer is listening to the "
+                                       L"default output until it comes back.");
             } else if (!fellBack) {
                 warnedSource_.clear();
             }
             g_audioOnFallback.store(fellBack, std::memory_order_relaxed);
+        } else {
+            ULONGLONG was = retryMs_;
+            retryMs_ = std::min<ULONGLONG>(retryMs_ * 2, kRetryMaxMs);
+            if (retryMs_ != was) Wh_Log(L"[Audio] no audio source could be opened; next try in %llu ms", retryMs_);
         }
     }
 
@@ -273,6 +373,7 @@ public:
         capture_.Reset();
         client_.Reset();
         meter_.Reset();
+        meterOk_ = false;
         device_.Reset();
         stopped_ = false;
         ResetAnalysis();
@@ -281,8 +382,10 @@ public:
     }
 
     // Deep idle: stop the stream, keep the client (restarting it is instant).
+    // Loopback only: an input device's meter may read nothing once our
+    // stream is stopped, which would strand it in deep idle.
     void StopStream() {
-        if (client_ && !stopped_) {
+        if (client_ && !stopped_ && loopback_) {
             client_->Stop();
             stopped_ = true;
             Wh_Log(L"[Idle] deep idle: loopback stopped, watching the peak meter");
@@ -293,34 +396,66 @@ public:
             client_->Start();
             stopped_ = false;
             lastPacketQpc_ = 0;
-            Wh_Log(L"[Idle] audio back: loopback restarted");
+            Wh_Log(L"[Idle] loopback restarted");
         }
     }
-    // The endpoint's own peak meter, 0..1. Reading it costs one COM call and
-    // needs no stream of ours to be running.
-    float MeterPeak() {
-        float p = 0.f;
-        if (meter_ && SUCCEEDED(meter_->GetPeakValue(&p))) return p;
-        return 1.f;  // no meter: never trust silence, so deep idle can't strand us
+    // The endpoint's own peak meter, 0..1 (the loudest channel, before Input
+    // Gain). Reading it costs one COM call and needs no stream of ours to be
+    // running. False when there is no meter or the read failed; the caller
+    // then must not trust silence (and MeterOk() turns false, so deep idle
+    // isn't entered again on this stream).
+    bool ReadMeter(float* peak) {
+        *peak = 0.f;
+        if (!meter_) return false;
+        HRESULT hr = meter_->GetPeakValue(peak);
+        meterOk_ = SUCCEEDED(hr);
+        return meterOk_;
     }
 
     // ---- Per frame ------------------------------------------------------------------
-    // Drains the loopback buffer, runs the analysis the settings ask for, and
+    // Drains whatever has arrived into the analysis inputs (rings, meters)
+    // without analysing it. Cheap: what trickle does on each audio event.
+    // Returns true when the audio since the last Frame() got loud enough to
+    // be worth looking at now: above the audible level and 6 dB above what
+    // the last frame saw, so a steady noise floor above -70 dBFS (a hum on a
+    // virtual cable, an app's dither) doesn't turn every event into a frame,
+    // while music starting still does at once.
+    bool Pump() {
+        SyncConfig();
+        if (client_ && !stopped_) pendingGot_ += Drain();
+        float trigger = std::max(kVizAudibleLin, 2.f * lastFramePeak_);
+        return pendingGot_ > 0 && blockPeak_ > trigger;
+    }
+
+    // Drains the stream, runs the analysis the settings ask for, and
     // publishes everything the renderer reads. dt is the time since the last
     // call, which the ballistics and the classic silence decay are scaled by.
-    void Frame(double dt) {
-        SyncConfig();
+    // Returns false when nothing the renderer reads has changed (settled
+    // digital silence), so an idle caller can skip the render tick.
+    bool Frame(double dt) {
+        Pump();
         dt = std::clamp(dt, 0.0005, 0.25);
-        int got = client_ && !stopped_ ? Drain() : 0;
-        PublishScope();
-        if (cfg_.precision) PrecisionFrame(dt, got);
-        else ClassicFrame(dt, got);
-        if (cfg_.wantLoudness || cfg_.wantGonio) PublishMeters();
-        if (cfg_.wantGonio && got > 0) PublishGonio();
+        int got = pendingGot_;
+        bool changed = PublishScope();
+        if (cfg_.precision) changed |= PrecisionFrame(dt, got);
+        else {
+            ClassicFrame(dt, got);
+            changed = true;
+        }
+        if (cfg_.wantLoudness || cfg_.wantGonio) changed |= PublishMeters();
+        if (cfg_.wantGonio && got > 0) {
+            PublishGonio();
+            changed = true;
+        }
+        lastFramePeak_ = blockPeak_;
+        blockPeak_ = 0.f;
+        pendingGot_ = 0;
+        return changed;
     }
 
 private:
     static constexpr int RING_CAP = VIZ_FFT_SIZE_MAX * 4;
+    static constexpr ULONGLONG kRetryMinMs = 500, kRetryMaxMs = 30000, kProbeMs = 30000;
 
     void ResetAnalysis() {
         std::fill(ring_.begin(), ring_.end(), 0.f);
@@ -332,6 +467,10 @@ private:
         VizBandFrame empty;
         PublishBandFrame(empty);
         lastPacketQpc_ = 0;
+        blockPeak_ = lastFramePeak_ = 0.f;
+        pendingGot_ = 0;
+        zeroRun_ = 0;
+        silentFinal_ = settled_ = gpuSilentFlushed_ = false;
     }
 
     // Picks up a settings change. The precision engine also has to be rebuilt
@@ -390,7 +529,19 @@ private:
                 w[c] = 1.41f;
         }
         loudness_.Configure((int)sampleRate_, (int)std::min<UINT32>(channels_, ttdsp::LoudnessMeter::kMaxCh), w);
+        loudness_.SetTruePeak(cfg_.wantTruePeak);
         correlation_.Configure((int)sampleRate_, 300.0);
+        // Digital silence (see PrecisionFrame): zeros enough to fill the
+        // deepest tier's whole ring (2 N at fs / 16) plus every decimator's
+        // history, after which every input the analysis can see is zero.
+        {
+            int deepest = 0;
+            if (cfg_.precision) deepest = spec_.TierUsed(2) ? 2 : spec_.TierUsed(1) ? 1 : 0;
+            silentNeeded_ = ((long long)2 * std::max(256, spec_.Cfg().fftSize) << (2 * deepest)) + 1024;
+            zeroRun_ = 0;
+            silentFinal_ = settled_ = gpuSilentFlushed_ = false;
+        }
+        lastMeters_.valid = false;  // publish the meters on the next frame whatever they read
         lastTrackTick_ = g_nowPlayingChangedTick.load(std::memory_order_relaxed);
     }
 
@@ -410,8 +561,7 @@ private:
         float inputGainLin = (g_settings.inputGainDb == 0.0f) ? 1.0f : powf(10.f, g_settings.inputGainDb / 20.f);
         UINT32 ch = std::max<UINT32>(1, channels_);
         float monoScale = inputGainLin / (float)ch;
-        int total = 0;
-        blockPeak_ = 0.f;
+        int total = 0;  // blockPeak_ accumulates until Frame() takes it
 
         while (packetSize > 0) {
             BYTE* pData = nullptr;
@@ -446,39 +596,57 @@ private:
     // precision engine's chosen channel, loudness, correlation, goniometer.
     // A silent packet (pData null) is real silence of known length: it is fed
     // to the precision engine and the meters as zeros, so they decay on time,
-    // while the classic ring, as in 1.5, is left alone.
+    // while the classic ring, as in 1.5, is left alone. Each consumer only
+    // gets work done for it when it is in use: the interleaved copy for
+    // loudness, L/R correlation for the full loudness readout or the
+    // Goniometer, the stereo history for the Goniometer.
     void ConvertPacket(const BYTE* pData, UINT32 frames, UINT32 ch, float gain, float monoScale) {
         const bool prec = cfg_.precision;
         const bool loud = cfg_.wantLoudness;
-        const bool stereoWork = loud || cfg_.wantGonio;
+        const bool corr = cfg_.wantCorrelation;
+        const bool gonio = cfg_.wantGonio;
         if (prec) mono_.resize(frames);
-        if (stereoWork) {
-            inter_.resize((size_t)frames * ch);
-            stereo_.resize((size_t)frames * 2);
+        if (loud) inter_.resize((size_t)frames * ch);
+        if (gonio) stereo_.resize((size_t)frames * 2);
+        if (!pData) {
+            if (prec) {
+                // Once the analysis holds nothing but zeros, more zeros change
+                // none of its state, so they needn't be pushed.
+                if (zeroRun_ < silentNeeded_) {
+                    std::fill(mono_.begin(), mono_.end(), 0.f);
+                    spec_.Push(mono_.data(), (int)frames);
+                }
+                zeroRun_ += frames;
+            }
+            if (loud) {
+                std::fill(inter_.begin(), inter_.end(), 0.f);
+                loudness_.Process(inter_.data(), (int)frames, (int)ch);
+            }
+            if (corr) correlation_.PushSilence((int)frames);
+            if (gonio) {
+                std::fill(stereo_.begin(), stereo_.end(), 0.f);
+                AppendGonio(frames);
+            }
+            return;
         }
         const float* f32 = reinterpret_cast<const float*>(pData);
         const INT16* i16 = reinterpret_cast<const INT16*>(pData);
+        int lastNonZero = -1;
         for (UINT32 f = 0; f < frames; f++) {
             float l = 0.f, r = 0.f, sum = 0.f;
-            if (pData) {
-                for (UINT32 c = 0; c < ch; c++) {
-                    float v = isFloat_ ? f32[f * ch + c] : i16[f * ch + c] / 32768.f;
-                    sum += v;
-                    if (stereoWork) inter_[(size_t)f * ch + c] = v * gain;
-                    if (c == 0) l = v;
-                    if (c == 1) r = v;
-                }
-                if (ch == 1) r = l;
-                float mono = sum * monoScale;
-                ring_[ringHead_] = mono;
-                ringHead_ = (ringHead_ + 1) % RING_CAP;
-                if (ringCount_ < RING_CAP) ringCount_++;
-                blockPeak_ = std::max(blockPeak_, fabsf(mono));
-                lastAudioTick_ = GetTickCount64();
-                scopeFlatPublished_ = false;
-            } else if (stereoWork) {
-                for (UINT32 c = 0; c < ch; c++) inter_[(size_t)f * ch + c] = 0.f;
+            for (UINT32 c = 0; c < ch; c++) {
+                float v = isFloat_ ? f32[f * ch + c] : i16[f * ch + c] / 32768.f;
+                sum += v;
+                if (loud) inter_[(size_t)f * ch + c] = v * gain;
+                if (c == 0) l = v;
+                if (c == 1) r = v;
             }
+            if (ch == 1) r = l;
+            float mono = sum * monoScale;
+            ring_[ringHead_] = mono;
+            ringHead_ = (ringHead_ + 1) % RING_CAP;
+            if (ringCount_ < RING_CAP) ringCount_++;
+            blockPeak_ = std::max(blockPeak_, fabsf(mono));
             l *= gain;
             r *= gain;
             if (prec) {
@@ -488,40 +656,54 @@ private:
                     case VizChannel::Right: v = r; break;
                     case VizChannel::Mid: v = 0.5f * (l + r); break;
                     case VizChannel::Side: v = 0.5f * (l - r); break;
-                    default: v = sum * monoScale; break;
+                    default: v = mono; break;
                 }
                 mono_[f] = v;
+                if (v != 0.f) lastNonZero = (int)f;
             }
-            if (stereoWork) {
+            if (corr) correlation_.Push(l, r);
+            if (gonio) {
                 stereo_[2 * f] = l;
                 stereo_[2 * f + 1] = r;
-                correlation_.Push(l, r);
             }
         }
-        if (prec) spec_.Push(mono_.data(), (int)frames);
+        // One clock read per packet (1.5 read it per sample).
+        if (frames > 0) {
+            lastAudioTick_ = GetTickCount64();
+            scopeFlatPublished_ = false;
+        }
+        if (prec) {
+            if (lastNonZero >= 0) {
+                if (zeroRun_ >= silentNeeded_) wakeFromSilence_ = true;
+                zeroRun_ = (long long)frames - 1 - lastNonZero;
+            } else {
+                zeroRun_ += frames;
+            }
+            spec_.Push(mono_.data(), (int)frames);
+        }
         if (loud) loudness_.Process(inter_.data(), (int)frames, (int)ch);
-        if (cfg_.wantGonio) {
-            // Keep the newest 2048 stereo frames.
-            const size_t keep = 2048;
-            for (UINT32 f = 0; f < frames; f++) {
-                gonioPending_.push_back(stereo_[2 * f]);
-                gonioPending_.push_back(stereo_[2 * f + 1]);
-            }
-            if (gonioPending_.size() > keep * 2)
-                gonioPending_.erase(gonioPending_.begin(), gonioPending_.end() - keep * 2);
-        }
+        if (gonio) AppendGonio(frames);
+    }
+
+    void AppendGonio(UINT32 frames) {
+        // Keep the newest 2048 stereo frames.
+        const size_t keep = 2048;
+        gonioPending_.insert(gonioPending_.end(), stereo_.begin(), stereo_.begin() + (size_t)frames * 2);
+        if (gonioPending_.size() > keep * 2)
+            gonioPending_.erase(gonioPending_.begin(), gonioPending_.end() - keep * 2);
     }
 
     // ---- Oscilloscope trace (1.5, unchanged apart from where it lives) ---------------
-    void PublishScope() {
-        if (g_settings.shape != VizShape::Oscilloscope) return;
+    // Returns whether a new trace was published.
+    bool PublishScope() {
+        if (g_settings.shape != VizShape::Oscilloscope) return false;
         static constexpr double SCOPE_HOLD_MS = 60.0;
         static constexpr double SCOPE_FADE_MS = 140.0;
         double sinceAudioMs = (double)(GetTickCount64() - lastAudioTick_);
         float staleFade = 1.0f;
         if (sinceAudioMs > SCOPE_HOLD_MS)
             staleFade = std::max(0.0f, 1.0f - (float)((sinceAudioMs - SCOPE_HOLD_MS) / SCOPE_FADE_MS));
-        if (staleFade <= 0.0f && scopeFlatPublished_) return;
+        if (staleFade <= 0.0f && scopeFlatPublished_) return false;
 
         auto ringAt = [&](int i) -> float {
             int m = i % RING_CAP;
@@ -556,6 +738,7 @@ private:
         }
         PublishWaveform(waveSnap);
         scopeFlatPublished_ = (staleFade <= 0.0f);
+        return true;
     }
 
     // ---- Classic engine (1.4 / 1.5 numbers, unchanged) -----------------------------------
@@ -685,7 +868,17 @@ private:
     }
 
     // ---- Precision engine --------------------------------------------------------------
-    void PrecisionFrame(double dt, int got) {
+    // Digital silence. Once every sample the analysis can see is an exact
+    // zero (zeroRun_ >= silentNeeded_), one last forced analysis gives the
+    // levels of pure zeros, and after that there is nothing for an FFT to
+    // find: no FFTs run until a non-zero sample arrives. The bars keep their
+    // ballistics until they are within 1e-4 of the floor (a tenth of a pixel
+    // on a 1000 px bar), are then put exactly on it and published once, and
+    // from there a frame does nothing at all and reports no change. The first
+    // non-zero sample forces every tier to be analysed on the next frame, so
+    // the bass tiers don't wait out a hop after the silence.
+    // Returns whether anything the renderer reads was published.
+    bool PrecisionFrame(double dt, int got) {
         LARGE_INTEGER q;
         QueryPerformanceCounter(&q);
         // Stream starved (nothing at all, not even silent packets, for more
@@ -695,26 +888,39 @@ private:
             double since = lastPacketQpc_ ? (double)(q.QuadPart - lastPacketQpc_) / (double)VizQpcFreq() : 1.0;
             if (since > 0.040) {
                 int n = std::min((int)(dt * sampleRate_), cfg_.spec.fftSize);
-                zeros_.assign((size_t)std::max(0, n), 0.f);
-                if (n > 0) spec_.Push(zeros_.data(), n);
+                if (n > 0) {
+                    if (zeroRun_ < silentNeeded_) {
+                        zeros_.assign((size_t)n, 0.f);
+                        spec_.Push(zeros_.data(), n);
+                    }
+                    zeroRun_ += n;
+                }
             }
         }
+        const bool silent = zeroRun_ >= silentNeeded_;
+        const bool force = wakeFromSilence_;
+        wakeFromSilence_ = false;
+        if (!silent) silentFinal_ = settled_ = gpuSilentFlushed_ = false;
 
         if (cfg_.workload == VizWorkload::Gpu) {
-            // The GPU does the analysis. Here: hand over fresh blocks, and
-            // judge silence from the samples themselves.
-            {
+            // The GPU does the analysis. Here: hand over fresh blocks (in
+            // silence, the all-zero ones once and then nothing), and judge
+            // silence from the samples themselves.
+            if (!silent || !gpuSilentFlushed_) {
+                bool take = force || silent;
                 std::lock_guard<std::mutex> lock(g_gpuFeed.m);
                 int n = g_gpuFeed.n;
                 if (n > 0 && g_gpuFeed.blocks.size() >= (size_t)3 * n) {
                     for (int t = 0; t < 3; t++)
-                        if (spec_.TakeTierBlock(t, &g_gpuFeed.blocks[(size_t)t * n], false)) g_gpuFeed.dirty |= 1u << t;
+                        if (spec_.TakeTierBlock(t, &g_gpuFeed.blocks[(size_t)t * n], take)) g_gpuFeed.dirty |= 1u << t;
+                    if (silent) gpuSilentFlushed_ = true;
                 }
             }
-            if (got > 0 && blockPeak_ > 0.000316f)  // -70 dBFS
+            if (got > 0 && blockPeak_ > kVizAudibleLin)
                 g_lastAudibleTickMs.store(GetTickCount64(), std::memory_order_relaxed);
-            return;
+            return true;  // the renderer runs the ballistics, so it always has work
         }
+        if (silent && settled_) return false;
 
         auto npu = [this](const float* windowed, int n, float* re, float* im) -> bool {
             if (cfg_.workload != VizWorkload::Npu) return false;
@@ -728,32 +934,51 @@ private:
             re[n / 2] = im[n / 2] = 0.f;  // the NPU model leaves out the Nyquist bin
             return true;
         };
-        bool fresh = spec_.Analyze(false, npu);
+        bool fresh = false;
+        if (!silentFinal_) {
+            fresh = spec_.Analyze(force || silent, npu);
+            if (silent) silentFinal_ = true;
+            if (fresh) {
+                VizPerf(kPerfAnalyses);
+                VizPerf(kPerfFfts, (uint32_t)spec_.LastFftCount());
+            }
+        }
 
         const int nb = std::min(spec_.NumBands(), VIZ_BARS_MAX);
         const float* db = spec_.LevelsDb();
         const float range = std::max(1.f, cfg_.disp.ceilDb - cfg_.disp.floorDb);
         ttdsp::DisplayMap disp = cfg_.disp;
         disp.gainDb = cfg_.sensDb + agcDb_;
-        float maxX = 0.f, rawMax = -300.f, bass = 0.f;
+        // Attack / release coefficients once per frame, not once per band.
+        const ttdsp::BallisticsCoef bc = ttdsp::BallisticsCoefs(dt, cfg_.ball, range);
+        float maxX = 0.f, rawMax = -300.f, bass = 0.f, maxLevel = 0.f;
         VizBandFrame& out = frame_;
         out.count = nb;
         out.zone[0] = out.zone[1] = out.zone[2] = 0.f;
         out.zoneCount[0] = out.zoneCount[1] = out.zoneCount[2] = 0.f;
         for (int b = 0; b < nb; b++) {
             float x = disp.ToNorm(db[b]);
-            bandLevel_[b] = ttdsp::BallisticsStep(bandLevel_[b], x, dt, cfg_.ball, range);
+            bandLevel_[b] = ttdsp::BallisticsApply(bandLevel_[b], x, bc);
             out.level[b] = bandLevel_[b];
             out.zone[bandZone_[b]] += bandLevel_[b];
             out.zoneCount[bandZone_[b]] += 1.f;
             maxX = std::max(maxX, x);
+            maxLevel = std::max(maxLevel, bandLevel_[b]);
             rawMax = std::max(rawMax, db[b]);
             if (bandBass_[b]) bass = std::max(bass, x);
+        }
+        if (silent && silentFinal_ && maxLevel < 1e-4f) {
+            for (int b = 0; b < nb; b++) bandLevel_[b] = out.level[b] = 0.f;
+            out.zone[0] = out.zone[1] = out.zone[2] = 0.f;
+            bassSlow_ = 0.f;
+            settled_ = true;
+            PublishBandFrame(out);
+            return true;
         }
 
         // Silence, judged on both the samples and the drawn level, so neither
         // a quiet hiss nor a display range set very low can hold the mod awake.
-        bool audible = got > 0 && blockPeak_ > 0.000316f && maxX > 0.02f;
+        bool audible = got > 0 && blockPeak_ > kVizAudibleLin && maxX > 0.02f;
         if (audible) g_lastAudibleTickMs.store(GetTickCount64(), std::memory_order_relaxed);
 
         // Auto Gain: lift the loudest band toward 85% of the range. Boost
@@ -782,9 +1007,11 @@ private:
             if (hz > 0.0) g_dominantFreqHz.store((float)hz, std::memory_order_relaxed);
         }
         PublishBandFrame(out);
+        return true;
     }
 
-    void PublishMeters() {
+    // Returns whether any reading changed since the last publish.
+    bool PublishMeters() {
         // A new track starts a new integrated measurement.
         ULONGLONG tick = g_nowPlayingChangedTick.load(std::memory_order_relaxed);
         if (cfg_.loudnessResetOnTrack && tick != lastTrackTick_) {
@@ -798,8 +1025,14 @@ private:
         v.truePeak = loudness_.TruePeakDb();
         v.correlation = correlation_.Value();
         v.valid = true;
+        bool changed = !(v.momentary == lastMeters_.momentary && v.shortTerm == lastMeters_.shortTerm &&
+                         v.integrated == lastMeters_.integrated && v.truePeak == lastMeters_.truePeak &&
+                         v.correlation == lastMeters_.correlation && lastMeters_.valid);
+        lastMeters_ = v;
+        if (!changed) return false;
         std::lock_guard<std::mutex> lock(g_meterMutex);
         g_meters = v;
+        return true;
     }
 
     void PublishGonio() {
@@ -834,7 +1067,14 @@ private:
     ULONGLONG lastReinit_ = 0;
     std::wstring warnedSource_;  // the source last reported missing
     LONGLONG lastPacketQpc_ = 0;
-    float blockPeak_ = 0.f;
+    float blockPeak_ = 0.f;      // mono-mix peak since the last Frame(), after Input Gain
+    float lastFramePeak_ = 0.f;  // the same, for the frame before
+    int pendingGot_ = 0;         // frames drained (by Pump) since the last Frame()
+    bool loopback_ = true;
+    bool meterOk_ = false;
+    ULONGLONG retryMs_ = kRetryMinMs;
+    bool openFallback_ = false;  // the default output stands in for a source that wouldn't open
+    ULONGLONG lastProbe_ = 0;
 
     // Shared by both engines: the classic mono ring also feeds the scope.
     std::vector<float> ring_;
@@ -859,11 +1099,14 @@ private:
     float agcDb_ = 0.f, loudEnvDb_ = -200.f, bassSlow_ = 0.f;
     VizBandFrame frame_;
     std::vector<float> mono_, zeros_, npuRe_, npuIm_;
+    long long zeroRun_ = 0, silentNeeded_ = 1LL << 62;  // digital silence, see PrecisionFrame
+    bool silentFinal_ = false, settled_ = false, gpuSilentFlushed_ = false, wakeFromSilence_ = false;
 
     // Meters
     std::vector<float> inter_, stereo_, gonioPending_;
     ttdsp::LoudnessMeter loudness_;
     ttdsp::Correlation correlation_;
+    VizMeterValues lastMeters_;
     ULONGLONG lastTrackTick_ = 0;
 };
 
