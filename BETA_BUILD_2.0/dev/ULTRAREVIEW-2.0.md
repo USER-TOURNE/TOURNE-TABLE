@@ -68,6 +68,15 @@ analysis 2048/2048 bars 15,109 -> 10,254; ballistics at 2048 bands 3,218 -> 589;
 
 `workspaces/round1_features/tests_features/` has ASan/UBSan/TSan harnesses (timeline, waterfall, layout, GSMTC mock) and `run.sh <new v2b> <old v2b>`.
 
+## Merge status (2026-10-09)
+
+Merged on branch `ultrareview-merge`, all checks clean (x64 + x86 syntax check with the WinRT region stubbed, fxc_lint, DXC on all six entries, test_dsp, test_gfx, the features harness incl. TSan on the GSMTC mock, settings-key cross-check):
+
+- Steps 1 and 2: A's render files; `g_termGridSerial` in `p2_term.cpp` (bumped by a memcmp against the previous grid); B11.
+- Step 3: the `round1_engine` drafts (E1, E3, E4, E5, E6, E7+B2, B3, B4, E9, E10) after review, with two changes: trickle still posts a render tick every 250 ms (the draft skipped it when the engine reported no change, which could freeze a peak cap mid-fall), and **E2 is not applied** (QoS unchanged; the alternative is left as a comment in `VizThreadEcoQoS` until `[Perf]` / HWiNFO numbers decide it). Engine counters wired (wakes, engine time, analyses, FFTs, idle split, `VizPerfMaybeLog`).
+- Step 4: the `round1_features` drafts (B1, B5, B6, B7, B9, B10, Copy Quick Settings), with the perf-counter hunks of `splice2.py` kept.
+- Not done: step 6 (measured `[Perf]` lines from Windows), the E8 visual trade-off, R7, R9, R10. The "55% of a core" DominantHz figure is not reproduced; the fix (search on power) is merged either way, since it is exact.
+
 ## Merge plan (for the next session)
 
 Ownership keeps merges conflict-free; follow it.

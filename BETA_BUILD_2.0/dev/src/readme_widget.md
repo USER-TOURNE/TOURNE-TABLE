@@ -6,9 +6,9 @@ Right-click the visualizer for quick settings, applied the moment you pick them:
 - **Shape**, **Terminal Style**, **Color Mode**, **Analysis Engine**, **Band Layout**, **Weighting**, **Ballistics**, **Readout**, **Workload**, **Renderer**, **Target FPS**.
 - Toggles for Peak Hold Caps, Beat Flash, Now Playing, the Track Progress Bar, Media Controls, Pixel-Sharp Text, **Pixel Snap** and **Subpixel Nudges**.
 - **Pause Visualizer**, which blanks it and stops the audio stream until you right-click the same spot again (or the media strip) and untick it.
-- **Reset Quick Settings**.
+- **Copy Quick Settings** and **Reset Quick Settings**.
 
-Windhawk lets a mod read its settings but not write them, so a menu choice is kept as the mod's own saved value and laid over the settings page. The page keeps showing what's underneath, which is why the menu says how many quick settings are active. **Reset Quick Settings** hands everything back to the page.
+Windhawk lets a mod read its settings but not write them, so a menu choice is kept as the mod's own saved value and laid over the settings page. The page keeps showing what's underneath, which is why the menu says how many quick settings are active. **Copy Quick Settings** puts them on the clipboard as `name = value` lines, worded as the menu shows them (for example `Shape = Terminal`, `Peak Hold Caps = On`), so you can make them permanent on the settings page. **Reset Quick Settings** then hands everything back to the page.
 
 The menu only opens where the visualizer is actually showing on the desktop, never through a window that covers it, and a right-click there doesn't open the desktop's own menu. If you'd rather keep a plain right-click for the desktop, set **Right-Click Menu** (Interaction) to **Ctrl + Right-Click**. Right-clicking the media strip opens the same menu.
 

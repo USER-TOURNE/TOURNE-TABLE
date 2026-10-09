@@ -88,29 +88,149 @@ rep("#define WM_APP_REBUILD_DEVICE (WM_APP + 8)   // wParam: 1 = device was lost
 #define WM_APP_CONTEXT_MENU (WM_APP + 9)     // wParam, lParam: screen x, y
 """)
 
+# ================================================================ globals: hidden / menu state for the mouse hook
+rep("bool g_autoHideBlanked = false;\n", """bool g_autoHideBlanked = false;
+// For other threads (the right-click hook): true while Auto-Hide has the scene
+// at zero alpha, so nothing is visible inside the still-valid draw rect. Set by
+// the render thread every frame, from the same sceneAlpha the renderers use.
+std::atomic<bool> g_vizSceneHidden{false};
+// True while the right-click menu's TrackPopupMenuEx loop runs (message-window
+// thread); the hook passes every click through while it is set.
+std::atomic<bool> g_menuOpen{false};
+""")
+rep("""    // Direct3D 11 renderer (2.0). Falls through to the Direct2D path below if
+""", """    g_vizSceneHidden.store(sceneAlpha <= 0.001f, std::memory_order_relaxed);
+
+    // Direct3D 11 renderer (2.0). Falls through to the Direct2D path below if
+""")
+
 # ================================================================ globals: now playing parts, timeline, brushes
 rep("""std::wstring g_nowPlayingDisplay;
 """, """std::wstring g_nowPlayingDisplay;
 std::wstring g_nowPlayingTitle, g_nowPlayingArtist;  // the parts, for the two-line layout
 
+// ---- track timeline: begin (src/tests_features/test_timeline.cpp compiles this block from v2b.cpp)
 // Track timeline from the media session, for the progress bar: start, end and
 // position in 100 ns units, and the tick at which the position was current.
 // Between updates the bar extrapolates while playing, since most players only
 // report the position on a seek or a state change.
+//
+// Writers are WinRT thread-pool callbacks (two can run at once), serialised by
+// g_tlWriteMutex; each write is tagged with the session generation it was read
+// for, so a late event from a session that has since been replaced is dropped.
+// The render thread reads without locking, through the g_tlSeq sequence count
+// (odd while a write is in progress), so it never sees a position paired with
+// another update's tick.
 std::atomic<bool> g_tlValid{false};
 std::atomic<int64_t> g_tlStart{0}, g_tlEnd{0}, g_tlPos{0};
 std::atomic<ULONGLONG> g_tlTick{0};
+std::atomic<bool> g_tlRunning{false};  // extrapolating: the session reported Playing
+std::atomic<uint32_t> g_tlSeq{0};
+std::atomic<uint32_t> g_tlGen{0};
+std::mutex g_tlWriteMutex;
 
-float VizTrackProgress() {
-    if (!g_tlValid.load(std::memory_order_relaxed)) return -1.f;
-    double start = (double)g_tlStart.load(std::memory_order_relaxed);
-    double dur = (double)g_tlEnd.load(std::memory_order_relaxed) - start;
-    if (dur <= 0.0) return -1.f;
-    double pos = (double)g_tlPos.load(std::memory_order_relaxed) - start;
-    if (g_mediaIsPlaying.load(std::memory_order_relaxed))
-        pos += (double)(GetTickCount64() - g_tlTick.load(std::memory_order_relaxed)) * 10000.0;
-    return (float)std::clamp(pos / dur, 0.0, 1.0);
+static void VizTlWriteBegin() {
+    g_tlSeq.store(g_tlSeq.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
+    std::atomic_thread_fence(std::memory_order_release);
 }
+static void VizTlWriteEnd() {
+    g_tlSeq.store(g_tlSeq.load(std::memory_order_relaxed) + 1, std::memory_order_release);
+}
+
+// A new media session is being hooked up: forget the old timeline and return
+// the generation the new session's events must carry.
+uint32_t VizTimelineNewSource() {
+    std::lock_guard<std::mutex> lock(g_tlWriteMutex);
+    uint32_t gen = g_tlGen.load(std::memory_order_relaxed) + 1;
+    VizTlWriteBegin();
+    g_tlGen.store(gen, std::memory_order_relaxed);
+    g_tlValid.store(false, std::memory_order_relaxed);
+    g_tlRunning.store(false, std::memory_order_relaxed);
+    g_tlPos.store(0, std::memory_order_relaxed);
+    g_tlTick.store(GetTickCount64(), std::memory_order_relaxed);
+    VizTlWriteEnd();
+    return gen;
+}
+
+// Playback status. On a Playing <-> Paused change the position so far is
+// folded in and the clock restarts from now, so the bar neither jumps back
+// when pausing nor forward by the length of the pause when resuming (players
+// often leave the timeline itself untouched across a pause).
+void VizTimelineSetPlaying(uint32_t gen, bool playing) {
+    std::lock_guard<std::mutex> lock(g_tlWriteMutex);
+    if (gen != g_tlGen.load(std::memory_order_relaxed)) return;
+    g_mediaIsPlaying.store(playing, std::memory_order_relaxed);
+    bool running = g_tlRunning.load(std::memory_order_relaxed);
+    if (running == playing) return;
+    ULONGLONG now = GetTickCount64();
+    int64_t pos = g_tlPos.load(std::memory_order_relaxed);
+    if (running) pos += (int64_t)(now - g_tlTick.load(std::memory_order_relaxed)) * 10000;
+    VizTlWriteBegin();
+    g_tlPos.store(pos, std::memory_order_relaxed);
+    g_tlTick.store(now, std::memory_order_relaxed);
+    g_tlRunning.store(playing, std::memory_order_relaxed);
+    VizTlWriteEnd();
+}
+
+// A fresh timeline (TimelinePropertiesChanged, or the first read of a
+// session). ageMs is how old the position already is (from LastUpdatedTime);
+// it only counts while playing, since a paused position doesn't move.
+void VizTimelineSet(uint32_t gen, int64_t start, int64_t end, int64_t pos, int64_t ageMs) {
+    std::lock_guard<std::mutex> lock(g_tlWriteMutex);
+    if (gen != g_tlGen.load(std::memory_order_relaxed)) return;
+    if (ageMs < 0 || ageMs > 6LL * 3600 * 1000) ageMs = 0;  // unset or nonsense
+    if (!g_tlRunning.load(std::memory_order_relaxed)) ageMs = 0;
+    VizTlWriteBegin();
+    g_tlStart.store(start, std::memory_order_relaxed);
+    g_tlEnd.store(end, std::memory_order_relaxed);
+    g_tlPos.store(pos, std::memory_order_relaxed);
+    g_tlTick.store(GetTickCount64() - (ULONGLONG)ageMs, std::memory_order_relaxed);
+    g_tlValid.store(end > start, std::memory_order_relaxed);
+    VizTlWriteEnd();
+}
+
+void VizTimelineInvalidate(uint32_t gen) {
+    std::lock_guard<std::mutex> lock(g_tlWriteMutex);
+    if (gen != g_tlGen.load(std::memory_order_relaxed)) return;
+    VizTlWriteBegin();
+    g_tlValid.store(false, std::memory_order_relaxed);
+    VizTlWriteEnd();
+}
+
+// 0..1 along the track, or -1 for no bar. Render thread.
+float VizTrackProgress() {
+    static std::atomic<float> s_last{-1.f};  // if a writer is preempted mid-update
+    bool valid = false, running = false;
+    int64_t start = 0, end = 0, pos = 0;
+    ULONGLONG tick = 0;
+    for (int tries = 0;; tries++) {
+        if (tries == 64) return s_last.load(std::memory_order_relaxed);
+        uint32_t s1 = g_tlSeq.load(std::memory_order_acquire);
+        if (s1 & 1u) continue;
+        valid = g_tlValid.load(std::memory_order_relaxed);
+        start = g_tlStart.load(std::memory_order_relaxed);
+        end = g_tlEnd.load(std::memory_order_relaxed);
+        pos = g_tlPos.load(std::memory_order_relaxed);
+        tick = g_tlTick.load(std::memory_order_relaxed);
+        running = g_tlRunning.load(std::memory_order_relaxed);
+        std::atomic_thread_fence(std::memory_order_acquire);
+        if (g_tlSeq.load(std::memory_order_relaxed) == s1) break;
+    }
+    float result = -1.f;
+    double dur = (double)(end - start);
+    if (valid && dur > 0.0) {
+        double p = (double)(pos - start);
+        if (running) {
+            // Modular difference, so a tick set back past boot by an age still works.
+            int64_t elapsedMs = (int64_t)(GetTickCount64() - tick);
+            if (elapsedMs > 0) p += (double)elapsedMs * 10000.0;
+        }
+        result = (float)std::clamp(p / dur, 0.0, 1.0);
+    }
+    s_last.store(result, std::memory_order_relaxed);
+    return result;
+}
+// ---- track timeline: end
 """)
 rep("ComPtr<ID2D1SolidColorBrush> g_nowPlayingBrush;\n",
     """ComPtr<ID2D1SolidColorBrush> g_nowPlayingBrush;
@@ -153,63 +273,147 @@ rep("""                if (!display.empty()) {
                 }""")
 rep("static winrt::event_token g_gsmtcPlaybackToken{};\n",
     "static winrt::event_token g_gsmtcPlaybackToken{};\nstatic winrt::event_token g_gsmtcTimelineToken{};\n")
-rep("""void SetupGsmtcSessionListener() {""", """// Reads the session's timeline for the progress bar. LastUpdatedTime says how
-// old the position already is; a player that leaves it unset gets age 0.
-void RefreshMediaTimeline() {
-    if (!g_gsmtcSession) {
-        g_tlValid.store(false, std::memory_order_relaxed);
-        return;
-    }
+# The session handlers run on WinRT thread-pool threads while
+# CurrentSessionChanged (another pool thread) swaps g_gsmtcSession, so the
+# handlers never read the global: each works on its `sender` and carries the
+# generation it was hooked up for (see VizTimelineNewSource).
+rep("""void RefreshMediaPlaybackStatus() {
+    if (!g_gsmtcSession) return;
     try {
-        auto tl = g_gsmtcSession.GetTimelineProperties();
+        auto info = g_gsmtcSession.GetPlaybackInfo();
+        bool playing = info && info.PlaybackStatus() ==
+            GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing;
+        g_mediaIsPlaying.store(playing, std::memory_order_relaxed);
+    } catch (...) {}
+    if (g_mediaWnd) PostMessage(g_mediaWnd, WM_APP_MEDIA_REPAINT, 0, 0);
+}
+
+void SetupGsmtcSessionListener() {
+    if (!g_gsmtcMgr) return;
+    try {
+        if (g_gsmtcSession) {
+            try { g_gsmtcSession.MediaPropertiesChanged(g_gsmtcMediaPropsToken); } catch (...) {}
+            try { g_gsmtcSession.PlaybackInfoChanged(g_gsmtcPlaybackToken); } catch (...) {}
+            g_gsmtcSession = nullptr;
+        }
+        g_gsmtcSession = g_gsmtcMgr.GetCurrentSession();
+        if (!g_gsmtcSession) return;
+        g_gsmtcMediaPropsToken = g_gsmtcSession.MediaPropertiesChanged(
+            [](auto const&, auto const&) {
+                if (g_settings.colorMode == VizColorMode::AlbumArt ||
+                    g_settings.colorMode == VizColorMode::DynamicAlbum ||
+                    g_settings.nowPlayingEnabled)
+                    FetchAlbumArtColorAsync();
+            });
+        g_gsmtcPlaybackToken = g_gsmtcSession.PlaybackInfoChanged(
+            [](auto const&, auto const&) { RefreshMediaPlaybackStatus(); });
+        RefreshMediaPlaybackStatus();
+    } catch (...) {}
+}
+""", """// g_gsmtcSession, g_gsmtcMgr and the session's event tokens are only touched
+// under this lock: by SetupGsmtcSessionListener (the GSMTC thread at start, a
+// WinRT thread-pool thread on every CurrentSessionChanged) and by shutdown.
+// The session's own event handlers never read them; they get the session as
+// `sender` and the generation it was hooked up with, and a handler still
+// running for a replaced session has its result dropped by the timeline.
+static std::mutex g_gsmtcSessionMutex;
+
+void RefreshMediaPlaybackStatus(GlobalSystemMediaTransportControlsSession const& session, uint32_t gen) {
+    if (!session) return;
+    try {
+        auto info = session.GetPlaybackInfo();
+        bool playing = info && info.PlaybackStatus() ==
+            GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing;
+        VizTimelineSetPlaying(gen, playing);  // also sets g_mediaIsPlaying
+    } catch (...) {}
+    if (g_mediaWnd) PostMessage(g_mediaWnd, WM_APP_MEDIA_REPAINT, 0, 0);
+}
+
+// Reads the session's timeline for the progress bar. LastUpdatedTime says how
+// old the position already is; a player that leaves it unset gets age 0.
+void RefreshMediaTimeline(GlobalSystemMediaTransportControlsSession const& session, uint32_t gen) {
+    if (!session) return;
+    try {
+        auto tl = session.GetTimelineProperties();
         if (!tl) {
-            g_tlValid.store(false, std::memory_order_relaxed);
+            VizTimelineInvalidate(gen);
             return;
         }
         int64_t start = tl.StartTime().count(), end = tl.EndTime().count(), pos = tl.Position().count();
         int64_t ageMs = std::chrono::duration_cast<std::chrono::milliseconds>(winrt::clock::now() -
                                                                               tl.LastUpdatedTime())
                             .count();
-        if (ageMs < 0 || ageMs > 6LL * 3600 * 1000) ageMs = 0;
-        g_tlStart.store(start, std::memory_order_relaxed);
-        g_tlEnd.store(end, std::memory_order_relaxed);
-        g_tlPos.store(pos, std::memory_order_relaxed);
-        g_tlTick.store(GetTickCount64() - (ULONGLONG)ageMs, std::memory_order_relaxed);
-        g_tlValid.store(end > start, std::memory_order_relaxed);
+        VizTimelineSet(gen, start, end, pos, ageMs);
     } catch (...) {
-        g_tlValid.store(false, std::memory_order_relaxed);
+        VizTimelineInvalidate(gen);
     }
 }
 
-void SetupGsmtcSessionListener() {""")
-rep("""        g_gsmtcPlaybackToken = g_gsmtcSession.PlaybackInfoChanged(
-            [](auto const&, auto const&) { RefreshMediaPlaybackStatus(); });
-        RefreshMediaPlaybackStatus();""", """        g_gsmtcPlaybackToken = g_gsmtcSession.PlaybackInfoChanged(
-            [](auto const&, auto const&) {
-                RefreshMediaPlaybackStatus();
-                RefreshMediaTimeline();  // pausing freezes the bar where it is
-            });
-        g_gsmtcTimelineToken = g_gsmtcSession.TimelinePropertiesChanged(
-            [](auto const&, auto const&) { RefreshMediaTimeline(); });
-        RefreshMediaPlaybackStatus();
-        RefreshMediaTimeline();""")
-rep("""            try { g_gsmtcSession.PlaybackInfoChanged(g_gsmtcPlaybackToken); } catch (...) {}
-            g_gsmtcSession = nullptr;
-        }
-        g_gsmtcSession = g_gsmtcMgr.GetCurrentSession();
-        if (!g_gsmtcSession) return;""", """            try { g_gsmtcSession.PlaybackInfoChanged(g_gsmtcPlaybackToken); } catch (...) {}
+void SetupGsmtcSessionListener() {
+    std::lock_guard<std::mutex> lock(g_gsmtcSessionMutex);
+    if (!g_gsmtcMgr) return;
+    try {
+        if (g_gsmtcSession) {
+            try { g_gsmtcSession.MediaPropertiesChanged(g_gsmtcMediaPropsToken); } catch (...) {}
+            try { g_gsmtcSession.PlaybackInfoChanged(g_gsmtcPlaybackToken); } catch (...) {}
             try { g_gsmtcSession.TimelinePropertiesChanged(g_gsmtcTimelineToken); } catch (...) {}
             g_gsmtcSession = nullptr;
         }
-        g_gsmtcSession = g_gsmtcMgr.GetCurrentSession();
-        if (!g_gsmtcSession) {
-            g_tlValid.store(false, std::memory_order_relaxed);
-            return;
-        }""")
-rep("""                g_gsmtcSession.PlaybackInfoChanged(g_gsmtcPlaybackToken);
-            }""", """                g_gsmtcSession.PlaybackInfoChanged(g_gsmtcPlaybackToken);
-                g_gsmtcSession.TimelinePropertiesChanged(g_gsmtcTimelineToken);
-            }""")
+        // From here on, events from the old session are ignored.
+        const uint32_t gen = VizTimelineNewSource();
+        GlobalSystemMediaTransportControlsSession session = g_gsmtcMgr.GetCurrentSession();
+        g_gsmtcSession = session;
+        if (!session) return;
+        g_gsmtcMediaPropsToken = session.MediaPropertiesChanged(
+            [](auto const&, auto const&) {
+                if (g_settings.colorMode == VizColorMode::AlbumArt ||
+                    g_settings.colorMode == VizColorMode::DynamicAlbum ||
+                    g_settings.nowPlayingEnabled)
+                    FetchAlbumArtColorAsync();
+            });
+        // Pausing / resuming folds the position in (VizTimelineSetPlaying);
+        // the timeline itself is only re-read when the player changes it.
+        g_gsmtcPlaybackToken = session.PlaybackInfoChanged(
+            [gen](GlobalSystemMediaTransportControlsSession const& sender, auto const&) {
+                RefreshMediaPlaybackStatus(sender, gen);
+            });
+        g_gsmtcTimelineToken = session.TimelinePropertiesChanged(
+            [gen](GlobalSystemMediaTransportControlsSession const& sender, auto const&) {
+                RefreshMediaTimeline(sender, gen);
+            });
+        // Status first, so the first timeline read knows whether its age counts.
+        RefreshMediaPlaybackStatus(session, gen);
+        RefreshMediaTimeline(session, gen);
+    } catch (...) {}
+}
+""")
+# Shutdown: stop session swaps first (outside the lock, so an in-flight
+# CurrentSessionChanged can finish), then unhook the session under the lock.
+rep("""        try {
+            if (g_gsmtcSession) {
+                g_gsmtcSession.MediaPropertiesChanged(g_gsmtcMediaPropsToken);
+                g_gsmtcSession.PlaybackInfoChanged(g_gsmtcPlaybackToken);
+            }
+            if (g_gsmtcMgr) {
+                g_gsmtcMgr.CurrentSessionChanged(g_gsmtcSessionToken);
+            }
+            g_gsmtcSession = nullptr;
+            g_gsmtcMgr     = nullptr;
+            winrt::uninit_apartment();
+        } catch (...) {}""", """        try {
+            if (g_gsmtcMgr) g_gsmtcMgr.CurrentSessionChanged(g_gsmtcSessionToken);
+        } catch (...) {}
+        {
+            std::lock_guard<std::mutex> lock(g_gsmtcSessionMutex);
+            if (g_gsmtcSession) {
+                try { g_gsmtcSession.MediaPropertiesChanged(g_gsmtcMediaPropsToken); } catch (...) {}
+                try { g_gsmtcSession.PlaybackInfoChanged(g_gsmtcPlaybackToken); } catch (...) {}
+                try { g_gsmtcSession.TimelinePropertiesChanged(g_gsmtcTimelineToken); } catch (...) {}
+            }
+            g_gsmtcSession = nullptr;
+            g_gsmtcMgr     = nullptr;
+        }
+        try { winrt::uninit_apartment(); } catch (...) {}""")
 # ================================================================ media strip: anchoring, right-click
 rep("""    int x = mi.rcWork.left + (int)std::lround((workWidth - width) * (hPercent / 100.0f));
     int y = mi.rcWork.top + (int)std::lround((workHeight - height) * (vPercent / 100.0f));
@@ -240,8 +444,10 @@ rep("""        case WM_APP_MEDIA_REPAINT:
             return 0;
 
         // Right-click on the strip opens the same quick-settings menu as the
-        // visualizer (handy when the visualizer is paused from it).
+        // visualizer (handy when the visualizer is paused from it), with the
+        // same Ctrl requirement when Right-Click Menu is Ctrl + Right-Click.
         case WM_RBUTTONUP:
+            if (g_settings.contextMenu == VizContextMenu::CtrlRightClick && !(wParam & MK_CONTROL)) break;
             if (g_messageWnd && g_settings.contextMenu != VizContextMenu::Off) {
                 POINT pt;
                 GetCursorPos(&pt);
@@ -295,17 +501,29 @@ rep("""    if (g_settings.nowPlayingEnabled) {
             textTop = std::max(textTop, fontPx * lines + 8.0f * g_dpiScale + npOffY);
             textAnchorSide = std::max(textAnchorSide, 100.0f * g_dpiScale);
         } else {
-            // Inside the panel: only an offset can take it past the edge.
+            // Inside the panel, in the padding band (VizDrawTextOverlays): Panel
+            // Bottom starts at the bars' bottom edge and Panel Top at the panel's
+            // top edge, both npHeight tall. Padding smaller than the text (or
+            // the background off, padding 0) lets it hang past the panel's
+            // bottom: reserve that overflow, plus the offset room as before.
+            float npHeight = fontPx * ((g_settings.npLayout == VizNpLayout::TwoLines) ? 2.7f : 1.6f);
+            float overflow = (g_settings.npPlacement == VizNpPlacement::PanelBottom)
+                                 ? npHeight - padB
+                                 : npHeight - padT - totalHeight - padB;
             textTop = std::max(textTop, npOffY);
+            textBottom = std::max(textBottom, std::max(0.f, overflow) + npOffY);
         }
         textBottom = std::max(textBottom, npOffY);
         extraSide  = std::max(extraSide, npOffX);
     }
-    if (g_settings.progressEnabled && g_settings.progressPlacement != VizProgressPlacement::PanelBottom) {
+    if (g_settings.progressEnabled) {
         float need = (float)(std::max(1, g_settings.progressHeight) + g_settings.progressGap) * g_dpiScale +
                      2.0f * g_dpiScale;
         if (g_settings.progressPlacement == VizProgressPlacement::Above) textTop += need;
-        else textBottom = std::max(textBottom, need);
+        else if (g_settings.progressPlacement == VizProgressPlacement::Below) textBottom = std::max(textBottom, need);
+        // Panel Bottom: drawn at the bars' bottom edge + gap (VizProgressRect),
+        // so whatever of gap + height the bottom padding doesn't cover.
+        else textBottom = std::max(textBottom, std::max(0.f, need - padB));
     }""")
 
 # ================================================================ Direct2D path: Terminal
@@ -350,6 +568,17 @@ bool g_menuButtonDown = false;          // hook thread only
 // with its modifier held keeps priority.
 bool VizMenuHook(WPARAM wParam, const MSLLHOOKSTRUCT* info) {
     if (g_settings.contextMenu == VizContextMenu::Off) return false;
+    // Our menu is up: everything goes through, so a click elsewhere (either
+    // button) dismisses it the normal way. Only the release of a press this
+    // hook already swallowed is swallowed too, so the desktop never gets an
+    // unpaired button-up.
+    if (g_menuOpen.load(std::memory_order_acquire)) {
+        if (wParam == WM_RBUTTONUP && g_menuButtonDown) {
+            g_menuButtonDown = false;
+            return true;
+        }
+        return false;
+    }
     if (wParam == WM_RBUTTONDOWN) {
         g_menuButtonDown = false;
         if (g_settings.dragEnabled && g_settings.dragButton == VizDragButton::Right && DragModifierHeld())
@@ -358,6 +587,11 @@ bool VizMenuHook(WPARAM wParam, const MSLLHOOKSTRUCT* info) {
             return false;
         // Hidden for a fullscreen app or a covering window: nothing to click.
         if (g_fullscreenPaused.load(std::memory_order_relaxed) && !g_userPaused.load(std::memory_order_relaxed))
+            return false;
+        // Faded out by Auto-Hide: the draw rect is still valid, but there is
+        // nothing visible there, so the click belongs to the desktop. (Pause
+        // Visualizer still catches it: that is how it gets unticked.)
+        if (g_vizSceneHidden.load(std::memory_order_relaxed) && !g_userPaused.load(std::memory_order_relaxed))
             return false;
         if (!PointInVisualizerBounds(info->pt) || !VizDesktopUnderPoint(info->pt)) return false;
         g_menuButtonDown = true;
