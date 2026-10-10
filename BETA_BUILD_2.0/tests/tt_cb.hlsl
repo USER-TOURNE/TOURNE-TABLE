@@ -25,6 +25,34 @@ TT_CBUFFER(FrameCB, b0) {
     float4 fTermGeom;   // origin x, origin y, cell width, cell height
     float4 fTermAtlas;  // atlas width, atlas height, -, -
     uint fTermCols, fTermRows, fTermAtlasCols, fTermPad;
+    // Styles (2.1): which one (0 none, 1 LED, 2 Line, 3 Bloom, 4 Spectrogram,
+    // 5 VU, 6 Stereo Field, 7 Particles), LED segments per bar, Line
+    // subdivisions per bar gap, Spectrogram history rows in use.
+    uint fStyle, fSegs, fSubdiv, fSpecRows;
+    // Reflection: base line y, direction (+1 down), depth px, start opacity.
+    float fReflBase, fReflDir, fReflDepth, fReflAlpha;
+    // LED segment pitch and height, Line glow radius and fill opacity.
+    float fSegStep, fSegH, fGlowR, fFillA;
+    float4 fVu;     // VU needle L, R (0..1 of the scale), peak LED L, R (0..1)
+    float4 fVuBox;  // one meter's width, height, offset of the second meter x, y
+    uint fSpecW, fSpecHead, fSpecTex, fSpecPad;  // bars per row, newest row, rows in the texture
+    // FX (2.1): Glow strength 0..1 and radius px, Bloom strength 0..1 and
+    // radius px; texel size of the quarter-res bloom target and of the scene.
+    float fFxGlow, fFxGlowR, fFxBloom, fFxBloomR;
+    float4 fFxTexel;
+    // Outline and Shadow (FX, 2.1): outline colour (straight alpha), shadow
+    // colour (alpha = strength), then outline width, shadow offset x, y and
+    // softness, all px.
+    float4 fFxLineColor;
+    float4 fFxShadowColor;
+    float fFxLineW, fFxShadowX, fFxShadowY, fFxShadowSoft;
+    // Bar modifiers (2.1): dash and gap length px, tilt (shear per px of
+    // height), the base line it leans from; Afterimage opacity, Hollow line
+    // width px, Mirror gap px (Middle anchor), flags: 1 hollow, 2 dashed,
+    // 4 tilted, 8 mirror gap.
+    float fBarDash, fBarDashGap, fBarTiltK, fBarPivot;
+    float fGhostA, fHollowW, fMirrorGap;
+    uint fModFlags;
 }
 TT_CBUFFER_END
 

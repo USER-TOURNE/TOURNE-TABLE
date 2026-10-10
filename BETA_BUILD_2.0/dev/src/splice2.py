@@ -889,6 +889,1390 @@ rep("""    g_settings.deepIdle = Wh_GetIntSetting(L"performance.deepIdle") != 0;
 """, """    g_settings.deepIdle = Wh_GetIntSetting(L"performance.deepIdle") != 0;
     g_perfStatsEnabled.store(Wh_GetIntSetting(L"performance.perfStats") != 0, std::memory_order_relaxed);
 """)
+# ================================================================ styles (2.1)
+# Eight new styles chosen from the Shape list, plus Reflection. See
+# p3_styles.cpp for what each one is and how it rides on an existing shape.
+after("enum class VizContextMenu { RightClick, CtrlRightClick, Off };\n",
+      "enum class VizStyle { None, Led, Line, Bloom, Spectrogram, Vu, SplitLR, Particles };\n")
+after("    std::wstring audioSourceKey;\n", """
+    // Styles (2.1): picked from the Shape list on top of an internal shape.
+    VizStyle style = VizStyle::None;
+    int reflection = 0;  // %, of Bar Max Size
+""")
+after("std::atomic<uint32_t> g_gonioSerial{0};\n",
+      "std::atomic<uint32_t> g_vizStereoRate{48000};  // sample rate of g_gonioXY, for Stereo Field\n")
+rep("""        gonioPending_.clear();
+        g_gonioSerial.fetch_add(1, std::memory_order_release);""", """        gonioPending_.clear();
+        g_vizStereoRate.store(sampleRate_, std::memory_order_relaxed);
+        g_gonioSerial.fetch_add(1, std::memory_order_release);""")
+# The stereo feed also drives VU Needles and Stereo Field; beats throw the sparks.
+rep("    c.wantGonio = g_settings.shape == VizShape::Goniometer;",
+    "    c.wantGonio = g_settings.shape == VizShape::Goniometer || g_settings.style == VizStyle::Vu ||\n"
+    "                  g_settings.style == VizStyle::SplitLR;")
+rep("    c.beat = g_settings.beatFlashEnabled;",
+    "    c.beat = g_settings.beatFlashEnabled || g_settings.style == VizStyle::Particles;")
+before("bool ComputeVizLayout(VizLayout* out) {", read("p3_styles.cpp") + "\n")
+rep("""        totalWidth  = horizontal ? barsThickness : maxSize;
+        totalHeight = horizontal ? maxSize       : barsThickness;
+    }
+""", """        totalWidth  = horizontal ? barsThickness : maxSize;
+        totalHeight = horizontal ? maxSize       : barsThickness;
+    }
+    VizStyleBox(&totalWidth, &totalHeight, maxSize, horizontal);
+""", 2)
+rep("""        totalWidth  = horizontal ? groupThickness : groupExtent;
+        totalHeight = horizontal ? groupExtent    : groupThickness;
+    }
+""", """        totalWidth  = horizontal ? groupThickness : groupExtent;
+        totalHeight = horizontal ? groupExtent    : groupThickness;
+    }
+    VizStyleBox(&totalWidth, &totalHeight, maxSize, horizontal);
+""")
+rep("if (g_settings.shape == VizShape::Terminal) VizBuildTermGrid();\n",
+    "if (g_settings.shape == VizShape::Terminal) VizBuildTermGrid();\n        VizStylesFrame();\n", 2)
+rep("""        if (g_settings.shape == VizShape::Dots) {""", """        if (VizDrawStyleD2D(blockX, blockY, totalWidth, totalHeight, barCount, barW, barGap, maxSize, idleSize,
+                            horizontal, c1, cGrad1, c2, rainbowBase)) {
+            // drawn by the style
+        } else if (g_settings.shape == VizShape::Dots) {""")
+rep("""    PCWSTR shape = Wh_GetStringSetting(L"appearance.shape");
+    g_settings.shape = (wcscmp(shape, L"goniometer") == 0)   ? VizShape::Goniometer
+                       : (wcscmp(shape, L"mountain") == 0)   ? VizShape::Mountain
+                       : (wcscmp(shape, L"mirror") == 0)     ? VizShape::Mirror
+                       : (wcscmp(shape, L"wave") == 0)       ? VizShape::Wave
+                       : (wcscmp(shape, L"breathe") == 0)    ? VizShape::Breathe
+                       : (wcscmp(shape, L"dots") == 0)       ? VizShape::Dots
+                       : (wcscmp(shape, L"radial") == 0)     ? VizShape::Radial
+                       : (wcscmp(shape, L"oscilloscope") == 0) ? VizShape::Oscilloscope
+                       : (wcscmp(shape, L"terminal") == 0)   ? VizShape::Terminal
+                                                               : VizShape::Stereo;
+    Wh_FreeStringSetting(shape);""", """    PCWSTR shape = Wh_GetStringSetting(L"appearance.shape");
+    VizParseShape(shape, &g_settings.shape, &g_settings.style);
+    Wh_FreeStringSetting(shape);
+    g_settings.reflection = std::clamp(Wh_GetIntSetting(L"appearance.reflection"), 0, 100);""")
+rep("""        if (g_settings.workload == VizWorkload::Gpu && g_settings.shape == VizShape::Terminal) {""",
+    """        if (g_settings.workload == VizWorkload::Gpu && VizStyleNeedsCpuBars()) {
+            ReportSettingWarning(L"Hardware", L"Workload",
+                                 L"Spectrogram, Stereo Field and Particles work from the bar levels on the CPU, "
+                                 L"so with them the analysis runs on the CPU (Hybrid).");
+        }
+        if (g_settings.workload == VizWorkload::Gpu && g_settings.shape == VizShape::Terminal) {""")
+rep("""        - terminal: Terminal (text characters, see the Terminal section)
+    - orientation: horizontal""", """        - terminal: Terminal (text characters, see the Terminal section)
+        - led: LED Meter (segmented, green / amber / red)
+        - line: Line Spectrum (filled curve, glowing edge)
+        - bloom: Polar Bloom (Radial as one filled shape)
+        - spectrogram: Spectrogram (scrolling colour history)
+        - vu: VU Needles (two analog meters, L and R)
+        - stereo_field: Stereo Field (left above, right below)
+        - particles: Particles (bars plus sparks on each beat)
+    - reflection: 0
+      $name: Reflection
+      $description: 0-100. Mirrors the bars onto a floor beneath them, fading out over this percentage of Bar Max Size. Horizontal bars anchored to the bottom only, with the bar shapes, LED Meter, Line Spectrum and Particles. Both renderers (Direct2D draws it on the CPU, so it costs a little more there)
+    - orientation: horizontal""")
+
+# ================================================================ Media Card (2.1)
+# Media Controls > Layout = Card: album art with controls on hover, a seek
+# bar, one-click output switching and a volume slider. See p3_media.cpp.
+after("#include <mmdeviceapi.h>\n", "#include <endpointvolume.h>\n")
+after("    int mediaPlatePadding = 0;\n", "    bool mediaCard = false;  // Media Controls > Layout = Card (2.1)\n")
+after("static std::thread* g_albumArtThread = nullptr;\n", """
+// Media Card (2.1): the cover, box-filtered down to at most 160 px, straight
+// alpha BGRA as WIC decodes it. Written by the album-art thread, read by the
+// media window's paint.
+std::mutex g_artTileMutex;
+std::vector<BYTE> g_artTile;
+int g_artTileW = 0, g_artTileH = 0;
+std::atomic<int64_t> g_mediaSeekTicks{0};  // seek target for media command 3, 100 ns units
+
+void VizStoreArtTile(const BYTE* px, int w, int h) {
+    std::vector<BYTE> out;
+    int ow = 0, oh = 0;
+    if (px && w > 0 && h > 0) {
+        int f = std::max(1, (std::max(w, h) + 159) / 160);
+        ow = std::max(1, w / f);
+        oh = std::max(1, h / f);
+        out.resize((size_t)ow * oh * 4);
+        for (int y = 0; y < oh; y++)
+            for (int x = 0; x < ow; x++)
+                for (int k = 0; k < 4; k++) {
+                    unsigned sum = 0;
+                    for (int yy = 0; yy < f; yy++)
+                        for (int xx = 0; xx < f; xx++) sum += px[((size_t)(y * f + yy) * w + (x * f + xx)) * 4 + k];
+                    out[((size_t)y * ow + x) * 4 + k] = (BYTE)(sum / (unsigned)(f * f));
+                }
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_artTileMutex);
+        if (out.empty() && g_artTile.empty()) return;
+        g_artTile.swap(out);
+        g_artTileW = ow;
+        g_artTileH = oh;
+    }
+    if (g_mediaWnd && g_settings.mediaCard) PostMessage(g_mediaWnd, WM_APP_MEDIA_REPAINT, 0, 0);
+}
+""")
+rep("            if (!thumbRef) { winrt::uninit_apartment();",
+    "            if (!thumbRef) { VizStoreArtTile(nullptr, 0, 0); winrt::uninit_apartment();")
+rep("""            if (!pixels.empty()) {
+                struct Bucket""", """            if (!pixels.empty()) VizStoreArtTile(pixels.data(), imgW, imgH);
+            if (!pixels.empty()) {
+                struct Bucket""")
+rep("                    else if (cmd == 2) session.TrySkipNextAsync().get();",
+    """                    else if (cmd == 2) session.TrySkipNextAsync().get();
+                    else if (cmd == 3)
+                        session.TryChangePlaybackPositionAsync(g_mediaSeekTicks.load(std::memory_order_relaxed)).get();""")
+before("void PaintMediaControls(int x, int y, int width, int height) {", read("p3_media.cpp") + "\n")
+rep("""    // Optional backing plate behind the whole strip, with an optional outline.""",
+    """    if (VizCardActive()) {
+        VizPaintCard(buf, stride, width, height);
+    } else {
+    // Optional backing plate behind the whole strip, with an optional outline.""")
+rep("""    HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, dib);
+
+    POINT ptSrc = {0, 0};""", """    }  // strip
+
+    HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, dib);
+
+    POINT ptSrc = {0, 0};""")
+rep("""    if (!g_settings.mediaControlsEnabled) {
+        ShowWindow(g_mediaWnd, SW_HIDE);
+        return;
+    }""", """    if (!g_settings.mediaControlsEnabled) {
+        VizCardTimer(g_mediaWnd, false);
+        ShowWindow(g_mediaWnd, SW_HIDE);
+        return;
+    }
+    VizCardTimer(g_mediaWnd, VizCardActive());""")
+rep("""    int width = size * 3 + spacing * 2 + pad * 2;
+    int height = size + pad * 2;
+""", """    int width = size * 3 + spacing * 2 + pad * 2;
+    int height = size + pad * 2;
+    if (VizCardActive()) VizCardSize(&width, &height);
+""", 2)
+rep("""LRESULT CALLBACK MediaWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    switch (uMsg) {""", """LRESULT CALLBACK MediaWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    if (VizCardActive() && VizCardMessage(hWnd, uMsg, wParam, lParam)) return 0;
+    switch (uMsg) {""")
+before("// Resolves a source key to a device. Falls back", read("p3_media_dev.cpp") + "\n")
+after("""    g_settings.mediaIconSize = std::clamp(Wh_GetIntSetting(L"media_controls.iconSize"), 8, 256);
+""", """    {
+        PCWSTR layout = Wh_GetStringSetting(L"media_controls.layout");
+        g_settings.mediaCard = layout && wcscmp(layout, L"card") == 0;
+        Wh_FreeStringSetting(layout);
+    }
+""")
+rep("""      $description: Distance in from the panel's top or bottom edge, in pixels. Only used with a panel anchor
+""", """      $description: Distance in from the panel's top or bottom edge, in pixels. Only used with a panel anchor
+    - layout: strip
+      $name: Layout
+      $description: Strip is the three buttons. Card is a small media card in the same place, sized from Icon Size and Icon Spacing - the album art (hover it for previous / play / next), a seek bar (click or drag), a speaker button that switches the Windows default output in one click, and a volume slider (drag it, or scroll anywhere on the card)
+      $options:
+        - strip: Strip (three buttons)
+        - card: Card (art, seek, output, volume)
+""")
+
+# ================================================================ Media Card theme (2.1)
+after("    bool mediaCard = false;  // Media Controls > Layout = Card (2.1)\n", """    BYTE cardBgA = 158, cardBgR = 10, cardBgG = 10, cardBgB = 13;
+    BYTE cardBorderA = 0, cardBorderR = 255, cardBorderG = 255, cardBorderB = 255;
+    int cardBorderSize = 0, cardRadius = 12, cardArtSize = 0;
+    int cardAccentSource = 0;  // 0 icon colour, 1 custom, 2 album art, 3 Windows accent
+    BYTE cardAccentA = 255, cardAccentR = 255, cardAccentG = 255, cardAccentB = 255;
+""")
+after("std::atomic<int64_t> g_mediaSeekTicks{0};  // seek target for media command 3, 100 ns units\n",
+      "inline bool VizCardWantsArt() { return g_settings.mediaControlsEnabled && g_settings.mediaCard; }\n")
+# The card shows the cover, so it fetches it whatever the colour mode.
+import re as _re
+def _lit(x):
+    t = "%g" % x
+    return t + (".f" if "." not in t and "e" not in t else "f")
+_n = len(_re.findall(r"g_settings\.nowPlayingEnabled\)\n(\s*)FetchAlbumArtColorAsync\(\);", src))
+if _n != 4:
+    sys.exit(f"album fetch anchors {_n} != 4")
+src = _re.sub(r"g_settings\.nowPlayingEnabled\)\n(\s*)FetchAlbumArtColorAsync\(\);",
+              r"g_settings.nowPlayingEnabled || VizCardWantsArt())\n\1FetchAlbumArtColorAsync();", src)
+after("                    g_albumArtColorReady.store(true, std::memory_order_relaxed);\n",
+      "                    if (g_mediaWnd && g_settings.mediaCard) PostMessage(g_mediaWnd, WM_APP_MEDIA_REPAINT, 0, 0);\n")
+after("""        g_settings.mediaCard = layout && wcscmp(layout, L"card") == 0;
+        Wh_FreeStringSetting(layout);
+    }
+""", """    ReadColorSetting(L"media_controls.cardBackground", L"Media Controls", L"Card Background", 158, 10, 10, 13,
+                     &g_settings.cardBgA, &g_settings.cardBgR, &g_settings.cardBgG, &g_settings.cardBgB);
+    ReadColorSetting(L"media_controls.cardBorderColor", L"Media Controls", L"Card Border Color", 0, 255, 255, 255,
+                     &g_settings.cardBorderA, &g_settings.cardBorderR, &g_settings.cardBorderG, &g_settings.cardBorderB);
+    g_settings.cardBorderSize = std::clamp(Wh_GetIntSetting(L"media_controls.cardBorderSize"), 0, 20);
+    g_settings.cardRadius = std::clamp(Wh_GetIntSetting(L"media_controls.cardCornerRadius"), 0, 64);
+    g_settings.cardArtSize = std::clamp(Wh_GetIntSetting(L"media_controls.cardArtSize"), 0, 600);
+    {
+        PCWSTR acc = Wh_GetStringSetting(L"media_controls.cardAccent");
+        g_settings.cardAccentSource = !acc ? 0 : wcscmp(acc, L"custom") == 0 ? 1 : wcscmp(acc, L"album") == 0 ? 2
+                                    : wcscmp(acc, L"windows") == 0 ? 3 : 0;
+        Wh_FreeStringSetting(acc);
+    }
+    ReadColorSetting(L"media_controls.cardAccentColor", L"Media Controls", L"Card Accent Color", 255, 255, 255, 255,
+                     &g_settings.cardAccentA, &g_settings.cardAccentR, &g_settings.cardAccentG, &g_settings.cardAccentB);
+""")
+rep("""        - card: Card (art, seek, output, volume)
+""", """        - card: Card (art, seek, output, volume)
+    - cardBackground: '#9E0A0A0D'
+      $name: Card Background
+      $description: 'Card only. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b). Kept just above fully transparent at the least, so the card always takes clicks'
+    - cardBorderColor: '#00FFFFFF'
+      $name: Card Border Color
+      $description: 'Card only. Same formats as Card Background'
+    - cardBorderSize: 0
+      $name: Card Border Size
+      $description: Card only. Pixels, drawn inward from the edge
+    - cardCornerRadius: 12
+      $name: Card Corner Radius
+      $description: Card only. Pixels. The album art's corners follow it
+    - cardArtSize: 0
+      $name: Card Art Size
+      $description: Card only. Width of the album art in pixels, which sets the card's width. 0 sizes it from Icon Size and Icon Spacing
+    - cardAccent: icon
+      $name: Card Accent
+      $description: Card only. Colour of the seek and volume fills and their knobs
+      $options:
+        - icon: Icon Color
+        - custom: Card Accent Color
+        - album: Album art
+        - windows: Windows accent
+    - cardAccentColor: '#FFFFFFFF'
+      $name: Card Accent Color
+      $description: 'Card only, with Card Accent = Card Accent Color. Same formats as Card Background'
+""")
+
+# ================================================================ FX: Glow and Bloom (2.1)
+after("    int reflection = 0;  // %, of Bar Max Size\n",
+      "    int fxGlow = 0, fxGlowRadius = 6, fxBloom = 0, fxBloomRadius = 16;  // FX (2.1)\n")
+rep("""    g_settings.reflection = std::clamp(Wh_GetIntSetting(L"appearance.reflection"), 0, 100);""",
+    """    g_settings.reflection = std::clamp(Wh_GetIntSetting(L"appearance.reflection"), 0, 100);
+    g_settings.fxGlow = std::clamp(Wh_GetIntSetting(L"appearance.fxGlow"), 0, 100);
+    g_settings.fxGlowRadius = std::clamp(Wh_GetIntSetting(L"appearance.fxGlowRadius"), 1, 32);
+    g_settings.fxBloom = std::clamp(Wh_GetIntSetting(L"appearance.fxBloom"), 0, 100);
+    g_settings.fxBloomRadius = std::clamp(Wh_GetIntSetting(L"appearance.fxBloomRadius"), 4, 64);""")
+rep("""      $description: 0-100. Mirrors the bars onto a floor beneath them, fading out over this percentage of Bar Max Size. Horizontal bars anchored to the bottom only, with the bar shapes, LED Meter, Line Spectrum and Particles. Both renderers (Direct2D draws it on the CPU, so it costs a little more there)
+""", """      $description: 0-100. Mirrors the bars onto a floor beneath them, fading out over this percentage of Bar Max Size. Horizontal bars anchored to the bottom only, with the bar shapes, LED Meter, Line Spectrum and Particles. Both renderers (Direct2D draws it on the CPU, so it costs a little more there)
+    - fxGlow: 0
+      $name: Glow
+      $description: 0-100. A soft halo around each bar, dot, line and spark, worked out in the same shader pass that draws them, so it costs next to nothing. Direct3D 11 renderer only
+    - fxGlowRadius: 6
+      $name: Glow Radius
+      $description: 1-32 pixels. How far the halo reaches
+    - fxBloom: 0
+      $name: Bloom
+      $description: 0-100. Light bleeding out of the whole picture, like a camera lens, from a blurred copy at a quarter of the size added back on top. A little GPU work, and only on frames that change. Direct3D 11 renderer only
+    - fxBloomRadius: 16
+      $name: Bloom Radius
+      $description: 4-64 pixels. How far the light spreads
+""")
+
+# ================================================================ Style Editor (2.1)
+rep("-luuid -luser32 -ladvapi32", "-luuid -luser32 -ladvapi32 -lcomctl32 -lcomdlg32")
+after("#include <windowsx.h>\n", "#include <commctrl.h>\n#include <commdlg.h>\n")
+before("LRESULT CALLBACK MessageWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {", read("p3_editor.cpp") + "\n")
+before("    if (g_messageWnd) SendMessage(g_messageWnd, WM_APP_CLEANUP, 0, 0);\n    if (g_mediaWnd)",
+       "    if (g_styleEditorWnd) SendMessage(g_styleEditorWnd, WM_CLOSE, 0, 0);\n")
+after("    UnregisterMediaWindowClass();\n", "    UnregisterStyleEditorClass();\n")
+
+# ================================================================ README: 2.0 additions
+rep("media controls pinned to the panel.\n",
+    "media controls pinned to the panel.\n\n"
+    "**Seven new styles.** LED Meter, Line Spectrum, Polar Bloom, Spectrogram, VU Needles (real IEC VU ballistics), Stereo Field and Particles, "
+    "all in the Shape list and the right-click menu, plus **Reflection**, a fading mirror under the bars.\n\n"
+    "**Glow and Bloom.** A soft halo around every bar, worked out in the same shader pass that draws it, and a lens-style bloom from a quarter-size blur "
+    "that only runs on frames that change. Direct3D 11 renderer.\n\n"
+    "**A Media Card.** Media Controls > Layout = Card: album art with previous / play / next on hover, a seek bar, one-click output switching and a volume slider. "
+    "Theme its background, border, corner radius, art size and accent (icon colour, custom, album art or your Windows accent).\n\n"
+    "**My Styles.** Right-click > My Styles > Style Editor: mix a base style, colours, bar sizes, reflection, glow and bloom while the visualizer previews it live, "
+    "save it under a name, and pick it from the menu any time.\n\n"
+    "**Finer looks.** Outline and Shadow around every bar; bar modifiers Hollow, Dashed, Tilt, Afterimage (a slowly falling trail) and Mirror Gap; "
+    "scale numbers on Spectrogram and VU Needles; album colours that ease in; any Unicode character in Terminal. Reflection now works on both renderers.\n\n"
+    "**Exact sizes.** Bar width, gap, height, padding, borders, radii, fonts and offsets take decimals (turn Pixel Snap off to keep the fractions).\n\n"
+    "**Placement.** Drag snaps to the screen's edges and centre, the taskbar, the tray and the Start button (hold Shift to place freely). "
+    "Position > Dock To App keeps the visualizer beside an app's window as it moves, and Split Into Two Pieces cuts it in two, "
+    "e.g. either side of the taskbar's centred icons, at almost no cost.\n\n"
+    "**Media.** Click to Seek on the progress bar (off by default, with an app list), custom icons on the Media Card, and Media Controls > Stacking "
+    "(always on top, or a normal window apps can cover).\n")
+
+# ================================================================ Input hooks yield to covering apps (2.1)
+# A drag used to start whenever the combo was pressed inside the visualizer's
+# rectangle, even with a game on top, and then swallowed every mouse move
+# until release. It now needs the desktop itself under the cursor, like the
+# right-click menu, and the visualizer to be showing.
+rep("""            if (wParam == downMsg && DragModifierHeld() && PointInVisualizerBounds(info->pt)) {""",
+    """            if (wParam == downMsg && DragModifierHeld() && PointInVisualizerBounds(info->pt) &&
+                !g_fullscreenPaused.load(std::memory_order_relaxed) &&
+                !g_vizSceneHidden.load(std::memory_order_relaxed) && VizDesktopUnderPoint(info->pt)) {""")
+# The move keys go to whatever has focus while a fullscreen or covering app
+# has the visualizer hidden.
+rep("""        if ((isDown || isUp) && ModKeysHeld(g_settings.keyMoveModifier)) {""",
+    """        if ((isDown || isUp) && !g_fullscreenPaused.load(std::memory_order_relaxed) &&
+            ModKeysHeld(g_settings.keyMoveModifier)) {""")
+
+# ================================================================ Reflection on Direct2D (2.1)
+rep("""        if (VizDrawStyleD2D(blockX, blockY, totalWidth, totalHeight, barCount, barW, barGap, maxSize, idleSize,
+                            horizontal, c1, cGrad1, c2, rainbowBase)) {""",
+    """        const bool reflD2D = VizFxD2DBegin(useFadeLayer);
+        if (VizDrawStyleD2D(blockX, blockY, totalWidth, totalHeight, barCount, barW, barGap, maxSize, idleSize,
+                            horizontal, c1, cGrad1, c2, rainbowBase)) {""")
+rep("""        }
+
+        {
+            VizTextFrame tf;
+            VizBuildTextFrame(tf);
+            VizDrawTextOverlays(tf, layout, smooth);""",
+    """        }
+        if (reflD2D) VizFxD2DEnd(blockY + maxSize, VizReflectionDepth(maxSize));
+
+        {
+            VizTextFrame tf;
+            VizBuildTextFrame(tf);
+            VizDrawTextOverlays(tf, layout, smooth);""")
+
+# ================================================================ FX: Outline and Shadow (2.1)
+after("    int fxGlow = 0, fxGlowRadius = 6, fxBloom = 0, fxBloomRadius = 16;  // FX (2.1)\n",
+      "    float fxOutlineWidth = 0.f;  // px\n"
+      "    BYTE fxOutlineA = 0xB0, fxOutlineR = 255, fxOutlineG = 255, fxOutlineB = 255;\n"
+      "    int fxShadow = 0;  // %\n"
+      "    BYTE fxShadowR = 0, fxShadowG = 0, fxShadowB = 0;\n"
+      "    float fxShadowX = 2.f, fxShadowY = 3.f, fxShadowSoft = 4.f;  // px\n")
+rep("""    g_settings.fxBloomRadius = std::clamp(Wh_GetIntSetting(L"appearance.fxBloomRadius"), 4, 64);""",
+    """    g_settings.fxBloomRadius = std::clamp(Wh_GetIntSetting(L"appearance.fxBloomRadius"), 4, 64);
+    g_settings.fxOutlineWidth = ReadNumberSetting(L"appearance.fxOutlineWidth", L"Appearance", L"Outline Width", 0.f, 0.f, 16.f);
+    {
+        BYTE dummy = 0;
+        ReadColorSetting(L"appearance.fxOutlineColor", L"Appearance", L"Outline Color", 0xB0, 255, 255, 255,
+                         &g_settings.fxOutlineA, &g_settings.fxOutlineR, &g_settings.fxOutlineG, &g_settings.fxOutlineB);
+        ReadColorSetting(L"appearance.fxShadowColor", L"Appearance", L"Shadow Color", 255, 0, 0, 0,
+                         &dummy, &g_settings.fxShadowR, &g_settings.fxShadowG, &g_settings.fxShadowB);
+    }
+    g_settings.fxShadow = std::clamp(Wh_GetIntSetting(L"appearance.fxShadow"), 0, 100);
+    g_settings.fxShadowX = ReadNumberSetting(L"appearance.fxShadowX", L"Appearance", L"Shadow Offset X", 2.f, -32.f, 32.f);
+    g_settings.fxShadowY = ReadNumberSetting(L"appearance.fxShadowY", L"Appearance", L"Shadow Offset Y", 3.f, -32.f, 32.f);
+    g_settings.fxShadowSoft = ReadNumberSetting(L"appearance.fxShadowSoftness", L"Appearance", L"Shadow Softness", 4.f, 0.f, 32.f);""")
+rep("""    - fxBloomRadius: 16
+      $name: Bloom Radius
+      $description: 4-64 pixels. How far the light spreads
+""", """    - fxBloomRadius: 16
+      $name: Bloom Radius
+      $description: 4-64 pixels. How far the light spreads
+    - fxOutlineWidth: '0'
+      $name: Outline Width
+      $description: 0-16 pixels, decimals allowed (0.5, 1.25). A line just inside each bar's edge, so bars keep their size. 0 = off. Direct3D 11 renderer only
+    - fxOutlineColor: '#B0FFFFFF'
+      $name: Outline Color
+      $description: '#AARRGGBB or #RRGGBB. The outline fades with the bar it belongs to'
+    - fxShadow: 0
+      $name: Shadow
+      $description: 0-100. A drop shadow behind each bar, dot and line, worked out in the same shader pass as Glow, so it costs next to nothing. Both renderers
+    - fxShadowColor: '#000000'
+      $name: Shadow Color
+      $description: '#RRGGBB'
+    - fxShadowX: '2'
+      $name: Shadow Offset X
+      $description: -32 to 32 pixels, decimals allowed. Positive moves it right
+    - fxShadowY: '3'
+      $name: Shadow Offset Y
+      $description: -32 to 32 pixels, decimals allowed. Positive moves it down
+    - fxShadowSoftness: '4'
+      $name: Shadow Softness
+      $description: 0-32 pixels, decimals allowed. 0 = a hard edge
+""")
+
+# ================================================================ Album colours ease in (2.1)
+_k = src.index("bool ComputeVizLayout(VizLayout* out) {")
+_tail = src[_k:]
+assert _tail.count("g_albumArtColor.load(std::memory_order_relaxed)") == 3, _tail.count("g_albumArtColor.load(std::memory_order_relaxed)")
+assert _tail.count("g_albumArtColorSecondary.load(std::memory_order_relaxed)") == 2
+_tail = _tail.replace("g_albumArtColor.load(std::memory_order_relaxed)", "VizAlbumColorShown(0)")
+_tail = _tail.replace("g_albumArtColorSecondary.load(std::memory_order_relaxed)", "VizAlbumColorShown(1)")
+src = src[:_k] + _tail
+
+# ================================================================ Decimal sizes (2.1)
+# Sizes, gaps, paddings, borders and offsets take decimals ('1.05'), so things
+# can be lined up exactly; the renderers already place everything in
+# fractions of a pixel. The table is in size_keys.py.
+exec(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "size_keys.py")).read())
+import re as _re
+before("float ReadNumberSetting(PCWSTR key, PCWSTR group, PCWSTR name, float def, float lo, float hi) {", """// A size or offset: a number with decimals, given as text ('1.25'; a comma
+// works as the decimal point too). Up to 2.0 these were whole-number
+// settings, and a value saved then is still stored as a number, which reads
+// back here as empty text: that number is used until the setting is saved
+// again.
+float ReadSizeSetting(PCWSTR key, float lo, float hi, float def) {
+    PCWSTR str = Wh_GetStringSetting(key);
+    float v = def;
+    bool ok = false;
+    if (str && *str) {
+        WCHAR buf[64];
+        wcsncpy_s(buf, str, _TRUNCATE);
+        for (WCHAR* c = buf; *c; c++)
+            if (*c == L',') *c = L'.';
+        WCHAR* end = nullptr;
+        double d = wcstod(buf, &end);
+        if (end != buf && std::isfinite(d)) {
+            v = (float)d;
+            ok = true;
+        }
+    }
+    Wh_FreeStringSetting(str);
+    if (!ok) {
+        int n = Wh_GetIntSetting(key);
+        if (n != 0) v = (float)n;
+    }
+    return std::clamp(v, lo, hi);
+}
+
+""")
+_y = src.index("==/WindhawkModSettings==")
+_head, _rest = src[:_y], src[_y:]
+for _f, _k, _d, _lo, _hi in KEYS:
+    src, _n = _re.subn(r'g_settings\.%s\s*=\s*std::(?:clamp|max)\([^;]*?Wh_GetIntSetting\(L"%s"\)[^;]*;' % (_f, _re.escape(_k)),
+                       'g_settings.%s = ReadSizeSetting(L"%s", %s, %s, %s);' % (_f, _k, _lit(_lo), _lit(_hi), _lit(_d)), src)
+    assert _n == 1, _f
+    _last = _k.split(".")[1]
+    _y = src.index("==/WindhawkModSettings==")
+    _head, _rest = src[:_y], src[_y:]
+    _head, _n = _re.subn(r"(?m)^(\s+- %s: )(-?\d+)$" % _last, r"\1'\2'", _head)
+    assert _n == 1, _last
+    # say so in its description (the next $description after the entry)
+    _i = _head.index("- %s: '" % _last)
+    _j = _head.index("$description:", _i)
+    _e = _head.index("\n", _j)
+    _line = _head[_j:_e]
+    _note = (". Decimals allowed; the media controls round to whole pixels" if _k.startswith("media_controls.")
+             else ". Decimals allowed; turn Pixel Snap (Position) off to keep the fractions")
+    _line = _line[:-1] + _note + "'" if _line.endswith("'") else _line + _note
+    _line = _line.replace(".. Decimals", ". Decimals").replace(":. Decimals", ": Decimals")
+    _head = _head[:_j] + _line + _head[_e:]
+    src = _head + _rest
+# The fields themselves.
+for _f, _k, _d, _lo, _hi in KEYS:
+    src, _n = _re.subn(r"(?m)^(    )int (%s = -?\d+;)" % _f, r"\1float \2", src)
+    if _n == 0:  # in a shared declaration: split it out
+        _m = _re.search(r"(?m)^    int ([^;\n]*\b%s = (-?\d+)[^;\n]*);" % _f, src)
+        assert _m, _f
+        _rest_decl = _re.sub(r",?\s*\b%s = -?\d+" % _f, "", _m.group(1)).strip().lstrip(",").strip()
+        _new = ("    int %s;\n" % _rest_decl if _rest_decl else "") + "    float %s = %s;" % (_f, _m.group(2))
+        src = src[:_m.start()] + _new + src[_m.end():]
+# Integer literals next to them in std::max / min / clamp become float ones.
+_fields = "|".join([_f for _f, *_ in KEYS] + ["bgPadding[LRTB]"])
+_ref = r"(?:\(float\))?(?:g_settings|s)\.(?:%s)\b" % _fields
+src = _re.sub(r"std::(max|min)\((-?\d+), (%s)\)" % _ref, r"std::\1(\2.f, \3)", src)
+src = _re.sub(r"std::(max|min)\((%s), (-?\d+)\)" % _ref, r"std::\1(\2, \3.f)", src)
+src = _re.sub(r"std::clamp\((%s), (-?\d+), (-?\d+)\)" % _ref, r"std::clamp(\1, \2.f, \3.f)", src)
+rep("    int bgPaddingL = 24, bgPaddingR = 24, bgPaddingT = 24, bgPaddingB = 24;",
+    "    float bgPaddingL = 24, bgPaddingR = 24, bgPaddingT = 24, bgPaddingB = 24;")
+for _c in "LRTB":
+    rep("        g_settings.bgPadding%s = (int)v[" % _c, "        g_settings.bgPadding%s = v[" % _c)
+
+# Places that held these as whole numbers.
+rep("    int padding, cornerRadius, borderSize;\n};", "    float padding, cornerRadius, borderSize;\n};")
+rep("int g_borderCacheBorderSize = -1;", "float g_borderCacheBorderSize = -1.f;")
+rep("int g_dwriteTextFormatFontSize = -1;", "float g_dwriteTextFormatFontSize = -1.f;")
+rep("    g_dwriteTextFormatFontSize = -1;", "    g_dwriteTextFormatFontSize = -1.f;")
+rep("        int fontSize = std::max(6.f, g_settings.nowPlayingFontSize);", "        float fontSize = std::max(6.f, g_settings.nowPlayingFontSize);")
+rep("""                    int step = fast ? g_settings.keyMoveFastStep : g_settings.keyMoveStep;""",
+    """                    float fstep = fast ? g_settings.keyMoveFastStep : g_settings.keyMoveStep;
+                    int step = std::max(1, (int)lroundf(fstep));  // the strip and the text: whole pixels""")
+rep("float vstep = fine ? g_settings.keyMoveFineStep : (float)step;", "float vstep = fine ? g_settings.keyMoveFineStep : fstep;")
+
+# ================================================================ Click to Seek on the progress bar (2.1)
+after("    bool progressEnabled = false;\n",
+      "    bool progressSeek = false;        // Click to Seek\n"
+      "    bool progressSeekOnlyListed = false;  // the app list includes rather than excludes\n"
+      "    std::vector<std::wstring> progressSeekApps;  // lower case, without .exe\n")
+rep("""        g_settings.progressEnabled = Wh_GetIntSetting(L"progress.enabled") != 0;
+""", """        g_settings.progressEnabled = Wh_GetIntSetting(L"progress.enabled") != 0;
+        g_settings.progressSeek = Wh_GetIntSetting(L"progress.clickToSeek") != 0;
+        str(L"progress.seekAppsMode", [](PCWSTR v) { g_settings.progressSeekOnlyListed = wcscmp(v, L"only") == 0; });
+        str(L"progress.seekApps", [](PCWSTR v) {
+            g_settings.progressSeekApps.clear();
+            std::wstring cur;
+            for (const WCHAR* c = v;; c++) {
+                if (!*c || *c == L',' || *c == L';' || *c == L'\\n') {
+                    while (!cur.empty() && iswspace(cur.back())) cur.pop_back();
+                    size_t b = 0;
+                    while (b < cur.size() && iswspace(cur[b])) b++;
+                    cur = cur.substr(b);
+                    for (auto& ch : cur) ch = (WCHAR)towlower(ch);
+                    if (cur.size() > 4 && cur.compare(cur.size() - 4, 4, L".exe") == 0) cur.resize(cur.size() - 4);
+                    if (!cur.empty()) g_settings.progressSeekApps.push_back(cur);
+                    cur.clear();
+                    if (!*c) break;
+                } else {
+                    cur += *c;
+                }
+            }
+        });
+""")
+rep("""      $description: 'The rest of the bar. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b)'
+  $name: Track Progress""", """      $description: 'The rest of the bar. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b)'
+    - clickToSeek: false
+      $name: Click to Seek
+      $description: Click or drag along the bar to jump in the track. Only where the desktop itself is under the cursor, never through a window, and the drag key still moves the visualizer. Off by default so the bar never takes clicks meant for the desktop
+    - seekAppsMode: except
+      $name: Seek App List
+      $description: How the app list below applies. Apps count while they are running
+      $options:
+        - except: Seek, except while these apps run
+        - only: Seek only while these apps run
+    - seekApps: ''
+      $name: Seek Apps
+      $description: 'Program names, separated by commas, e.g. "League of Legends, obs64, Spotify". ".exe" is optional. Empty = the list does nothing'
+  $name: Track Progress""")
+after("std::atomic<LONG> g_drawRectL{0}, g_drawRectT{0}, g_drawRectR{0}, g_drawRectB{0};\n",
+      "// The progress bar's hit area for Click to Seek, in screen pixels (render thread\n"
+      "// writes, the input hook reads).\n"
+      "std::atomic<LONG> g_seekRectL{0}, g_seekRectT{0}, g_seekRectR{0}, g_seekRectB{0};\n"
+      "std::atomic<bool> g_seekRectValid{false};\n")
+rep("""void VizPublishDrawRect(const VizLayout& layout) {
+    int virtualScreenX = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    int virtualScreenY = GetSystemMetrics(SM_YVIRTUALSCREEN);""", """bool VizProgressRect(const VizLayout& layout, D2D1_RECT_F* out);
+
+void VizPublishDrawRect(const VizLayout& layout) {
+    int virtualScreenX = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    int virtualScreenY = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    {
+        // Click to Seek: the bar, made at least 10 px tall to hit.
+        D2D1_RECT_F pr;
+        bool ok = g_settings.progressEnabled && g_settings.progressSeek && VizProgressRect(layout, &pr);
+        if (ok) {
+            float cy = (pr.top + pr.bottom) * 0.5f, hh = std::max((pr.bottom - pr.top) * 0.5f, 5.f * g_dpiScale);
+            g_seekRectL.store((LONG)lroundf(layout.originX + pr.left) + virtualScreenX, std::memory_order_relaxed);
+            g_seekRectR.store((LONG)lroundf(layout.originX + pr.right) + virtualScreenX, std::memory_order_relaxed);
+            g_seekRectT.store((LONG)lroundf(layout.originY + cy - hh) + virtualScreenY, std::memory_order_relaxed);
+            g_seekRectB.store((LONG)lroundf(layout.originY + cy + hh) + virtualScreenY, std::memory_order_relaxed);
+        }
+        g_seekRectValid.store(ok, std::memory_order_relaxed);
+    }""")
+before("LRESULT CALLBACK DragMouseHookProc(int nCode, WPARAM wParam, LPARAM lParam) {", r"""// ---- Click to Seek (2.1) -----------------------------------------------------------------
+// A left press on the progress bar jumps there; dragging and releasing jumps
+// again where it's let go. The cursor moves freely meanwhile (moves are
+// never swallowed). The app list is checked against running processes at
+// most every 3 s, and only on a press that lands on the bar.
+bool VizSeekAppsAllow() {
+    const auto& apps = g_settings.progressSeekApps;
+    if (apps.empty()) return true;
+    static ULONGLONG s_tick = 0;
+    static bool s_anyRunning = false;
+    ULONGLONG now = GetTickCount64();
+    if (s_tick == 0 || now - s_tick > 3000) {
+        s_tick = now;
+        s_anyRunning = false;
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snap != INVALID_HANDLE_VALUE) {
+            PROCESSENTRY32W pe = {sizeof(pe)};
+            for (BOOL more = Process32FirstW(snap, &pe); more && !s_anyRunning; more = Process32NextW(snap, &pe)) {
+                std::wstring n = pe.szExeFile;
+                for (auto& ch : n) ch = (WCHAR)towlower(ch);
+                if (n.size() > 4 && n.compare(n.size() - 4, 4, L".exe") == 0) n.resize(n.size() - 4);
+                for (const auto& a : apps)
+                    if (n == a) s_anyRunning = true;
+            }
+            CloseHandle(snap);
+        }
+    }
+    return g_settings.progressSeekOnlyListed ? s_anyRunning : !s_anyRunning;
+}
+
+void VizSeekAtX(LONG x) {
+    LONG l = g_seekRectL.load(std::memory_order_relaxed), r = g_seekRectR.load(std::memory_order_relaxed);
+    if (r > l) CardSeek((float)(x - l) / (float)(r - l));
+}
+
+bool VizSeekHook(WPARAM wParam, const MSLLHOOKSTRUCT* info) {
+    static bool s_seeking = false;
+    if (s_seeking) {
+        if (wParam == WM_LBUTTONUP) {
+            s_seeking = false;
+            VizSeekAtX(info->pt.x);
+            return true;
+        }
+        return false;
+    }
+    if (wParam != WM_LBUTTONDOWN || !g_settings.progressSeek || !g_seekRectValid.load(std::memory_order_relaxed))
+        return false;
+    if (g_settings.dragEnabled && DragButtonDownMsg() == WM_LBUTTONDOWN && DragModifierHeld()) return false;
+    if (g_fullscreenPaused.load(std::memory_order_relaxed) || g_vizSceneHidden.load(std::memory_order_relaxed))
+        return false;
+    POINT pt = info->pt;
+    if (pt.x < g_seekRectL.load(std::memory_order_relaxed) || pt.x >= g_seekRectR.load(std::memory_order_relaxed) ||
+        pt.y < g_seekRectT.load(std::memory_order_relaxed) || pt.y >= g_seekRectB.load(std::memory_order_relaxed))
+        return false;
+    if (!g_tlValid.load(std::memory_order_relaxed) || !VizDesktopUnderPoint(pt) || !VizSeekAppsAllow()) return false;
+    s_seeking = true;
+    VizSeekAtX(pt.x);
+    return true;
+}
+
+""")
+rep("""    if (nCode == HC_ACTION && !g_unloading.load(std::memory_order_relaxed) &&
+        VizMenuHook(wParam, (const MSLLHOOKSTRUCT*)lParam))
+        return 1;""", """    if (nCode == HC_ACTION && !g_unloading.load(std::memory_order_relaxed) &&
+        VizMenuHook(wParam, (const MSLLHOOKSTRUCT*)lParam))
+        return 1;
+    if (nCode == HC_ACTION && !g_unloading.load(std::memory_order_relaxed) &&
+        VizSeekHook(wParam, (const MSLLHOOKSTRUCT*)lParam))
+        return 1;""")
+after("#include <commdlg.h>\n", "#include <tlhelp32.h>\n")
+
+# ================================================================ Terminal: any character (2.1)
+# Glyph codes stay one byte per cell: 33-126 are themselves, and any other
+# character (Unicode, symbols, emoji, Nerd Font icons) gets a code from 128 up
+# while the settings load. The atlas bakes those after ASCII, at slot code - 32.
+after("uint32_t g_termGridSerial = 0;\n", """// Custom Terminal glyphs: code 128 + k draws g_termCustomGlyphs[k].
+std::vector<std::wstring> g_termCustomGlyphs;
+
+// The code for one character (a code point, plus a following emoji
+// presentation selector), adding it to the custom glyphs when it isn't ASCII.
+// 0 when there is no room left.
+wchar_t VizTermCodeFor(const std::wstring& glyph) {
+    if (glyph.size() == 1 && glyph[0] >= 32 && glyph[0] < 127) return glyph[0];
+    for (size_t k = 0; k < g_termCustomGlyphs.size(); k++)
+        if (g_termCustomGlyphs[k] == glyph) return (wchar_t)(128 + k);
+    if (g_termCustomGlyphs.size() >= 128) return 0;
+    g_termCustomGlyphs.push_back(glyph);
+    return (wchar_t)(128 + g_termCustomGlyphs.size() - 1);
+}
+
+// Splits text into characters as VizTermCodeFor takes them.
+std::vector<std::wstring> VizTermSplitGlyphs(const std::wstring& s) {
+    std::vector<std::wstring> out;
+    for (size_t i = 0; i < s.size();) {
+        size_t n = (IS_HIGH_SURROGATE(s[i]) && i + 1 < s.size() && IS_LOW_SURROGATE(s[i + 1])) ? 2 : 1;
+        if (i + n < s.size() && s[i + n] == 0xFE0F) n++;
+        if (s[i] >= 32 || n > 1) out.push_back(s.substr(i, n));
+        i += n;
+    }
+    return out;
+}
+
+std::wstring VizTermGlyphText(uint32_t code) {
+    if (code >= 128 && code - 128 < g_termCustomGlyphs.size()) return g_termCustomGlyphs[code - 128];
+    return std::wstring(1, (wchar_t)code);
+}
+""")
+rep("""    uint32_t ch = (c >= 32 && c < 127) ? (uint32_t)c : (uint32_t)'?';""",
+    """    uint32_t ch = ((c >= 32 && c < 127) || (c >= 128 && c < 256)) ? (uint32_t)c : (uint32_t)'?';""")
+rep("""            if ((cell & 127u) <= 32u) {""", """            if ((cell & 255u) <= 32u) {""")
+rep("""                bool blank = (k & 127u) <= 32u;""", """                bool blank = (k & 255u) <= 32u;""")
+rep("""                run.push_back(blank ? L' ' : (wchar_t)(k & 127u));""",
+    """                if (blank) run.push_back(L' ');
+                else run += VizTermGlyphText(k & 255u);""")
+rep("""                k += ((cell & 127u) > 32u) ? 1u : 0u;""", """                k += ((cell & 255u) > 32u) ? 1u : 0u;""")
+rep("constexpr UINT kAtlasCols = 16, kAtlasRows = 6;", "constexpr UINT kAtlasCols = 16, kAtlasRows = 14;  // ASCII, then 128 custom glyphs")
+rep("""    Mix(key, g_settings.textPixel ? 1u : 0u);
+    if (g.glyphSRV && key == g.glyphKey) return true;""", """    Mix(key, g_settings.textPixel ? 1u : 0u);
+    for (const auto& gl : g_termCustomGlyphs)
+        for (wchar_t c : gl) Mix(key, 0x10000u + (uint64_t)c);
+    if (g.glyphSRV && key == g.glyphKey) return true;""")
+rep("""        dc->DrawText(&c, 1, g_termFormat.Get(), D2D1::RectF(x, y, x + g_termCellW, y + g_termCellH), white.Get(),
+                     D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    }""", """        dc->DrawText(&c, 1, g_termFormat.Get(), D2D1::RectF(x, y, x + g_termCellW, y + g_termCellH), white.Get(),
+                     D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    }
+    for (UINT k = 0; k < (UINT)g_termCustomGlyphs.size() && k < 128; k++) {
+        UINT i = 96 + k;  // code 128 + k
+        UINT col = i % kAtlasCols, row = i / kAtlasCols;
+        float x = (float)(col * (UINT)g_termCellW), y = (float)(row * (UINT)g_termCellH);
+        const std::wstring& gl = g_termCustomGlyphs[k];
+        dc->DrawText(gl.c_str(), (UINT32)gl.size(), g_termFormat.Get(),
+                     D2D1::RectF(x, y, x + g_termCellW, y + g_termCellH), white.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    }""")
+rep("""        // One printable ASCII character each; the atlas holds 32-126.
+        auto glyph = [](PCWSTR key, PCWSTR name, wchar_t def) {
+            PCWSTR v = Wh_GetStringSetting(key);
+            wchar_t c = (v && v[0]) ? v[0] : def;
+            if (c < 33 || c > 126) {
+                WCHAR d[2] = {def, 0};
+                ReportSettingIssue(L"Terminal", name, v ? v : L"", L"one printable ASCII character", d);
+                c = def;
+            }
+            Wh_FreeStringSetting(v);
+            return c;
+        };""", """        // Any one character each (2.1): ASCII as itself, anything else as a
+        // custom glyph code. The font has to have it.
+        g_termCustomGlyphs.clear();
+        auto glyph = [](PCWSTR key, PCWSTR name, wchar_t def) {
+            PCWSTR v = Wh_GetStringSetting(key);
+            std::vector<std::wstring> gs = VizTermSplitGlyphs(v ? v : L"");
+            wchar_t c = 0;
+            if (!gs.empty() && gs[0] != L" ") c = VizTermCodeFor(gs[0]);
+            if (!c) {
+                WCHAR d[2] = {def, 0};
+                ReportSettingIssue(L"Terminal", name, v ? v : L"", L"one character", d);
+                c = def;
+            }
+            Wh_FreeStringSetting(v);
+            return c;
+        };""")
+rep("""            std::wstring r;
+            for (const wchar_t* p = v; *p; p++)
+                if (*p >= 32 && *p < 127) r.push_back(*p);
+            g_settings.termRamp = r.size() >= 2 ? r : L" .:-=+*#%@";""", """            std::wstring r;
+            for (const auto& gl : VizTermSplitGlyphs(v))
+                if (wchar_t c = VizTermCodeFor(gl)) r.push_back(c);
+            g_settings.termRamp = r.size() >= 2 ? r : L" .:-=+*#%@";""")
+rep("""      $description: The character columns and meters are built from. One printable ASCII character""",
+    """      $description: 'The character columns and meters are built from. Any one character: ASCII, Unicode symbols (█ ▓ ● ◆ ★), box drawing, Nerd Font icons or emoji, as long as the font has it'""")
+rep("""      $description: The peak cap in Columns (with Peak Hold on). One printable ASCII character""",
+    """      $description: The peak cap in Columns (with Peak Hold on). Any one character, as above""")
+rep("""      $description: Characters from quiet to loud for the Waterfall. Printable ASCII""",
+    """      $description: 'Characters from quiet to loud for the Waterfall, any characters, e.g. " ░▒▓█" or " ·•●". Up to 128 different non-ASCII characters across all three settings'""")
+
+# ================================================================ Bar modifiers (2.1)
+after("    float fxShadowX = 2.f, fxShadowY = 3.f, fxShadowSoft = 4.f;  // px\n",
+      "    bool barHollow = false;\n"
+      "    float barHollowWidth = 1.5f, barDash = 0.f, barDashGap = 2.f, barTilt = 0.f;  // px, px, px, degrees\n"
+      "    float barMirrorGap = 0.f;  // px\n"
+      "    int afterimage = 0;  // %\n"
+      "    float afterimageSeconds = 1.2f;\n")
+rep("""    g_settings.fxShadowSoft = ReadNumberSetting(L"appearance.fxShadowSoftness", L"Appearance", L"Shadow Softness", 4.f, 0.f, 32.f);""",
+    """    g_settings.fxShadowSoft = ReadNumberSetting(L"appearance.fxShadowSoftness", L"Appearance", L"Shadow Softness", 4.f, 0.f, 32.f);
+    g_settings.barHollow = Wh_GetIntSetting(L"appearance.barHollow") != 0;
+    g_settings.barHollowWidth = ReadSizeSetting(L"appearance.barHollowWidth", 0.25f, 16.f, 1.5f);
+    g_settings.barDash = ReadSizeSetting(L"appearance.barDash", 0.f, 200.f, 0.f);
+    g_settings.barDashGap = ReadSizeSetting(L"appearance.barDashGap", 0.f, 200.f, 2.f);
+    g_settings.barTilt = ReadSizeSetting(L"appearance.barTilt", -60.f, 60.f, 0.f);
+    g_settings.barMirrorGap = ReadSizeSetting(L"appearance.barMirrorGap", 0.f, 400.f, 0.f);
+    g_settings.afterimage = std::clamp(Wh_GetIntSetting(L"appearance.afterimage"), 0, 100);
+    g_settings.afterimageSeconds = ReadSizeSetting(L"appearance.afterimageLength", 0.1f, 10.f, 1.2f);""")
+rep("""    - fxShadowSoftness: '4'
+      $name: Shadow Softness
+      $description: 0-32 pixels, decimals allowed. 0 = a hard edge
+""", """    - fxShadowSoftness: '4'
+      $name: Shadow Softness
+      $description: 0-32 pixels, decimals allowed. 0 = a hard edge
+    - barHollow: false
+      $name: Hollow Bars
+      $description: Bars as outlines only, the inside left clear. Bar shapes (Stereo, Mountain, Mirror, Wave, Breathe). Direct3D 11 renderer
+    - barHollowWidth: '1.5'
+      $name: Hollow Line Width
+      $description: Pixels, decimals allowed
+    - barDash: '0'
+      $name: Dash Length
+      $description: Pixels, decimals allowed. Cuts the bars into dashes along their length, fixed to the base line so they stay put as a bar grows. 0 = solid. Bar shapes, Direct3D 11 renderer
+    - barDashGap: '2'
+      $name: Dash Gap
+      $description: Pixels between dashes, decimals allowed
+    - barTilt: '0'
+      $name: Tilt
+      $description: -60 to 60 degrees, decimals allowed. Leans every bar from its base line, like italics; peak caps and the Afterimage lean with them. Bar shapes, Direct3D 11 renderer
+    - barMirrorGap: '0'
+      $name: Mirror Gap
+      $description: Pixels, decimals allowed. With Anchor = Middle the bars already grow both ways from a centre line; this pulls the two halves apart, like a waveform with a spine. Bar shapes, Direct3D 11 renderer
+    - afterimage: 0
+      $name: Afterimage
+      $description: 0-100. A see-through trail behind each bar that jumps up with it and sinks back slowly. With Peak Hold on, the caps sit on the trail. Bar shapes, Direct3D 11 renderer; keeps the analysis on the CPU (Hybrid)
+    - afterimageLength: '1.2'
+      $name: Afterimage Length
+      $description: Seconds for a full-height trail to sink away, decimals allowed
+""")
+# The trail steps with the bars, on both engine paths.
+before("void VizComputeBarFrame() {", "void VizStepAfterimage(int barCount);  // Afterimage (2.1), with the styles\n\n")
+rep("""                g_peakState[i] = ttdsp::PeakHold();
+                g_vizPeakHold[i] = 0.f;
+            }
+        }
+        return;""", """                g_peakState[i] = ttdsp::PeakHold();
+                g_vizPeakHold[i] = 0.f;
+            }
+        }
+        VizStepAfterimage(barCount);
+        return;""")
+rep("""        } else {
+            g_vizPeakHold[i] = 0.f;
+        }
+    }
+}""", """        } else {
+            g_vizPeakHold[i] = 0.f;
+        }
+    }
+    VizStepAfterimage(barCount);
+}""")
+
+# ================================================================ Drag snapping (2.1)
+after("    bool dragEnabled = false;\n",
+      "    bool dragSnap = true;             // snap to screen and taskbar lines while dragging\n"
+      "    float dragSnapDistance = 8.f;     // logical px\n")
+after("""    g_settings.dragEnabled = Wh_GetIntSetting(L"interaction.dragEnabled") != 0;
+""", """    g_settings.dragSnap = Wh_GetIntSetting(L"interaction.dragSnap") != 0;
+    g_settings.dragSnapDistance = std::clamp((float)Wh_GetIntSetting(L"interaction.dragSnapDistance"), 1.f, 64.f);
+""")
+before("""    - dragModifier: ctrl
+      $name: Drag Modifier Key""", """    - dragSnap: true
+      $name: Snap While Dragging
+      $description: While dragging, the visualizer's edges and centre catch on the screen's edges and centre, the taskbar's edge, the tray and the Start button. Hold Shift (Alt when Shift is the drag key) to place it freely
+    - dragSnapDistance: 8
+      $name: Snap Distance
+      $description: How close, in pixels, an edge has to come before it snaps
+""")
+before("void UpdateDrag(POINT pt) {\n", r"""// ---- Drag snapping ---------------------------------------------------------
+// Lines the box can catch on while it is dragged, in screen pixels. Gathered once
+// when a drag starts (the taskbar does not move mid-drag), then each move only
+// compares a handful of numbers.
+std::vector<float> g_snapLinesX, g_snapLinesY;
+
+void VizSnapAddWindow(HWND w, bool xOnly) {
+    RECT r;
+    if (!w || !IsWindowVisible(w) || !GetWindowRect(w, &r) || r.right <= r.left || r.bottom <= r.top) return;
+    g_snapLinesX.push_back((float)r.left);
+    g_snapLinesX.push_back((float)r.right);
+    g_snapLinesX.push_back((r.left + r.right) * 0.5f);
+    if (xOnly) return;
+    g_snapLinesY.push_back((float)r.top);
+    g_snapLinesY.push_back((float)r.bottom);
+}
+
+void VizCollectSnapLines() {
+    g_snapLinesX.clear();
+    g_snapLinesY.clear();
+    if (!g_settings.dragSnap) return;
+    HMONITOR monitor = g_cachedMonitor;
+    if (!monitor) monitor = MonitorFromPoint({0, 0}, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi{.cbSize = sizeof(mi)};
+    if (!GetMonitorInfo(monitor, &mi)) return;
+    const RECT& wk = mi.rcWork;
+    g_snapLinesX = {(float)wk.left, (float)wk.right, (wk.left + wk.right) * 0.5f};
+    g_snapLinesY = {(float)wk.top, (float)wk.bottom, (wk.top + wk.bottom) * 0.5f};
+
+    // This monitor's taskbar: its edge, then the tray and the Start button along it.
+    for (PCWSTR cls : {L"Shell_TrayWnd", L"Shell_SecondaryTrayWnd"}) {
+        for (HWND tb = FindWindowEx(nullptr, nullptr, cls, nullptr); tb;
+             tb = FindWindowEx(nullptr, tb, cls, nullptr)) {
+            if (MonitorFromWindow(tb, MONITOR_DEFAULTTONULL) != monitor) continue;
+            RECT r;
+            if (GetWindowRect(tb, &r)) {
+                g_snapLinesY.push_back((float)r.top);
+                g_snapLinesY.push_back((float)r.bottom);
+            }
+            VizSnapAddWindow(FindWindowEx(tb, nullptr, L"TrayNotifyWnd", nullptr), true);
+            VizSnapAddWindow(FindWindowEx(tb, nullptr, L"Start", nullptr), true);
+        }
+    }
+}
+
+bool VizSnapBypassHeld() {
+    int key = g_settings.dragModifier == VizDragModifier::Shift ? VK_MENU : VK_SHIFT;
+    return (GetAsyncKeyState(key) & 0x8000) != 0;
+}
+
+// Moves a box [lo, lo+size] so its nearest edge or centre sits on a line within
+// reach. Returns the adjusted lo.
+float VizSnapAxis(float lo, float size, const std::vector<float>& lines, float reach) {
+    float best = reach + 1.f, shift = 0.f;
+    for (float line : lines) {
+        for (float a : {lo, lo + size * 0.5f, lo + size}) {
+            float d = line - a;
+            if (std::abs(d) < best) { best = std::abs(d); shift = d; }
+        }
+    }
+    return best <= reach ? lo + shift : lo;
+}
+
+void VizApplyDragSnap(float* h, float* v, float travelX, float travelY) {
+    if (!g_settings.dragSnap || g_snapLinesX.empty() || VizSnapBypassHeld()) return;
+    HMONITOR monitor = g_cachedMonitor;
+    if (!monitor) monitor = MonitorFromPoint({0, 0}, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi{.cbSize = sizeof(mi)};
+    if (!GetMonitorInfo(monitor, &mi)) return;
+    const RECT& wk = mi.rcWork;
+    float reach = g_settings.dragSnapDistance * g_dpiScale;
+    if (travelX > 1.0f) {
+        float boxW = (float)(wk.right - wk.left) - travelX;
+        float lo = VizSnapAxis(wk.left + travelX * *h / 100.0f, boxW, g_snapLinesX, reach);
+        *h = std::clamp((lo - wk.left) / travelX * 100.0f, 0.0f, 100.0f);
+    }
+    if (travelY > 1.0f) {
+        float boxH = (float)(wk.bottom - wk.top) - travelY;
+        float lo = VizSnapAxis(wk.top + travelY * *v / 100.0f, boxH, g_snapLinesY, reach);
+        *v = std::clamp((lo - wk.top) / travelY * 100.0f, 0.0f, 100.0f);
+    }
+}
+
+""")
+before("void BeginDrag(POINT pt) {\n", "void VizCollectSnapLines();\n\n")
+rep("""    g_dragRenderPauseActive.store(true, std::memory_order_relaxed);
+
+    Wh_Log(L"[Drag] BEGIN""", """    g_dragRenderPauseActive.store(true, std::memory_order_relaxed);
+    VizCollectSnapLines();
+
+    Wh_Log(L"[Drag] BEGIN""")
+rep("""    g_dragOverrideH.store(std::clamp(g_dragStartH + dxPercent, 0.0f, 100.0f), std::memory_order_relaxed);
+    g_dragOverrideV.store(std::clamp(g_dragStartV + dyPercent, 0.0f, 100.0f), std::memory_order_relaxed);
+    g_dragOverrideActive.store(true, std::memory_order_relaxed);
+""", """    float newH = std::clamp(g_dragStartH + dxPercent, 0.0f, 100.0f);
+    float newV = std::clamp(g_dragStartV + dyPercent, 0.0f, 100.0f);
+    VizApplyDragSnap(&newH, &newV, travelX, travelY);
+    g_dragOverrideH.store(newH, std::memory_order_relaxed);
+    g_dragOverrideV.store(newV, std::memory_order_relaxed);
+    g_dragOverrideActive.store(true, std::memory_order_relaxed);
+""")
+
+# ================================================================ Dock to an app window (2.1)
+after("std::atomic<LONG> g_drawRectL{0}, g_drawRectT{0}, g_drawRectR{0}, g_drawRectB{0};\n",
+      "// Dock to an app window: the window's visible frame in screen pixels, written\n"
+      "// on the UI thread and read by layout on the render thread.\n"
+      "std::atomic<bool> g_dockActive{false};\n"
+      "std::atomic<LONG> g_dockL{0}, g_dockT{0}, g_dockR{0}, g_dockB{0};\n"
+      "void VizDockPlace(float boxW, float boxH, float* x, float* y);\n")
+after("    bool dragEnabled = false;\n",
+      "    std::wstring dockApp;             // lower case, without .exe; empty = not docked\n"
+      "    int dockSide = 0;                 // 0 below, 1 above, 2 left, 3 right\n"
+      "    int dockAlign = 1;                // 0 start, 1 centre, 2 end\n"
+      "    float dockGap = 0.f, dockShift = 0.f;  // logical px\n")
+after("""    g_settings.dragEnabled = Wh_GetIntSetting(L"interaction.dragEnabled") != 0;
+""", """    {
+        PCWSTR app = Wh_GetStringSetting(L"position.dockApp");
+        std::wstring a = app ? app : L"";
+        Wh_FreeStringSetting(app);
+        while (!a.empty() && iswspace(a.back())) a.pop_back();
+        size_t b = 0;
+        while (b < a.size() && iswspace(a[b])) b++;
+        a = a.substr(b);
+        for (auto& ch : a) ch = (WCHAR)towlower(ch);
+        if (a.size() > 4 && a.compare(a.size() - 4, 4, L".exe") == 0) a.resize(a.size() - 4);
+        g_settings.dockApp = a;
+        PCWSTR side = Wh_GetStringSetting(L"position.dockSide");
+        g_settings.dockSide = !wcscmp(side, L"above") ? 1 : !wcscmp(side, L"left") ? 2 : !wcscmp(side, L"right") ? 3 : 0;
+        Wh_FreeStringSetting(side);
+        PCWSTR align = Wh_GetStringSetting(L"position.dockAlign");
+        g_settings.dockAlign = !wcscmp(align, L"start") ? 0 : !wcscmp(align, L"end") ? 2 : 1;
+        Wh_FreeStringSetting(align);
+        g_settings.dockGap = std::clamp((float)Wh_GetIntSetting(L"position.dockGap"), -400.f, 400.f);
+        g_settings.dockShift = std::clamp((float)Wh_GetIntSetting(L"position.dockShift"), -4000.f, 4000.f);
+    }
+""")
+rep("""Bar heights move smoothly either way
+  $name: Position""", """Bar heights move smoothly either way
+    - dockApp: ''
+      $name: Dock To App
+      $description: 'Program name, e.g. "Spotify" or "obs64" (".exe" optional). The visualizer then sits beside that app''s main window and follows it as it moves; the Now Playing text and readout come along. While the app is closed or minimized it goes back to its usual place. It stays on the desktop layer, so it shows beside the window, not on top of it. Empty = not docked'
+    - dockSide: below
+      $name: Dock Side
+      $options:
+        - below: Below the window
+        - above: Above the window
+        - left: Left of the window
+        - right: Right of the window
+    - dockAlign: center
+      $name: Dock Alignment
+      $description: Where along that side it sits
+      $options:
+        - start: Start (left or top)
+        - center: Centre
+        - end: End (right or bottom)
+    - dockGap: 0
+      $name: Dock Gap
+      $description: Pixels between the window and the visualizer. Negative overlaps
+    - dockShift: 0
+      $name: Dock Shift
+      $description: Pixels to slide it along the side from the alignment above
+  $name: Position""")
+after("std::vector<float> g_snapLinesX, g_snapLinesY;\n", r"""
+// ---- Dock to an app window -------------------------------------------------
+HWND g_dockTarget = nullptr;
+HWINEVENTHOOK g_dockHook = nullptr;
+std::wstring g_dockFor;  // the app name the current target was found for
+
+void VizDockRedraw() {
+    if (g_overlayWnd) PostMessage(g_overlayWnd, WM_APP_FORCE_REDRAW, 0, 0);
+}
+
+// Reads the target's frame; false while it is minimized, hidden or gone.
+bool VizDockReadRect() {
+    HWND w = g_dockTarget;
+    RECT r{};
+    bool ok = w && IsWindow(w) && IsWindowVisible(w) && !IsIconic(w);
+    if (ok && FAILED(DwmGetWindowAttribute(w, DWMWA_EXTENDED_FRAME_BOUNDS, &r, sizeof(r))))
+        ok = GetWindowRect(w, &r) != 0;
+    ok = ok && r.right > r.left && r.bottom > r.top;
+    bool was = g_dockActive.load(std::memory_order_relaxed);
+    if (ok) {
+        bool moved = r.left != g_dockL.load(std::memory_order_relaxed) || r.top != g_dockT.load(std::memory_order_relaxed) ||
+                     r.right != g_dockR.load(std::memory_order_relaxed) || r.bottom != g_dockB.load(std::memory_order_relaxed);
+        g_dockL.store(r.left, std::memory_order_relaxed);
+        g_dockT.store(r.top, std::memory_order_relaxed);
+        g_dockR.store(r.right, std::memory_order_relaxed);
+        g_dockB.store(r.bottom, std::memory_order_relaxed);
+        g_dockActive.store(true, std::memory_order_relaxed);
+        if (moved || !was) VizDockRedraw();
+    } else if (was) {
+        g_dockActive.store(false, std::memory_order_relaxed);
+        VizDockRedraw();
+    }
+    return ok;
+}
+
+void CALLBACK VizDockEventProc(HWINEVENTHOOK, DWORD, HWND hwnd, LONG idObject, LONG idChild, DWORD, DWORD) {
+    if (hwnd == g_dockTarget && idObject == OBJID_WINDOW && idChild == CHILDID_SELF) VizDockReadRect();
+}
+
+void VizDockStop() {
+    if (g_dockHook) UnhookWinEvent(g_dockHook);
+    g_dockHook = nullptr;
+    g_dockTarget = nullptr;
+    if (g_dockActive.exchange(false)) VizDockRedraw();
+}
+
+static bool VizProcessNameIs(DWORD pid, const std::wstring& want) {
+    HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!p) return false;
+    WCHAR path[MAX_PATH];
+    DWORD n = MAX_PATH;
+    bool match = false;
+    if (QueryFullProcessImageNameW(p, 0, path, &n)) {
+        std::wstring name = path;
+        size_t slash = name.find_last_of(L"\\/");
+        if (slash != std::wstring::npos) name = name.substr(slash + 1);
+        for (auto& ch : name) ch = (WCHAR)towlower(ch);
+        if (name.size() > 4 && name.compare(name.size() - 4, 4, L".exe") == 0) name.resize(name.size() - 4);
+        match = name == want;
+    }
+    CloseHandle(p);
+    return match;
+}
+
+struct VizDockFind { const std::wstring* want; HWND found; DWORD lastPid; };
+
+BOOL CALLBACK VizDockEnumProc(HWND w, LPARAM lp) {
+    auto* f = (VizDockFind*)lp;
+    if (!IsWindowVisible(w) || GetWindow(w, GW_OWNER) || IsIconic(w)) return TRUE;
+    if (GetWindowLongPtr(w, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) return TRUE;
+    if (GetWindowTextLengthW(w) == 0) return TRUE;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(w, &pid);
+    if (!pid || pid == f->lastPid || pid == GetCurrentProcessId()) return TRUE;
+    f->lastPid = pid;
+    if (!VizProcessNameIs(pid, *f->want)) return TRUE;
+    f->found = w;
+    return FALSE;
+}
+
+// Called on the 1 s watch timer: finds the app's main window when there is none
+// yet (the app may start later), and watches it move through a WinEvent hook
+// scoped to that one process, so following it costs nothing while it sits still.
+void VizDockRefresh() {
+    const std::wstring& want = g_settings.dockApp;
+    if (want != g_dockFor) { VizDockStop(); g_dockFor = want; }
+    if (want.empty()) return;
+    if (g_dockTarget && IsWindow(g_dockTarget)) { VizDockReadRect(); return; }
+    VizDockStop();
+
+    VizDockFind f{&want, nullptr, 0};
+    EnumWindows(VizDockEnumProc, (LPARAM)&f);
+    if (!f.found) return;
+
+    g_dockTarget = f.found;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(f.found, &pid);
+    g_dockHook = SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE, nullptr,
+                                 VizDockEventProc, pid, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    Wh_Log(L"[Dock] following %s (hwnd=%p hook=%p)", want.c_str(), f.found, g_dockHook);
+    VizDockReadRect();
+}
+
+// Where the docked box goes, in screen pixels, for a box of the given size.
+void VizDockPlace(float boxW, float boxH, float* x, float* y) {
+    float l = (float)g_dockL.load(std::memory_order_relaxed), t = (float)g_dockT.load(std::memory_order_relaxed);
+    float r = (float)g_dockR.load(std::memory_order_relaxed), b = (float)g_dockB.load(std::memory_order_relaxed);
+    float gap = g_settings.dockGap * g_dpiScale, shift = g_settings.dockShift * g_dpiScale;
+    int side = g_settings.dockSide, align = g_settings.dockAlign;
+    if (side <= 1) {
+        *x = (align == 0 ? l : align == 2 ? r - boxW : (l + r - boxW) * 0.5f) + shift;
+        *y = side == 0 ? b + gap : t - boxH - gap;
+    } else {
+        *y = (align == 0 ? t : align == 2 ? b - boxH : (t + b - boxH) * 0.5f) + shift;
+        *x = side == 3 ? r + gap : l - boxW - gap;
+    }
+}
+""")
+rep("""    float blockX = waLeft + (workWidth  - totalWidth)  * (hPercent / 100.0f);
+    float blockY = waTop  + (workHeight - totalHeight) * (vPercent / 100.0f);
+""", """    float blockX = waLeft + (workWidth  - totalWidth)  * (hPercent / 100.0f);
+    float blockY = waTop  + (workHeight - totalHeight) * (vPercent / 100.0f);
+    if (!g_settings.dockApp.empty() && g_dockActive.load(std::memory_order_relaxed)) {
+        // Docked: beside the app's window, kept inside the work area like any
+        // other position.
+        float dx, dy;
+        VizDockPlace(totalWidth, totalHeight, &dx, &dy);
+        blockX = std::clamp(dx - vsx, waLeft, std::max(waLeft, waLeft + workWidth - totalWidth));
+        blockY = std::clamp(dy - vsy, waTop, std::max(waTop, waTop + workHeight - totalHeight));
+    }
+""")
+rep("""                bool shouldPause = g_userPaused.load(std::memory_order_relaxed);
+""", """                VizDockRefresh();
+
+                bool shouldPause = g_userPaused.load(std::memory_order_relaxed);
+""")
+rep("""        case WM_DESTROY:
+            g_messageWnd = nullptr;""", """        case WM_DESTROY:
+            VizDockStop();
+            g_messageWnd = nullptr;""")
+# ================================================================ Split into two pieces (2.1)
+after("    bool dragEnabled = false;\n",
+      "    bool splitEnabled = false;        // show the visualizer as two pieces\n"
+      "    float splitAt = 50.f;             // % of the bars in the first piece\n"
+      "    float splitGap = 0.f, splitShift = 0.f;  // logical px: along, and across\n")
+after("""    g_settings.dragEnabled = Wh_GetIntSetting(L"interaction.dragEnabled") != 0;
+""", """    g_settings.splitEnabled = Wh_GetIntSetting(L"position.split") != 0;
+    g_settings.splitAt = std::clamp((float)Wh_GetIntSetting(L"position.splitAt"), 1.f, 99.f);
+    g_settings.splitGap = std::clamp((float)Wh_GetIntSetting(L"position.splitGap"), -8000.f, 8000.f);
+    g_settings.splitShift = std::clamp((float)Wh_GetIntSetting(L"position.splitShift"), -8000.f, 8000.f);
+""")
+rep("""      $description: Pixels to slide it along the side from the alignment above
+  $name: Position""", """      $description: Pixels to slide it along the side from the alignment above
+    - split: false
+      $name: Split Into Two Pieces
+      $description: Cuts the visualizer in two and moves the second piece by the gap and shift below, e.g. to sit either side of the taskbar's centred icons or a monitor bezel. Works with every shape and both renderers and costs next to nothing (Windows moves the piece; nothing is drawn twice). The background panel is cut at the same place. Drag, the right-click menu and Click to Seek answer on the first piece only
+    - splitAt: 50
+      $name: Split Point
+      $description: Percent of the way along where the cut goes. With bars it lands in the gap between two bars
+    - splitGap: 200
+      $name: Split Gap
+      $description: Pixels the second piece moves along the visualizer (right, or down when vertical). Negative moves it back
+    - splitShift: 0
+      $name: Split Shift
+      $description: Pixels the second piece moves across it (down, or right when vertical)
+  $name: Position""")
+after("ComPtr<IDCompositionVisual> g_rootVisual;\n", """// Split into two pieces (2.1): the composition target's real root. It holds
+// g_rootVisual (the first piece, clipped at the cut) and, while splitting, a
+// second container showing the same swap chains again, clipped to the other
+// side and offset. DWM does the moving; nothing is drawn twice.
+ComPtr<IDCompositionVisual> g_splitTop;
+struct VizSplitState {
+    ComPtr<IDCompositionVisual> p2, text2, gfx2;
+    ComPtr<IDCompositionRectangleClip> c1, c2;
+    bool built = false, on = false, gfxIn = false, gClip = false, vert = false;
+    float line = 0.f, dx = 0.f, dy = 0.f, tx = 0.f, ty = 0.f, gx = 0.f, gy = 0.f;
+    IUnknown* textC = nullptr;
+    IUnknown* gfxC = nullptr;
+} g_split;
+""")
+rep("""    hr = g_compositionTarget->SetRoot(g_rootVisual.Get());
+""", """    hr = g_compositionDevice->CreateVisual(&g_splitTop);
+    if (FAILED(hr)) return false;
+    hr = g_splitTop->AddVisual(g_rootVisual.Get(), FALSE, nullptr);
+    if (FAILED(hr)) return false;
+    g_split = {};
+
+    hr = g_compositionTarget->SetRoot(g_splitTop.Get());
+""")
+rep("""    g_compositionVisual.Reset();
+    g_rootVisual.Reset();
+""", """    g_compositionVisual.Reset();
+    g_split = {};
+    g_splitTop.Reset();
+    g_rootVisual.Reset();
+""")
+before("""// The panel surface and its visual. Called before the composition device goes.
+void ReleaseSurface() {
+""", r"""// Split into two pieces: keeps the second piece's copies of the text and panel
+// surfaces in step with the originals, and the cut where the settings put it.
+// Runs every tick but commits only when something changed.
+void SplitSync() {
+    auto& s = g_split;
+    if (!g_compositionDevice || !g_splitTop || !g_rootVisual || !g_compositionVisual) return;
+    bool want = g_settings.splitEnabled && (g_settings.splitGap != 0.f || g_settings.splitShift != 0.f);
+    VizLayout L;
+    if (want && !ComputeVizLayout(&L)) want = false;
+    bool dirty = false;
+    if (!want) {
+        if (s.on) {
+            g_rootVisual->SetClip((IDCompositionClip*)nullptr);
+            g_splitTop->RemoveVisual(s.p2.Get());
+            s.on = false;
+            g_compositionDevice->Commit();
+            VizPerf(kPerfCommits);
+        }
+        return;
+    }
+    if (!s.built) {
+        if (FAILED(g_compositionDevice->CreateVisual(&s.p2)) || FAILED(g_compositionDevice->CreateVisual(&s.text2)) ||
+            FAILED(g_compositionDevice->CreateVisual(&s.gfx2)) ||
+            FAILED(g_compositionDevice->CreateRectangleClip(&s.c1)) ||
+            FAILED(g_compositionDevice->CreateRectangleClip(&s.c2)) ||
+            FAILED(s.p2->AddVisual(s.text2.Get(), FALSE, nullptr)))
+            return;
+        s.gfx2->SetBorderMode(DCOMPOSITION_BORDER_MODE_SOFT);
+        s.p2->SetClip(s.c2.Get());
+        s.built = true;
+        s.line = NAN;
+    }
+    if (!s.on) {
+        if (FAILED(g_splitTop->AddVisual(s.p2.Get(), TRUE, g_rootVisual.Get()))) return;
+        g_rootVisual->SetClip(s.c1.Get());
+        s.on = true;
+        dirty = true;
+    }
+
+    // Where the cut goes, in overlay pixels. Bar shapes cut in the middle of
+    // the gap between two bars; the rest at that fraction of the box.
+    const VizShape sh = g_settings.shape;
+    const bool vert = g_settings.orientation == VizOrientation::Vertical && sh != VizShape::Radial &&
+                      sh != VizShape::Goniometer && sh != VizShape::Terminal;
+    const bool barish = sh != VizShape::Radial && sh != VizShape::Goniometer && sh != VizShape::Terminal &&
+                        sh != VizShape::Oscilloscope;
+    float start = vert ? g_visualOffsetY + L.blockY : g_visualOffsetX + L.blockX;
+    float len = vert ? L.totalHeight : L.totalWidth;
+    float line = start + len * g_settings.splitAt / 100.f;
+    if (barish) {
+        int n = VizEffectiveBarCount();
+        float bw = std::max(1.f, VizPx(std::max(1.f, g_settings.barWidth)));
+        float gap = VizPx(std::max(0.f, g_settings.barGap));
+        if (n >= 2) {
+            int k = std::clamp((int)lroundf(n * g_settings.splitAt / 100.f), 1, n - 1);
+            line = start + k * (bw + gap) - gap * 0.5f;
+        }
+    }
+    float along = g_settings.splitGap * g_dpiScale, across = g_settings.splitShift * g_dpiScale;
+    float dx = vert ? across : along, dy = vert ? along : across;
+    if (line != s.line || dx != s.dx || dy != s.dy || vert != s.vert) {
+        const float big = 1e6f;
+        s.c1->SetLeft(-big); s.c1->SetTop(-big); s.c1->SetRight(big); s.c1->SetBottom(big);
+        s.c2->SetLeft(-big); s.c2->SetTop(-big); s.c2->SetRight(big); s.c2->SetBottom(big);
+        if (vert) { s.c1->SetBottom(line); s.c2->SetTop(line); }
+        else      { s.c1->SetRight(line);  s.c2->SetLeft(line); }
+        s.p2->SetOffsetX(dx);
+        s.p2->SetOffsetY(dy);
+        s.line = line; s.dx = dx; s.dy = dy; s.vert = vert;
+        dirty = true;
+    }
+
+    // The text surface again (the whole scene, on the Direct2D renderer).
+    IUnknown* tc = g.textDetached ? nullptr : (IUnknown*)g_swapChain.Get();
+    if (tc != s.textC) { s.text2->SetContent(tc); s.textC = tc; dirty = true; }
+    if (g_visualOffsetX != s.tx || g_visualOffsetY != s.ty) {
+        s.text2->SetOffsetX(g_visualOffsetX);
+        s.text2->SetOffsetY(g_visualOffsetY);
+        s.tx = g_visualOffsetX; s.ty = g_visualOffsetY;
+        dirty = true;
+    }
+
+    // The Direct3D 11 panel surface again, sharing its clip object.
+    bool gin = g.visualAttached && g.sc;
+    if (gin) {
+        if (!s.gfxIn) {
+            if (FAILED(s.p2->AddVisual(s.gfx2.Get(), FALSE, s.text2.Get()))) return;
+            s.gfxIn = true;
+            dirty = true;
+        }
+        if ((IUnknown*)g.sc.Get() != s.gfxC) { s.gfx2->SetContent(g.sc.Get()); s.gfxC = g.sc.Get(); dirty = true; }
+        if (g.dcOffX != s.gx || g.dcOffY != s.gy) {
+            s.gfx2->SetOffsetX(g.dcOffX);
+            s.gfx2->SetOffsetY(g.dcOffY);
+            s.gx = g.dcOffX; s.gy = g.dcOffY;
+            dirty = true;
+        }
+        if (g.dcClipOn != s.gClip) {
+            s.gfx2->SetClip(g.dcClipOn ? (IDCompositionClip*)g.clip.Get() : nullptr);
+            s.gClip = g.dcClipOn;
+            dirty = true;
+        }
+    } else if (s.gfxIn) {
+        s.p2->RemoveVisual(s.gfx2.Get());
+        s.gfx2->SetContent(nullptr);
+        s.gfxC = nullptr;
+        s.gfxIn = false;
+        dirty = true;
+    }
+    if (dirty) {
+        g_compositionDevice->Commit();
+        VizPerf(kPerfCommits);
+    }
+}
+
+""")
+rep("void ReleaseSurface();\nvoid OnSettingsChanged();", "void ReleaseSurface();\nvoid SplitSync();\nvoid OnSettingsChanged();")
+rep("""    UpdateSwapChainForLayout();
+
+    // Smooth Mode""", """    UpdateSwapChainForLayout();
+    ttgfx::SplitSync();
+
+    // Smooth Mode""")
+# ================================================================ Card fixes: custom icons, stacking, menus (2.1)
+rep("""    int sizePx = std::max(1, (int)std::lround(g_settings.mediaIconSize * dpiScale));
+    g_mediaIconLoadedSize = sizePx;
+""", """    int sizePx = std::max(1, (int)std::lround(g_settings.mediaIconSize * dpiScale));
+    if (g_settings.mediaCard) {
+        // The card draws its controls at a quarter of the art tile; load the
+        // icons at that size so they are not stretched up from the strip size.
+        int sp = std::max(0, (int)std::lround(g_settings.mediaIconSpacing * dpiScale));
+        int tile = g_settings.cardArtSize > 0 ? std::max(24, (int)std::lround(g_settings.cardArtSize * dpiScale))
+                                              : sizePx * 3 + sp * 2;
+        sizePx = std::max(8, tile / 4);
+    }
+    g_mediaIconLoadedSize = sizePx;
+""")
+after("    bool mediaHideWhenCovered = false;\n",
+      "    bool mediaOnTop = true;           // the strip / card stays above other windows\n")
+rep("""    g_settings.mediaHideWhenCovered = Wh_GetIntSetting(L"media_controls.hideWhenCovered") != 0;
+""", """    g_settings.mediaHideWhenCovered = Wh_GetIntSetting(L"media_controls.hideWhenCovered") != 0;
+    {
+        PCWSTR z = Wh_GetStringSetting(L"media_controls.stacking");
+        g_settings.mediaOnTop = wcscmp(z, L"normal") != 0;
+        Wh_FreeStringSetting(z);
+    }
+""")
+rep("""    - hideWhenCovered: false
+      $name: Hide When Covered
+""", """    - stacking: top
+      $name: Stacking
+      $description: Whether the strip or card stays above other windows
+      $options:
+        - top: Always on top (covers apps, even ones run as administrator)
+        - normal: Normal window (apps you click on cover it)
+    - hideWhenCovered: false
+      $name: Hide When Covered
+""")
+rep("""    BOOL posOk = SetWindowPos(g_mediaWnd, HWND_TOPMOST, x, y, width, height,
+                              SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOOWNERZORDER);
+""", """    // Stacking: only touch the z-order when it is wrong. Raising it on every
+    // repaint put the card back over its own open menus.
+    const bool isTop = (GetWindowLongPtr(g_mediaWnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+    const bool wantTop = g_settings.mediaOnTop && !g_menuOpen.load(std::memory_order_acquire);
+    UINT zFlags = (isTop == wantTop) ? SWP_NOZORDER : 0;
+    BOOL posOk = SetWindowPos(g_mediaWnd, wantTop ? HWND_TOPMOST : HWND_NOTOPMOST, x, y, width, height,
+                              SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOOWNERZORDER | zFlags);
+""")
+rep("""                        if (!g_mediaHiddenByCover &&
+                            (!IsWindowVisible(g_mediaWnd) ||
+                             !(GetWindowLongPtr(g_mediaWnd, GWL_EXSTYLE) & WS_EX_TOPMOST))) {""",
+    """                        if (!g_mediaHiddenByCover && !g_menuOpen.load(std::memory_order_acquire) &&
+                            (!IsWindowVisible(g_mediaWnd) ||
+                             (g_settings.mediaOnTop &&
+                              !(GetWindowLongPtr(g_mediaWnd, GWL_EXSTYLE) & WS_EX_TOPMOST)))) {""")
+# Menus: the strip / card steps out of the topmost band while any of our menus is
+# open, then goes back.
+before("LRESULT CALLBACK MediaWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {", r"""// While one of the mod's menus is open the strip / card leaves the topmost band
+// (menus are topmost too, and the later raise would win), then returns.
+void VizMediaMenuBegin() {
+    g_menuOpen.store(true, std::memory_order_release);
+    if (g_mediaWnd && (GetWindowLongPtr(g_mediaWnd, GWL_EXSTYLE) & WS_EX_TOPMOST))
+        SetWindowPos(g_mediaWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+}
+void VizMediaMenuEnd() {
+    g_menuOpen.store(false, std::memory_order_release);
+    if (g_mediaWnd && g_settings.mediaOnTop && IsWindowVisible(g_mediaWnd))
+        SetWindowPos(g_mediaWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+}
+
+""")
+rep("""    g_menuOpen.store(true, std::memory_order_release);
+    UINT cmd = (UINT)TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, pt.x, pt.y, g_messageWnd,
+                                      nullptr);
+    g_menuOpen.store(false, std::memory_order_release);
+""", """    VizMediaMenuBegin();
+    UINT cmd = (UINT)TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, pt.x, pt.y, g_messageWnd,
+                                      nullptr);
+    VizMediaMenuEnd();
+""")
+rep("""    UINT cmd = (UINT)TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_BOTTOMALIGN, pt.x, pt.y, hWnd, nullptr);
+""", """    VizMediaMenuBegin();
+    UINT cmd = (UINT)TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_BOTTOMALIGN, pt.x, pt.y, hWnd, nullptr);
+    VizMediaMenuEnd();
+""")
 out = os.path.join(S, "v2b.cpp")
 open(out, "w", encoding="utf-8", newline="\n").write(src)
 print("wrote", out, src.count("\n"), "lines")

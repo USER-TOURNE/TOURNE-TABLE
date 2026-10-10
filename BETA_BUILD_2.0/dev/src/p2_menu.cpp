@@ -53,7 +53,11 @@ static const VizMenuOption kShapes[] = {
     {L"stereo", L"Stereo"},     {L"mountain", L"Mountain"},         {L"mirror", L"Mirror"},
     {L"wave", L"Wave"},         {L"breathe", L"Breathe"},           {L"dots", L"Dots"},
     {L"radial", L"Radial"},     {L"oscilloscope", L"Oscilloscope"}, {L"goniometer", L"Goniometer"},
-    {L"terminal", L"Terminal"}};
+    {L"terminal", L"Terminal"},
+    // Styles (2.1), in VizStyle order after the shapes (see VizShapeMenuIndex).
+    {L"led", L"LED Meter"},     {L"line", L"Line Spectrum"},        {L"bloom", L"Polar Bloom"},
+    {L"spectrogram", L"Spectrogram"}, {L"vu", L"VU Needles"},       {L"stereo_field", L"Stereo Field"},
+    {L"particles", L"Particles"}};
 static const VizMenuOption kColorModes[] = {
     {L"solid", L"Solid"},          {L"gradient", L"Gradient"},           {L"reactive_gradient", L"Reactive Gradient"},
     {L"accent", L"Windows Accent"}, {L"album_art", L"Album Art"},         {L"dynamic_album", L"Dynamic Album"},
@@ -86,11 +90,7 @@ void VizApplyMenuOverrides() {
         PCWSTR v = kv.second.c_str();
         auto is = [&](PCWSTR s) { return wcscmp(v, s) == 0; };
         if (k == L"shape") {
-            g_settings.shape = is(L"mountain") ? VizShape::Mountain : is(L"mirror") ? VizShape::Mirror
-                             : is(L"wave") ? VizShape::Wave : is(L"breathe") ? VizShape::Breathe
-                             : is(L"dots") ? VizShape::Dots : is(L"radial") ? VizShape::Radial
-                             : is(L"oscilloscope") ? VizShape::Oscilloscope : is(L"goniometer") ? VizShape::Goniometer
-                             : is(L"terminal") ? VizShape::Terminal : VizShape::Stereo;
+            VizParseShape(v, &g_settings.shape, &g_settings.style);
         } else if (k == L"colorMode") {
             g_settings.colorMode = is(L"gradient") ? VizColorMode::Gradient
                                  : is(L"reactive_gradient") ? VizColorMode::ReactiveGradient
@@ -149,6 +149,32 @@ void VizApplyMenuOverrides() {
             g_settings.pixelSnap = is(L"1");
         } else if (k == L"fineNudge") {
             g_settings.keyMoveFine = is(L"1");
+        // The look, from the Style Editor and saved styles (2.1).
+        } else if (k == L"barWidth") {
+            g_settings.barWidth = std::clamp((float)_wtof(v), 0.1f, 400.f);
+        } else if (k == L"barGap") {
+            g_settings.barGap = std::clamp((float)_wtof(v), 0.f, 400.f);
+        } else if (k == L"barMaxSize") {
+            g_settings.barMaxSize = std::clamp((float)_wtof(v), 2.f, 4000.f);
+        } else if (k == L"barRadius") {
+            float rad = std::clamp((float)_wtof(v), 0.f, 100.f);
+            g_settings.barRadiusTL = g_settings.barRadiusTR = g_settings.barRadiusBR = g_settings.barRadiusBL = rad;
+        } else if (k == L"reflection") {
+            g_settings.reflection = std::clamp(_wtoi(v), 0, 100);
+        } else if (k == L"fxGlow") {
+            g_settings.fxGlow = std::clamp(_wtoi(v), 0, 100);
+        } else if (k == L"fxGlowRadius") {
+            g_settings.fxGlowRadius = std::clamp((float)_wtof(v), 0.5f, 32.f);
+        } else if (k == L"fxBloom") {
+            g_settings.fxBloom = std::clamp(_wtoi(v), 0, 100);
+        } else if (k == L"fxBloomRadius") {
+            g_settings.fxBloomRadius = std::clamp((float)_wtof(v), 4.f, 64.f);
+        } else if (k == L"color") {
+            ParseColorHex(v, &g_settings.colorA, &g_settings.colorR, &g_settings.colorG, &g_settings.colorB);
+        } else if (k == L"grad1") {
+            ParseColorHex(v, &g_settings.grad1A, &g_settings.grad1R, &g_settings.grad1G, &g_settings.grad1B);
+        } else if (k == L"grad2") {
+            ParseColorHex(v, &g_settings.grad2A, &g_settings.grad2R, &g_settings.grad2G, &g_settings.grad2B);
         }
     }
 }
@@ -158,7 +184,7 @@ static std::wstring CurrentValue(const std::wstring& key) {
     auto pick = [](const VizMenuOption* opts, size_t n, int index) -> std::wstring {
         return (index >= 0 && (size_t)index < n) ? opts[index].value : L"";
     };
-    if (key == L"shape") return pick(kShapes, ARRAYSIZE(kShapes), (int)g_settings.shape);
+    if (key == L"shape") return pick(kShapes, ARRAYSIZE(kShapes), VizShapeMenuIndex());
     if (key == L"colorMode") return pick(kColorModes, ARRAYSIZE(kColorModes), (int)g_settings.colorMode);
     if (key == L"termStyle") return pick(kTermStyles, ARRAYSIZE(kTermStyles), (int)g_settings.termStyle);
     if (key == L"engine") return pick(kEngines, ARRAYSIZE(kEngines), (int)g_settings.engine);
@@ -191,7 +217,14 @@ enum : UINT {
     kMenuDefaultIn = 201,
     kMenuDeviceBase = 300,   // + endpoint index
     kMenuChoiceBase = 1000,  // + group * 100 + option
+    kMenuStyleEditor = 4999,
+    kMenuPresetBase = 5000,  // + saved style index
 };
+
+// Saved styles and the Style Editor (p3_editor.cpp).
+std::vector<std::wstring> VizStylePresetNames();
+bool VizApplyStylePreset(const std::wstring& name);
+void VizOpenStyleEditor();
 struct VizMenuGroup {
     const wchar_t* key;
     const wchar_t* label;
@@ -310,6 +343,16 @@ void VizShowContextMenu(POINT pt) {
     }
     AppendMenuW(menu, MF_POPUP, (UINT_PTR)dev, L"Audio Source");
 
+    // My Styles: saved looks, one click each, and the editor that makes them.
+    std::vector<std::wstring> presets = VizStylePresetNames();
+    HMENU mine = CreatePopupMenu();
+    for (size_t i = 0; i < presets.size() && i < 200; i++)
+        AppendMenuW(mine, MF_STRING, kMenuPresetBase + (UINT)i, presets[i].c_str());
+    if (presets.empty()) AppendMenuW(mine, MF_STRING | MF_GRAYED, 0, L"(none saved yet)");
+    AppendMenuW(mine, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(mine, MF_STRING, kMenuStyleEditor, L"Style Editor...");
+    AppendMenuW(menu, MF_POPUP, (UINT_PTR)mine, L"My Styles");
+
     for (size_t gi = 0; gi < ARRAYSIZE(kGroups); gi++) {
         const VizMenuGroup& grp = kGroups[gi];
         if (wcscmp(grp.key, L"termStyle") == 0 && g_settings.shape != VizShape::Terminal) continue;
@@ -351,7 +394,12 @@ void VizShowContextMenu(POINT pt) {
     DestroyMenu(menu);  // destroys the submenus with it
     if (!cmd) return;
 
-    if (cmd == kMenuCopy) {
+    if (cmd == kMenuStyleEditor) {
+        VizOpenStyleEditor();
+        return;
+    } else if (cmd >= kMenuPresetBase && cmd < kMenuPresetBase + presets.size()) {
+        if (!VizApplyStylePreset(presets[cmd - kMenuPresetBase])) return;
+    } else if (cmd == kMenuCopy) {
         VizCopyMenuOverrides(toggles, ARRAYSIZE(toggles), eps);
         return;
     } else if (cmd == kMenuReset) {

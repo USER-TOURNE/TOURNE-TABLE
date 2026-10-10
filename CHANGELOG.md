@@ -12,6 +12,31 @@ Beta build, in `BETA_BUILD_2.0/`. Same `@id` as the 1.4 beta, so it upgrades tha
 
 > **Beta fix:** the Direct3D 11 shaders failed to compile on Windows ("unexpected token 'pass'"), so every PC fell back to Direct2D. Windows' own shader compiler (`fxc`) reserves `pass` and doesn't accept a macro with an empty parameter list, and the DXC compiler used for testing accepts both. Both are fixed, and `tests/fxc_lint.py` now checks for anything else in that class before a build goes out.
 
+### ✦ New: eight styles, Reflection, a Media Card, FX and My Styles
+
+- **Styles in the Shape list:** LED Meter (segmented, green / amber / red, peak segment held), Line Spectrum (a smooth filled curve with a glowing edge), Polar Bloom (Radial as one filled shape), Spectrogram (a scrolling colour history with a legend), VU Needles (two analog L / R meters with IEC VU ballistics: 99 % in 300 ms, 1.5 % overshoot, plus peak LEDs), Stereo Field (left channel above the centre line, right below) and Particles (sparks thrown off the bar tops on each beat). Each rides on an existing shape, so layout, panel, colours and settings work as before. They're also in the right-click menu.
+- **Reflection** (Appearance, 0-100): mirrors the bars onto a floor beneath them, fading out. Horizontal, bottom-anchored bar styles, on both renderers.
+- **Cost:** each style is one draw call on the same instanced quad. Nothing new is uploaded per frame unless the style has its own data: a Spectrogram row (a few hundred bytes, 60 a second), the Stereo Field levels, or live sparks. A resting VU needle leaves the frame unchanged, so it still skips presents. Spectrogram, Stereo Field and Particles keep the analysis on the CPU (Hybrid), like Terminal.
+- **Media Card** (Media Controls > Layout = Card): album art with previous / play / next on hover, a seek bar (click or drag), a speaker button that switches the Windows default output in one click, and a volume slider (drag it, or scroll anywhere on the card). It repaints only when something on it changes.
+- **Card theming** (Media Controls): Card Background, Card Border Color and Size, Card Corner Radius (the art follows it), Card Art Size, and Card Accent taken from the icon colour, a custom colour, the album art, or the Windows accent.
+- **Glow and Bloom** (Appearance, 0-100 each, with a radius): Glow is a soft halo worked out in the same shader pass that draws each bar, so it costs next to nothing. Bloom adds a blurred copy at a quarter of the size back on top, only on frames that change. Direct3D 11 renderer.
+- **My Styles and the Style Editor** (right-click > My Styles): save a look (base style, colours, peak caps, beat flash, bar sizes, corner radius, reflection, glow and bloom) under a name and pick it from the menu later. The editor is a small window where the visualizer itself is the live preview; slider changes apply about 12 times a second while dragging.
+
+### ✦ New: finer control, bar modifiers, placement
+
+- **Outline and Shadow** (Appearance): a stroke around each bar and a soft drop shadow, each with its own colour. Album colours now ease in over 0.6 s on a track change. Direct3D 11 renderer.
+- **Reflection on Direct2D** too (drawn on the CPU there, so it costs a little more).
+- **Decimal sizes** for bar width, gap, height, padding, borders, radii, font sizes, offsets and the card: turn Pixel Snap off to keep the fractions.
+- **Scale numbers** on Spectrogram (dB or %) and VU Needles.
+- **Click to Seek** on the progress bar (off by default), with an app list that turns it off, or only on, while those apps run.
+- **Terminal: any character**, including any Unicode glyph, for the bars and the ramp.
+- **Bar modifiers** (Appearance): Hollow, Dashed, Tilt, Afterimage (a trail that falls slowly) and Mirror Gap. Each is one shader branch, free when off.
+- **Snap while dragging**: edges and centre catch on the screen, the taskbar edge, the tray and the Start button. Hold Shift to place freely.
+- **Dock To App** (Position): sits beside a chosen app's window and follows it as it moves; back to its usual place while the app is closed or minimized.
+- **Split Into Two Pieces** (Position): cut at a chosen point, the second piece moved by a gap and shift. Windows composes the second piece from the same frame, so it costs next to nothing.
+- **Fix:** the drag and menu hooks no longer take clicks while another app (e.g. a full-screen game) covers the visualizer.
+- **Card fixes:** custom media icons now show on the Media Card too (they only worked on the strip); the card no longer covers its own device menu or the right-click menu; new Media Controls > Stacking setting (Always on top, or a Normal window that apps can cover).
+
 ### ✦ Efficiency and fixes pass (review merge)
 
 - **Nothing changed, nothing sent**: the compositor is only committed when the panel actually moves (was every frame, 144/s), buffers are hashed first and only uploaded when the frame will be drawn and that buffer changed (432 to 144 uploads/s while playing, 0 when still), the background plate is drawn without blending and without a redundant clear.

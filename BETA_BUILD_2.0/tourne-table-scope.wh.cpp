@@ -9,7 +9,7 @@
 // @donateUrl           https://ko-fi.com/tourne
 // @license             MIT
 // @include             windhawk.exe
-// @compilerOptions     -ldxgi -ld2d1 -ld3d11 -ldcomp -ldwmapi -ldwrite -lgdi32 -lshcore -lshlwapi -lole32 -lshell32 -lksuser -lwindowscodecs -lruntimeobject -lwindowsapp -luuid -luser32 -ladvapi32
+// @compilerOptions     -ldxgi -ld2d1 -ld3d11 -ldcomp -ldwmapi -ldwrite -lgdi32 -lshcore -lshlwapi -lole32 -lshell32 -lksuser -lwindowscodecs -lruntimeobject -lwindowsapp -luuid -luser32 -ladvapi32 -lcomctl32 -lcomdlg32
 // ==/WindhawkMod==
 
 // ==WindhawkModReadme==
@@ -66,6 +66,22 @@ The 1.4 analysis is still there as **Analysis Engine = Classic**.
 **Target FPS 0** matches your display's refresh rate, whatever it is.
 
 **Right-click for quick settings.** Shape, colours, analysis, readout, overlays and **which audio device it listens to**, any output, input or virtual device (VB-Audio, Voicemeeter, an Ableton return), all live, without opening Windhawk. Plus a **Terminal** shape (text characters: columns, a waterfall or text meters) and a **media widget** layout: title and artist inside the panel, pixel-sharp text, a track progress bar and media controls pinned to the panel.
+
+**Seven new styles.** LED Meter, Line Spectrum, Polar Bloom, Spectrogram, VU Needles (real IEC VU ballistics), Stereo Field and Particles, all in the Shape list and the right-click menu, plus **Reflection**, a fading mirror under the bars.
+
+**Glow and Bloom.** A soft halo around every bar, worked out in the same shader pass that draws it, and a lens-style bloom from a quarter-size blur that only runs on frames that change. Direct3D 11 renderer.
+
+**A Media Card.** Media Controls > Layout = Card: album art with previous / play / next on hover, a seek bar, one-click output switching and a volume slider. Theme its background, border, corner radius, art size and accent (icon colour, custom, album art or your Windows accent).
+
+**My Styles.** Right-click > My Styles > Style Editor: mix a base style, colours, bar sizes, reflection, glow and bloom while the visualizer previews it live, save it under a name, and pick it from the menu any time.
+
+**Finer looks.** Outline and Shadow around every bar; bar modifiers Hollow, Dashed, Tilt, Afterimage (a slowly falling trail) and Mirror Gap; scale numbers on Spectrogram and VU Needles; album colours that ease in; any Unicode character in Terminal. Reflection now works on both renderers.
+
+**Exact sizes.** Bar width, gap, height, padding, borders, radii, fonts and offsets take decimals (turn Pixel Snap off to keep the fractions).
+
+**Placement.** Drag snaps to the screen's edges and centre, the taskbar, the tray and the Start button (hold Shift to place freely). Position > Dock To App keeps the visualizer beside an app's window as it moves, and Split Into Two Pieces cuts it in two, e.g. either side of the taskbar's centred icons, at almost no cost.
+
+**Media.** Click to Seek on the progress bar (off by default, with an app list), custom icons on the Media Card, and Media Controls > Stacking (always on top, or a normal window apps can cover).
 
 ---
 
@@ -690,6 +706,73 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
         - oscilloscope: Oscilloscope
         - goniometer: Goniometer (stereo field)
         - terminal: Terminal (text characters, see the Terminal section)
+        - led: LED Meter (segmented, green / amber / red)
+        - line: Line Spectrum (filled curve, glowing edge)
+        - bloom: Polar Bloom (Radial as one filled shape)
+        - spectrogram: Spectrogram (scrolling colour history)
+        - vu: VU Needles (two analog meters, L and R)
+        - stereo_field: Stereo Field (left above, right below)
+        - particles: Particles (bars plus sparks on each beat)
+    - reflection: 0
+      $name: Reflection
+      $description: 0-100. Mirrors the bars onto a floor beneath them, fading out over this percentage of Bar Max Size. Horizontal bars anchored to the bottom only, with the bar shapes, LED Meter, Line Spectrum and Particles. Both renderers (Direct2D draws it on the CPU, so it costs a little more there)
+    - fxGlow: 0
+      $name: Glow
+      $description: 0-100. A soft halo around each bar, dot, line and spark, worked out in the same shader pass that draws them, so it costs next to nothing. Direct3D 11 renderer only
+    - fxGlowRadius: '6'
+      $name: Glow Radius
+      $description: 1-32 pixels. How far the halo reaches. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
+    - fxBloom: 0
+      $name: Bloom
+      $description: 0-100. Light bleeding out of the whole picture, like a camera lens, from a blurred copy at a quarter of the size added back on top. A little GPU work, and only on frames that change. Direct3D 11 renderer only
+    - fxBloomRadius: '16'
+      $name: Bloom Radius
+      $description: 4-64 pixels. How far the light spreads. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
+    - fxOutlineWidth: '0'
+      $name: Outline Width
+      $description: 0-16 pixels, decimals allowed (0.5, 1.25). A line just inside each bar's edge, so bars keep their size. 0 = off. Direct3D 11 renderer only
+    - fxOutlineColor: '#B0FFFFFF'
+      $name: Outline Color
+      $description: '#AARRGGBB or #RRGGBB. The outline fades with the bar it belongs to'
+    - fxShadow: 0
+      $name: Shadow
+      $description: 0-100. A drop shadow behind each bar, dot and line, worked out in the same shader pass as Glow, so it costs next to nothing. Both renderers
+    - fxShadowColor: '#000000'
+      $name: Shadow Color
+      $description: '#RRGGBB'
+    - fxShadowX: '2'
+      $name: Shadow Offset X
+      $description: -32 to 32 pixels, decimals allowed. Positive moves it right
+    - fxShadowY: '3'
+      $name: Shadow Offset Y
+      $description: -32 to 32 pixels, decimals allowed. Positive moves it down
+    - fxShadowSoftness: '4'
+      $name: Shadow Softness
+      $description: 0-32 pixels, decimals allowed. 0 = a hard edge
+    - barHollow: false
+      $name: Hollow Bars
+      $description: Bars as outlines only, the inside left clear. Bar shapes (Stereo, Mountain, Mirror, Wave, Breathe). Direct3D 11 renderer
+    - barHollowWidth: '1.5'
+      $name: Hollow Line Width
+      $description: Pixels, decimals allowed
+    - barDash: '0'
+      $name: Dash Length
+      $description: Pixels, decimals allowed. Cuts the bars into dashes along their length, fixed to the base line so they stay put as a bar grows. 0 = solid. Bar shapes, Direct3D 11 renderer
+    - barDashGap: '2'
+      $name: Dash Gap
+      $description: Pixels between dashes, decimals allowed
+    - barTilt: '0'
+      $name: Tilt
+      $description: -60 to 60 degrees, decimals allowed. Leans every bar from its base line, like italics; peak caps and the Afterimage lean with them. Bar shapes, Direct3D 11 renderer
+    - barMirrorGap: '0'
+      $name: Mirror Gap
+      $description: Pixels, decimals allowed. With Anchor = Middle the bars already grow both ways from a centre line; this pulls the two halves apart, like a waveform with a spine. Bar shapes, Direct3D 11 renderer
+    - afterimage: 0
+      $name: Afterimage
+      $description: 0-100. A see-through trail behind each bar that jumps up with it and sinks back slowly. With Peak Hold on, the caps sit on the trail. Bar shapes, Direct3D 11 renderer; keeps the analysis on the CPU (Hybrid)
+    - afterimageLength: '1.2'
+      $name: Afterimage Length
+      $description: Seconds for a full-height trail to sink away, decimals allowed
     - orientation: horizontal
       $name: Orientation
       $description: Whether bars run left-to-right or bottom-to-top
@@ -699,18 +782,18 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
     - barCount: 32
       $name: Bar Count
       $description: How many bars are drawn across the visualizer
-    - barWidth: 6
+    - barWidth: '6'
       $name: Bar Width
-      $description: Thickness of each bar, in pixels
-    - barGap: 4
+      $description: Thickness of each bar, in pixels. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
+    - barGap: '4'
       $name: Bar Gap
-      $description: Space between bars, in pixels
-    - barMaxSize: 140
+      $description: Space between bars, in pixels. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
+    - barMaxSize: '140'
       $name: Bar Max Size
-      $description: Maximum height (or length, if vertical) a bar can reach at full volume, in pixels
-    - barIdleSize: 4
+      $description: Maximum height (or length, if vertical) a bar can reach at full volume, in pixels. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
+    - barIdleSize: '4'
       $name: Bar Idle Size
-      $description: Minimum height bars keep when there's no audio, so the visualizer never looks completely flat
+      $description: Minimum height bars keep when there's no audio, so the visualizer never looks completely flat. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
     - barCornerRadius: '3'
       $name: Bar Corner Radius
       $description: One value for all corners, or four space-separated values for top-left, top-right, bottom-right, bottom-left
@@ -847,51 +930,51 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
     - nowPlayingFont: Segoe UI
       $name: Now Playing Font
       $description: Font family name, must be installed on your system (e.g. a Nerd Font for glyph support)
-    - nowPlayingFontSize: 16
+    - nowPlayingFontSize: '16'
       $name: Now Playing Font Size
-      $description: Text size, in points
+      $description: Text size, in points. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
     - nowPlayingDisplaySeconds: 6
       $name: Now Playing Display Seconds
       $description: How long the text stays visible after a track changes, before fading out. 0 keeps it on screen all the time, like a media widget
-    - nowPlayingOffsetX: 0
+    - nowPlayingOffsetX: '0'
       $name: Now Playing Offset X
-      $description: Shifts the artist/title text sideways from where it normally sits, in pixels. Negative moves it left, positive right. It still travels with the visualizer -- this only changes where it sits relative to it, which is how you move it clear of the background panel. Can also be nudged live with the keyboard (Interaction, move target 2). A keyboard nudge ADDS to this number rather than replacing it, so whatever you type here always counts
-    - nowPlayingOffsetY: 0
+      $description: Shifts the artist/title text sideways from where it normally sits, in pixels. Negative moves it left, positive right. It still travels with the visualizer -- this only changes where it sits relative to it, which is how you move it clear of the background panel. Can also be nudged live with the keyboard (Interaction, move target 2). A keyboard nudge ADDS to this number rather than replacing it, so whatever you type here always counts. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
+    - nowPlayingOffsetY: '0'
       $name: Now Playing Offset Y
-      $description: Shifts the artist/title text up or down from where it normally sits, in pixels. Negative moves it up, positive down. As with Offset X, a keyboard nudge adds to this rather than replacing it
+      $description: Shifts the artist/title text up or down from where it normally sits, in pixels. Negative moves it up, positive down. As with Offset X, a keyboard nudge adds to this rather than replacing it. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
     - nowPlayingBgColor: '#00000000'
       $name: Now Playing Background
       $description: 'A panel drawn behind the artist/title text, sized to the text itself rather than to the visualizer. Fully transparent by default, meaning no panel. Give it some alpha to make the text readable over a busy wallpaper without having to enlarge the main Background panel. It fades in and out with the text. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b)'
-    - nowPlayingBgPadding: 6
+    - nowPlayingBgPadding: '6'
       $name: Now Playing Background Padding
-      $description: Space between the text and the edge of its panel, in pixels
-    - nowPlayingBgCornerRadius: 6
+      $description: Space between the text and the edge of its panel, in pixels. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
+    - nowPlayingBgCornerRadius: '6'
       $name: Now Playing Background Corner Radius
-      $description: Roundness of the text panel's corners, in pixels
-    - nowPlayingBgBorderSize: 0
+      $description: Roundness of the text panel's corners, in pixels. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
+    - nowPlayingBgBorderSize: '0'
       $name: Now Playing Background Border Size
-      $description: Outline thickness around the text panel, in pixels. 0 disables it. Draws whether or not the panel itself has any fill, so an outline on its own is possible
+      $description: Outline thickness around the text panel, in pixels. 0 disables it. Draws whether or not the panel itself has any fill, so an outline on its own is possible. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
     - nowPlayingBgBorderColor: '#40FFFFFF'
       $name: Now Playing Background Border Color
       $description: 'Color of the text panel''s outline. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b)'
-    - peakFreqOffsetX: 0
+    - peakFreqOffsetX: '0'
       $name: Peak Readout Offset X
-      $description: Shifts the frequency readout sideways from its chosen alignment, in pixels. Negative moves it left, positive right. Use this for fine placement -- the alignment options above put it in the right general area, this puts it exactly where you want it. Can also be nudged live with the keyboard (Interaction, move target 3), which adds to this number rather than replacing it
-    - peakFreqOffsetY: 0
+      $description: Shifts the frequency readout sideways from its chosen alignment, in pixels. Negative moves it left, positive right. Use this for fine placement -- the alignment options above put it in the right general area, this puts it exactly where you want it. Can also be nudged live with the keyboard (Interaction, move target 3), which adds to this number rather than replacing it. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
+    - peakFreqOffsetY: '0'
       $name: Peak Readout Offset Y
-      $description: Shifts the frequency readout up or down from its chosen alignment, in pixels. Negative moves it up, positive down. As with Offset X, a keyboard nudge adds to this rather than replacing it
+      $description: Shifts the frequency readout up or down from its chosen alignment, in pixels. Negative moves it up, positive down. As with Offset X, a keyboard nudge adds to this rather than replacing it. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
     - peakFreqBgColor: '#00000000'
       $name: Peak Readout Background
       $description: 'A panel drawn behind the frequency readout, sized to the text itself. Fully transparent by default, meaning no panel. Particularly useful for this one, since the readout sits over the bars on the inside alignments and can be hard to read against them. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b)'
-    - peakFreqBgPadding: 6
+    - peakFreqBgPadding: '6'
       $name: Peak Readout Background Padding
-      $description: Space between the readout and the edge of its panel, in pixels
-    - peakFreqBgCornerRadius: 6
+      $description: Space between the readout and the edge of its panel, in pixels. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
+    - peakFreqBgCornerRadius: '6'
       $name: Peak Readout Background Corner Radius
-      $description: Roundness of the readout panel's corners, in pixels
-    - peakFreqBgBorderSize: 0
+      $description: Roundness of the readout panel's corners, in pixels. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
+    - peakFreqBgBorderSize: '0'
       $name: Peak Readout Background Border Size
-      $description: Outline thickness around the readout panel, in pixels. 0 disables it. Draws whether or not the panel itself has any fill
+      $description: Outline thickness around the readout panel, in pixels. 0 disables it. Draws whether or not the panel itself has any fill. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
     - peakFreqBgBorderColor: '#40FFFFFF'
       $name: Peak Readout Background Border Color
       $description: 'Color of the readout panel''s outline. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b)'
@@ -946,18 +1029,30 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
         - below: Below the panel
         - above: Above the panel
         - panel_bottom: Inside the panel, under the bars
-    - height: 2
+    - height: '2'
       $name: Height
-      $description: In pixels
-    - gap: 6
+      $description: In pixels. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
+    - gap: '6'
       $name: Gap
-      $description: Distance from the panel (or, inside it, from the bars), in pixels
+      $description: Distance from the panel (or, inside it, from the bars), in pixels. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
     - color: '#FFFFFFFF'
       $name: Color
       $description: 'The played part. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b)'
     - trackColor: '#40FFFFFF'
       $name: Track Color
       $description: 'The rest of the bar. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b)'
+    - clickToSeek: false
+      $name: Click to Seek
+      $description: Click or drag along the bar to jump in the track. Only where the desktop itself is under the cursor, never through a window, and the drag key still moves the visualizer. Off by default so the bar never takes clicks meant for the desktop
+    - seekAppsMode: except
+      $name: Seek App List
+      $description: How the app list below applies. Apps count while they are running
+      $options:
+        - except: Seek, except while these apps run
+        - only: Seek only while these apps run
+    - seekApps: ''
+      $name: Seek Apps
+      $description: 'Program names, separated by commas, e.g. "League of Legends, obs64, Spotify". ".exe" is optional. Empty = the list does nothing'
   $name: Track Progress
 - terminal:
     - style: columns
@@ -970,9 +1065,9 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
     - font: Consolas
       $name: Font
       $description: A monospace font installed in Windows (Consolas, Cascadia Mono, a Nerd Font, a pixel font)
-    - fontSize: 14
+    - fontSize: '14'
       $name: Font Size
-      $description: In points. Sets the cell size, and with it the size of the whole grid; Bar Width, Gap and Max Size don't apply to this shape
+      $description: In points. Sets the cell size, and with it the size of the whole grid; Bar Width, Gap and Max Size don't apply to this shape. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
     - rows: 16
       $name: Rows
       $description: Height of Columns and Waterfall, in lines. Columns are one per bar (Bar Count, or the band layout)
@@ -984,13 +1079,13 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
       $description: Above this share of full height a character turns the Hot Color
     - columnGlyph: '#'
       $name: Column Glyph
-      $description: The character columns and meters are built from. One printable ASCII character
+      $description: 'The character columns and meters are built from. Any one character: ASCII, Unicode symbols (█ ▓ ● ◆ ★), box drawing, Nerd Font icons or emoji, as long as the font has it'
     - peakGlyph: '-'
       $name: Peak Glyph
-      $description: The peak cap in Columns (with Peak Hold on). One printable ASCII character
+      $description: The peak cap in Columns (with Peak Hold on). Any one character, as above
     - ramp: ' .:-=+*#%@'
       $name: Waterfall Ramp
-      $description: Characters from quiet to loud for the Waterfall. Printable ASCII
+      $description: 'Characters from quiet to loud for the Waterfall, any characters, e.g. " ░▒▓█" or " ·•●". Up to 128 different non-ASCII characters across all three settings'
     - scrollRate: 20
       $name: Waterfall Speed
       $description: Lines per second
@@ -1146,6 +1241,41 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
     - pixelSnap: true
       $name: Pixel Snap
       $description: Puts the panel, every bar, the text and the grid on whole pixels, so edges stay razor sharp at any size and any display scaling (at 125% or 150%, sizes otherwise land on half pixels and blur). Turn off for subpixel placement, which moves the picture by fractions of a pixel at the cost of antialiased, slightly soft edges. Bar heights move smoothly either way
+    - dockApp: ''
+      $name: Dock To App
+      $description: 'Program name, e.g. "Spotify" or "obs64" (".exe" optional). The visualizer then sits beside that app''s main window and follows it as it moves; the Now Playing text and readout come along. While the app is closed or minimized it goes back to its usual place. It stays on the desktop layer, so it shows beside the window, not on top of it. Empty = not docked'
+    - dockSide: below
+      $name: Dock Side
+      $options:
+        - below: Below the window
+        - above: Above the window
+        - left: Left of the window
+        - right: Right of the window
+    - dockAlign: center
+      $name: Dock Alignment
+      $description: Where along that side it sits
+      $options:
+        - start: Start (left or top)
+        - center: Centre
+        - end: End (right or bottom)
+    - dockGap: 0
+      $name: Dock Gap
+      $description: Pixels between the window and the visualizer. Negative overlaps
+    - dockShift: 0
+      $name: Dock Shift
+      $description: Pixels to slide it along the side from the alignment above
+    - split: false
+      $name: Split Into Two Pieces
+      $description: Cuts the visualizer in two and moves the second piece by the gap and shift below, e.g. to sit either side of the taskbar's centred icons or a monitor bezel. Works with every shape and both renderers and costs next to nothing (Windows moves the piece; nothing is drawn twice). The background panel is cut at the same place. Drag, the right-click menu and Click to Seek answer on the first piece only
+    - splitAt: 50
+      $name: Split Point
+      $description: Percent of the way along where the cut goes. With bars it lands in the gap between two bars
+    - splitGap: 200
+      $name: Split Gap
+      $description: Pixels the second piece moves along the visualizer (right, or down when vertical). Negative moves it back
+    - splitShift: 0
+      $name: Split Shift
+      $description: Pixels the second piece moves across it (down, or right when vertical)
   $name: Position
 - interaction:
     - keyMoveEnabled: true
@@ -1170,12 +1300,12 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
         - both: Arrow Keys and WASD
         - arrows: Arrow Keys only
         - wasd: WASD only
-    - keyMoveStep: 1
+    - keyMoveStep: '1'
       $name: Keyboard Move Step
-      $description: How far one press moves the visualizer, in pixels. 1 gives true pixel-by-pixel placement
-    - keyMoveFastStep: 10
+      $description: How far one press moves the visualizer, in pixels. 1 gives true pixel-by-pixel placement. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
+    - keyMoveFastStep: '10'
       $name: Keyboard Move Fast Step
-      $description: How far one press moves it while the Fast Key below is also held, in pixels
+      $description: How far one press moves it while the Fast Key below is also held, in pixels. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
     - keyMoveFineStep: '0.25'
       $name: Keyboard Move Fine Step
       $description: A subpixel step for the visualizer, used while the Fine Key is held or with Subpixel Nudges ticked in the right-click menu. Only shows as movement with Pixel Snap off (Position); with it on, the position still accumulates and the picture moves a whole pixel at a time
@@ -1205,6 +1335,12 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
     - dragEnabled: false
       $name: Enable Drag-to-Move
       $description: Hold the modifier + mouse button below anywhere over the visualizer and drag to reposition it. Bar rendering pauses for the duration of the drag -- only the background/border box (if Background is enabled) moves. Double-click the same combo without dragging to clear a dragged position. Note this rides a global mouse hook and has to repaint the whole visualizer to keep up with the cursor, so on a heavy shape or a high bar count it can feel sluggish next to the keyboard move above -- which is why it's off by default now
+    - dragSnap: true
+      $name: Snap While Dragging
+      $description: While dragging, the visualizer's edges and centre catch on the screen's edges and centre, the taskbar's edge, the tray and the Start button. Hold Shift (Alt when Shift is the drag key) to place it freely
+    - dragSnapDistance: 8
+      $name: Snap Distance
+      $description: How close, in pixels, an edge has to come before it snaps
     - dragModifier: ctrl
       $name: Drag Modifier Key
       $description: Held together with the mouse button below to start a drag
@@ -1247,27 +1383,33 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
     - iconNextPath: ''
       $name: Next Icon Path
       $description: Full path to a local image file for the Next button. Leave blank to use the built-in icon
-    - iconSize: 32
+    - iconSize: '32'
       $name: Icon Size
-      $description: Size of each button, in pixels (square)
-    - iconSpacing: 14
+      $description: Size of each button, in pixels (square). Decimals allowed; the media controls round to whole pixels
+    - iconSpacing: '14'
       $name: Icon Spacing
-      $description: Gap between buttons, in pixels
+      $description: Gap between buttons, in pixels. Decimals allowed; the media controls round to whole pixels
     - plateColor: '#00000000'
       $name: Backing Plate Color
       $description: 'A panel drawn behind the whole icon strip. Fully transparent by default, so your icons sit directly on the wallpaper with nothing behind them. Raise the alpha if pale icons are hard to pick out against a light wallpaper -- e.g. #8C141414 for a soft dark plate. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b)'
-    - platePadding: 0
+    - platePadding: '0'
       $name: Backing Plate Padding
-      $description: Breathing room between the icons and the edge of the backing plate, in pixels. This grows the strip itself rather than shrinking the icons, so raising it never makes the buttons smaller or harder to click. Note that it grows the strip whether or not the plate is visible, which very slightly shifts where the Horizontal/Vertical Position percentages land
-    - plateCornerRadius: 8
+      $description: Breathing room between the icons and the edge of the backing plate, in pixels. This grows the strip itself rather than shrinking the icons, so raising it never makes the buttons smaller or harder to click. Note that it grows the strip whether or not the plate is visible, which very slightly shifts where the Horizontal/Vertical Position percentages land. Decimals allowed; the media controls round to whole pixels
+    - plateCornerRadius: '8'
       $name: Backing Plate Corner Radius
-      $description: Roundness of the backing plate corners, in pixels. Only used when the plate color above has some alpha
-    - plateBorderSize: 0
+      $description: Roundness of the backing plate corners, in pixels. Only used when the plate color above has some alpha. Decimals allowed; the media controls round to whole pixels
+    - plateBorderSize: '0'
       $name: Backing Plate Border Size
-      $description: Outline thickness around the backing plate, in pixels. 0 disables it. The border draws whether or not the plate itself has any fill, so you can have an outline on its own with nothing behind the icons
+      $description: Outline thickness around the backing plate, in pixels. 0 disables it. The border draws whether or not the plate itself has any fill, so you can have an outline on its own with nothing behind the icons. Decimals allowed; the media controls round to whole pixels
     - plateBorderColor: '#40FFFFFF'
       $name: Backing Plate Border Color
       $description: 'Color of the backing plate outline. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b)'
+    - stacking: top
+      $name: Stacking
+      $description: Whether the strip or card stays above other windows
+      $options:
+        - top: Always on top (covers apps, even ones run as administrator)
+        - normal: Normal window (apps you click on cover it)
     - hideWhenCovered: false
       $name: Hide When Covered
       $description: The strip is topmost, so by default it stays on screen over whatever else you have open. Turn this on to have it get out of the way while a real application window sits underneath it, and come back when that window moves or closes. Note that while it is parked out of the way it is genuinely hidden, so keyboard nudges (move target 4) still apply but you will not see them land until it comes back. Coverage is re-checked once a second, not instantly
@@ -1310,12 +1452,44 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
         - panel_top_right: Panel, top right
         - panel_bottom_left: Panel, bottom left
         - panel_bottom_right: Panel, bottom right
-    - anchorOffsetX: 8
+    - anchorOffsetX: '8'
       $name: Anchor Inset X
-      $description: Distance in from the panel's left or right edge, in pixels. Only used with a panel anchor
-    - anchorOffsetY: 8
+      $description: Distance in from the panel's left or right edge, in pixels. Only used with a panel anchor. Decimals allowed; the media controls round to whole pixels
+    - anchorOffsetY: '8'
       $name: Anchor Inset Y
-      $description: Distance in from the panel's top or bottom edge, in pixels. Only used with a panel anchor
+      $description: Distance in from the panel's top or bottom edge, in pixels. Only used with a panel anchor. Decimals allowed; the media controls round to whole pixels
+    - layout: strip
+      $name: Layout
+      $description: Strip is the three buttons. Card is a small media card in the same place, sized from Icon Size and Icon Spacing - the album art (hover it for previous / play / next), a seek bar (click or drag), a speaker button that switches the Windows default output in one click, and a volume slider (drag it, or scroll anywhere on the card)
+      $options:
+        - strip: Strip (three buttons)
+        - card: Card (art, seek, output, volume)
+    - cardBackground: '#9E0A0A0D'
+      $name: Card Background
+      $description: 'Card only. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b). Kept just above fully transparent at the least, so the card always takes clicks'
+    - cardBorderColor: '#00FFFFFF'
+      $name: Card Border Color
+      $description: 'Card only. Same formats as Card Background'
+    - cardBorderSize: '0'
+      $name: Card Border Size
+      $description: Card only. Pixels, drawn inward from the edge. Decimals allowed; the media controls round to whole pixels
+    - cardCornerRadius: '12'
+      $name: Card Corner Radius
+      $description: Card only. Pixels. The album art's corners follow it. Decimals allowed; the media controls round to whole pixels
+    - cardArtSize: '0'
+      $name: Card Art Size
+      $description: Card only. Width of the album art in pixels, which sets the card's width. 0 sizes it from Icon Size and Icon Spacing. Decimals allowed; the media controls round to whole pixels
+    - cardAccent: icon
+      $name: Card Accent
+      $description: Card only. Colour of the seek and volume fills and their knobs
+      $options:
+        - icon: Icon Color
+        - custom: Card Accent Color
+        - album: Album art
+        - windows: Windows accent
+    - cardAccentColor: '#FFFFFFFF'
+      $name: Card Accent Color
+      $description: 'Card only, with Card Accent = Card Accent Color. Same formats as Card Background'
   $name: Media Controls
 - background:
     - enabled: true
@@ -1333,9 +1507,9 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
     - blur: 0
       $name: Blur
       $description: Gaussian blur strength behind the panel, in pixels. 0 disables it. Computed once and cached, not redrawn every frame, so raising this has minimal ongoing CPU cost
-    - borderSize: 0
+    - borderSize: '0'
       $name: Border Size
-      $description: Panel border thickness, in pixels. 0 disables it
+      $description: Panel border thickness, in pixels. 0 disables it. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
     - borderColor: '#40FFFFFF'
       $name: Border Color
       $description: 'Panel border color. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b)'
@@ -1455,11 +1629,15 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
 #include <shlwapi.h>
 #include <shellapi.h>
 #include <mmdeviceapi.h>
+#include <endpointvolume.h>
 #include <audioclient.h>
 #include <wrl/client.h>
 #include <wincodec.h>
 #include <dwrite.h>
 #include <windowsx.h>
+#include <commctrl.h>
+#include <commdlg.h>
+#include <tlhelp32.h>
 
 #include <algorithm>
 #include <atomic>
@@ -1563,15 +1741,16 @@ enum class VizNpPlacement { Above, PanelTop, PanelBottom };
 enum class VizProgressPlacement { Below, Above, PanelBottom };
 enum class VizMediaAnchor { Screen, PanelTopLeft, PanelTopRight, PanelBottomLeft, PanelBottomRight };
 enum class VizContextMenu { RightClick, CtrlRightClick, Off };
+enum class VizStyle { None, Led, Line, Bloom, Spectrogram, Vu, SplitLR, Particles };
 
 struct Settings {
     VizShape shape = VizShape::Stereo;
     VizOrientation orientation = VizOrientation::Horizontal;
     int barCount = 32;
-    int barWidth = 6;
-    int barGap = 4;
-    int barMaxSize = 140;
-    int barIdleSize = 4;
+    float barWidth = 6;
+    float barGap = 4;
+    float barMaxSize = 140;
+    float barIdleSize = 4;
     float barRadiusTL = 3.0f, barRadiusTR = 3.0f, barRadiusBR = 3.0f, barRadiusBL = 3.0f;
     VizColorMode colorMode = VizColorMode::Solid;
     BYTE colorA = 255, colorR = 255, colorG = 255, colorB = 255;
@@ -1593,8 +1772,8 @@ struct Settings {
     bool keyMoveEnabled = true;
     unsigned keyMoveModifier = VIZ_MOD_CTRL | VIZ_MOD_ALT;
     VizKeyMoveKeys keyMoveKeys = VizKeyMoveKeys::Both;
-    int keyMoveStep = 1;
-    int keyMoveFastStep = 10;
+    float keyMoveStep = 1;
+    float keyMoveFastStep = 10;
     unsigned keyMoveFastKey = VIZ_MOD_SHIFT;
     float keyMoveFineStep = 0.25f;           // px, for subpixel nudges
     unsigned keyMoveFineKey = VIZ_MOD_NONE;  // held for a fine step
@@ -1602,6 +1781,15 @@ struct Settings {
     bool pixelSnap = true;
 
     bool dragEnabled = false;
+    bool splitEnabled = false;        // show the visualizer as two pieces
+    float splitAt = 50.f;             // % of the bars in the first piece
+    float splitGap = 0.f, splitShift = 0.f;  // logical px: along, and across
+    std::wstring dockApp;             // lower case, without .exe; empty = not docked
+    int dockSide = 0;                 // 0 below, 1 above, 2 left, 3 right
+    int dockAlign = 1;                // 0 start, 1 centre, 2 end
+    float dockGap = 0.f, dockShift = 0.f;  // logical px
+    bool dragSnap = true;             // snap to screen and taskbar lines while dragging
+    float dragSnapDistance = 8.f;     // logical px
     VizDragModifier dragModifier = VizDragModifier::Ctrl;
     VizDragButton dragButton = VizDragButton::Middle;
 
@@ -1609,10 +1797,10 @@ struct Settings {
 
     bool backgroundEnabled = true;
     BYTE bgA = 0x60, bgR = 0, bgG = 0, bgB = 0;
-    int bgPaddingL = 24, bgPaddingR = 24, bgPaddingT = 24, bgPaddingB = 24;
+    float bgPaddingL = 24, bgPaddingR = 24, bgPaddingT = 24, bgPaddingB = 24;
     float bgRadiusTL = 14.0f, bgRadiusTR = 14.0f, bgRadiusBR = 14.0f, bgRadiusBL = 14.0f;
     int bgBlur = 0;
-    int bgBorderSize = 0;
+    float bgBorderSize = 0;
     BYTE borderA = 0x40, borderR = 255, borderG = 255, borderB = 255;
 
     int targetFps = 60;
@@ -1629,19 +1817,25 @@ struct Settings {
     bool nowPlayingEnabled = false;
     BYTE nowPlayingA = 255, nowPlayingR = 255, nowPlayingG = 255, nowPlayingB = 255;
     std::wstring nowPlayingFont = L"Segoe UI";
-    int nowPlayingFontSize = 16;
+    float nowPlayingFontSize = 16;
     int nowPlayingDisplaySeconds = 6;
-    int nowPlayingOffsetX = 0, nowPlayingOffsetY = 0;
-    int peakFreqOffsetX = 0, peakFreqOffsetY = 0;
+    float nowPlayingOffsetY = 0;
+    float nowPlayingOffsetX = 0;
+    float peakFreqOffsetY = 0;
+    float peakFreqOffsetX = 0;
 
     // Per-overlay text panels. Alpha 0 on the fill means "no panel"; the border
     // is independent, so an outline with nothing behind it is a valid look.
     BYTE npBgA = 0, npBgR = 0, npBgG = 0, npBgB = 0;
-    int npBgPadding = 6, npBgCornerRadius = 6, npBgBorderSize = 0;
+    float npBgBorderSize = 0;
+    float npBgCornerRadius = 6;
+    float npBgPadding = 6;
     BYTE npBgBorderA = 0x40, npBgBorderR = 255, npBgBorderG = 255, npBgBorderB = 255;
 
     BYTE pfBgA = 0, pfBgR = 0, pfBgG = 0, pfBgB = 0;
-    int pfBgPadding = 6, pfBgCornerRadius = 6, pfBgBorderSize = 0;
+    float pfBgBorderSize = 0;
+    float pfBgCornerRadius = 6;
+    float pfBgPadding = 6;
     BYTE pfBgBorderA = 0x40, pfBgBorderR = 255, pfBgBorderG = 255, pfBgBorderB = 255;
 
     bool autoHideEnabled = false;
@@ -1664,15 +1858,24 @@ struct Settings {
     std::wstring mediaIconPlayPath;
     std::wstring mediaIconPausePath;
     std::wstring mediaIconNextPath;
-    int mediaIconSize = 32;
-    int mediaIconSpacing = 14;
+    float mediaIconSize = 32;
+    float mediaIconSpacing = 14;
     BYTE mediaPlateA = 0, mediaPlateR = 0, mediaPlateG = 0, mediaPlateB = 0;
-    int mediaPlatePadding = 0;
-    int mediaPlateCornerRadius = 8;
-    int mediaPlateBorderSize = 0;
+    float mediaPlatePadding = 0;
+    bool mediaCard = false;  // Media Controls > Layout = Card (2.1)
+    BYTE cardBgA = 158, cardBgR = 10, cardBgG = 10, cardBgB = 13;
+    BYTE cardBorderA = 0, cardBorderR = 255, cardBorderG = 255, cardBorderB = 255;
+    float cardArtSize = 0;
+    float cardRadius = 12;
+    float cardBorderSize = 0;
+    int cardAccentSource = 0;  // 0 icon colour, 1 custom, 2 album art, 3 Windows accent
+    BYTE cardAccentA = 255, cardAccentR = 255, cardAccentG = 255, cardAccentB = 255;
+    float mediaPlateCornerRadius = 8;
+    float mediaPlateBorderSize = 0;
     BYTE mediaPlateBorderA = 0x40, mediaPlateBorderR = 255, mediaPlateBorderG = 255,
          mediaPlateBorderB = 255;
     bool mediaHideWhenCovered = false;
+    bool mediaOnTop = true;           // the strip / card stays above other windows
     int mediaCoveredThresholdPercent = 50;
     float mediaHorizontalPosition = 50.0f;
     float mediaVerticalPosition = 95.0f;
@@ -1710,6 +1913,23 @@ struct Settings {
     // Audio source (2.0): "" / default_output, default_input, id:<endpoint>, name:<text>.
     std::wstring audioSourceKey;
 
+    // Styles (2.1): picked from the Shape list on top of an internal shape.
+    VizStyle style = VizStyle::None;
+    int reflection = 0;  // %, of Bar Max Size
+    int fxGlow = 0, fxBloom = 0;
+    float fxBloomRadius = 16;
+    float fxGlowRadius = 6;  // FX (2.1)
+    float fxOutlineWidth = 0.f;  // px
+    BYTE fxOutlineA = 0xB0, fxOutlineR = 255, fxOutlineG = 255, fxOutlineB = 255;
+    int fxShadow = 0;  // %
+    BYTE fxShadowR = 0, fxShadowG = 0, fxShadowB = 0;
+    float fxShadowX = 2.f, fxShadowY = 3.f, fxShadowSoft = 4.f;  // px
+    bool barHollow = false;
+    float barHollowWidth = 1.5f, barDash = 0.f, barDashGap = 2.f, barTilt = 0.f;  // px, px, px, degrees
+    float barMirrorGap = 0.f;  // px
+    int afterimage = 0;  // %
+    float afterimageSeconds = 1.2f;
+
     // Media widget (2.0).
     VizNpLayout npLayout = VizNpLayout::OneLine;
     VizNpPlacement npPlacement = VizNpPlacement::Above;
@@ -1717,18 +1937,23 @@ struct Settings {
     BYTE npArtistA = 0xB3, npArtistR = 255, npArtistG = 255, npArtistB = 255;
     bool textPixel = false;
     bool progressEnabled = false;
+    bool progressSeek = false;        // Click to Seek
+    bool progressSeekOnlyListed = false;  // the app list includes rather than excludes
+    std::vector<std::wstring> progressSeekApps;  // lower case, without .exe
     VizProgressPlacement progressPlacement = VizProgressPlacement::Below;
-    int progressHeight = 2, progressGap = 6;
+    float progressGap = 6;
+    float progressHeight = 2;
     BYTE progressA = 255, progressR = 255, progressG = 255, progressB = 255;
     BYTE progressTrackA = 0x40, progressTrackR = 255, progressTrackG = 255, progressTrackB = 255;
     VizMediaAnchor mediaAnchor = VizMediaAnchor::Screen;
-    int mediaAnchorOffsetX = 8, mediaAnchorOffsetY = 8;
+    float mediaAnchorOffsetY = 8;
+    float mediaAnchorOffsetX = 8;
     VizContextMenu contextMenu = VizContextMenu::RightClick;
 
     // Terminal shape (2.0).
     VizTermStyle termStyle = VizTermStyle::Columns;
     std::wstring termFont = L"Consolas";
-    int termFontSize = 14;
+    float termFontSize = 14;
     int termRows = 16;
     int termMeterColumns = 40;
     int termHotThreshold = 75;
@@ -1795,6 +2020,19 @@ ComPtr<IDCompositionVisual> g_compositionVisual;
 // (g_compositionVisual) as a child, so the Direct3D 11 renderer can slide its
 // panel surface in underneath it.
 ComPtr<IDCompositionVisual> g_rootVisual;
+// Split into two pieces (2.1): the composition target's real root. It holds
+// g_rootVisual (the first piece, clipped at the cut) and, while splitting, a
+// second container showing the same swap chains again, clipped to the other
+// side and offset. DWM does the moving; nothing is drawn twice.
+ComPtr<IDCompositionVisual> g_splitTop;
+struct VizSplitState {
+    ComPtr<IDCompositionVisual> p2, text2, gfx2;
+    ComPtr<IDCompositionRectangleClip> c1, c2;
+    bool built = false, on = false, gfxIn = false, gClip = false, vert = false;
+    float line = 0.f, dx = 0.f, dy = 0.f, tx = 0.f, ty = 0.f, gx = 0.f, gy = 0.f;
+    IUnknown* textC = nullptr;
+    IUnknown* gfxC = nullptr;
+} g_split;
 ComPtr<ID2D1SolidColorBrush> g_barBrush;
 ComPtr<ID2D1SolidColorBrush> g_barBrush2;
 ComPtr<ID2D1SolidColorBrush> g_backgroundBrush;
@@ -1811,7 +2049,7 @@ ComPtr<ID2D1PathGeometry> g_bgGeoCache;
 ComPtr<ID2D1GeometryGroup> g_borderRingCache;
 D2D1_RECT_F g_bgGeoCacheRect = {-1.f, -1.f, -1.f, -1.f};
 float g_bgGeoCacheRadii[4] = {-1.f, -1.f, -1.f, -1.f};
-int g_borderCacheBorderSize = -1;
+float g_borderCacheBorderSize = -1.f;
 
 ComPtr<ID2D1StrokeStyle> g_roundCapStrokeStyle;
 ComPtr<IDWriteFactory> g_dwriteFactory;
@@ -1820,7 +2058,7 @@ ComPtr<ID2D1SolidColorBrush> g_nowPlayingBrush;
 ComPtr<ID2D1SolidColorBrush> g_npArtistBrush;
 ComPtr<ID2D1SolidColorBrush> g_progressBrush;
 ComPtr<ID2D1SolidColorBrush> g_textPanelBrush;
-int g_dwriteTextFormatFontSize = -1;
+float g_dwriteTextFormatFontSize = -1.f;
 std::wstring g_dwriteTextFormatFontName;
 
 static const IID kCLSID_D2D1GaussianBlur = {
@@ -2035,6 +2273,15 @@ std::atomic<float> g_dominantFreqHz{0.f};
 // Screen-space bounds of the last drawn frame, used by the occlusion check so
 // it can test the region we actually occupy rather than the whole monitor.
 std::atomic<LONG> g_drawRectL{0}, g_drawRectT{0}, g_drawRectR{0}, g_drawRectB{0};
+// Dock to an app window: the window's visible frame in screen pixels, written
+// on the UI thread and read by layout on the render thread.
+std::atomic<bool> g_dockActive{false};
+std::atomic<LONG> g_dockL{0}, g_dockT{0}, g_dockR{0}, g_dockB{0};
+void VizDockPlace(float boxW, float boxH, float* x, float* y);
+// The progress bar's hit area for Click to Seek, in screen pixels (render thread
+// writes, the input hook reads).
+std::atomic<LONG> g_seekRectL{0}, g_seekRectT{0}, g_seekRectR{0}, g_seekRectB{0};
+std::atomic<bool> g_seekRectValid{false};
 std::atomic<bool> g_drawRectValid{false};
 // Set once the auto-hide fade has reached full transparency and a single blank
 // frame has been presented. While set, the render path exits immediately.
@@ -2209,6 +2456,42 @@ static HANDLE g_gsmtcStopEvent = nullptr;
 // pair. This is the documented form for a global worker thread.
 [[clang::no_destroy]] static std::optional<std::thread> g_gsmtcThread;
 static std::thread* g_albumArtThread = nullptr;
+
+// Media Card (2.1): the cover, box-filtered down to at most 160 px, straight
+// alpha BGRA as WIC decodes it. Written by the album-art thread, read by the
+// media window's paint.
+std::mutex g_artTileMutex;
+std::vector<BYTE> g_artTile;
+int g_artTileW = 0, g_artTileH = 0;
+std::atomic<int64_t> g_mediaSeekTicks{0};  // seek target for media command 3, 100 ns units
+inline bool VizCardWantsArt() { return g_settings.mediaControlsEnabled && g_settings.mediaCard; }
+
+void VizStoreArtTile(const BYTE* px, int w, int h) {
+    std::vector<BYTE> out;
+    int ow = 0, oh = 0;
+    if (px && w > 0 && h > 0) {
+        int f = std::max(1, (std::max(w, h) + 159) / 160);
+        ow = std::max(1, w / f);
+        oh = std::max(1, h / f);
+        out.resize((size_t)ow * oh * 4);
+        for (int y = 0; y < oh; y++)
+            for (int x = 0; x < ow; x++)
+                for (int k = 0; k < 4; k++) {
+                    unsigned sum = 0;
+                    for (int yy = 0; yy < f; yy++)
+                        for (int xx = 0; xx < f; xx++) sum += px[((size_t)(y * f + yy) * w + (x * f + xx)) * 4 + k];
+                    out[((size_t)y * ow + x) * 4 + k] = (BYTE)(sum / (unsigned)(f * f));
+                }
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_artTileMutex);
+        if (out.empty() && g_artTile.empty()) return;
+        g_artTile.swap(out);
+        g_artTileW = ow;
+        g_artTileH = oh;
+    }
+    if (g_mediaWnd && g_settings.mediaCard) PostMessage(g_mediaWnd, WM_APP_MEDIA_REPAINT, 0, 0);
+}
 // Guards the pointer above: callers arrive from WinRT callbacks, the GSMTC
 // thread and the UI thread, and the worker can clear the pending flag before
 // the caller has stored its new thread.
@@ -2489,6 +2772,35 @@ void ReportSettingWarning(PCWSTR group, PCWSTR name, const std::wstring& detail)
 // Reads a free-text setting that must be a single number in [lo, hi]. Rejects
 // trailing junk ("50px", "50 50") rather than silently taking the leading
 // number, since that's exactly the kind of near-miss that looks like it worked.
+// A size or offset: a number with decimals, given as text ('1.25'; a comma
+// works as the decimal point too). Up to 2.0 these were whole-number
+// settings, and a value saved then is still stored as a number, which reads
+// back here as empty text: that number is used until the setting is saved
+// again.
+float ReadSizeSetting(PCWSTR key, float lo, float hi, float def) {
+    PCWSTR str = Wh_GetStringSetting(key);
+    float v = def;
+    bool ok = false;
+    if (str && *str) {
+        WCHAR buf[64];
+        wcsncpy_s(buf, str, _TRUNCATE);
+        for (WCHAR* c = buf; *c; c++)
+            if (*c == L',') *c = L'.';
+        WCHAR* end = nullptr;
+        double d = wcstod(buf, &end);
+        if (end != buf && std::isfinite(d)) {
+            v = (float)d;
+            ok = true;
+        }
+    }
+    Wh_FreeStringSetting(str);
+    if (!ok) {
+        int n = Wh_GetIntSetting(key);
+        if (n != 0) v = (float)n;
+    }
+    return std::clamp(v, lo, hi);
+}
+
 float ReadNumberSetting(PCWSTR key, PCWSTR group, PCWSTR name, float def, float lo, float hi) {
     PCWSTR str = Wh_GetStringSetting(key);
     float result = def;
@@ -3057,7 +3369,7 @@ void FetchAlbumArtColorAsync() {
             }
 
             auto thumbRef = props.Thumbnail();
-            if (!thumbRef) { winrt::uninit_apartment(); g_albumArtFetchPending.store(false); return; }
+            if (!thumbRef) { VizStoreArtTile(nullptr, 0, 0); winrt::uninit_apartment(); g_albumArtFetchPending.store(false); return; }
 
             auto stream = thumbRef.OpenReadAsync().get();
             if (!stream) { winrt::uninit_apartment(); g_albumArtFetchPending.store(false); return; }
@@ -3108,6 +3420,7 @@ void FetchAlbumArtColorAsync() {
             pStream->Release();
             pFactory->Release();
 
+            if (!pixels.empty()) VizStoreArtTile(pixels.data(), imgW, imgH);
             if (!pixels.empty()) {
                 struct Bucket { uint32_t r=0,g=0,b=0,n=0; };
                 Bucket buckets[16][16][16]{};
@@ -3158,6 +3471,7 @@ void FetchAlbumArtColorAsync() {
                     g_albumArtColor.store(col,  std::memory_order_relaxed);
                     g_albumArtColorSecondary.store(col2, std::memory_order_relaxed);
                     g_albumArtColorReady.store(true, std::memory_order_relaxed);
+                    if (g_mediaWnd && g_settings.mediaCard) PostMessage(g_mediaWnd, WM_APP_MEDIA_REPAINT, 0, 0);
                 }
             }
         } catch (...) {}
@@ -3231,7 +3545,7 @@ void SetupGsmtcSessionListener() {
             [](auto const&, auto const&) {
                 if (g_settings.colorMode == VizColorMode::AlbumArt ||
                     g_settings.colorMode == VizColorMode::DynamicAlbum ||
-                    g_settings.nowPlayingEnabled)
+                    g_settings.nowPlayingEnabled || VizCardWantsArt())
                     FetchAlbumArtColorAsync();
             });
         // Pausing / resuming folds the position in (VizTimelineSetPlaying);
@@ -3266,14 +3580,14 @@ void InitGsmtcListener() {
                     SetupGsmtcSessionListener();
                     if (g_settings.colorMode == VizColorMode::AlbumArt ||
                         g_settings.colorMode == VizColorMode::DynamicAlbum ||
-                        g_settings.nowPlayingEnabled)
+                        g_settings.nowPlayingEnabled || VizCardWantsArt())
                         FetchAlbumArtColorAsync();
                 });
 
             SetupGsmtcSessionListener();
             if (g_settings.colorMode == VizColorMode::AlbumArt ||
                 g_settings.colorMode == VizColorMode::DynamicAlbum ||
-                g_settings.nowPlayingEnabled)
+                g_settings.nowPlayingEnabled || VizCardWantsArt())
                 FetchAlbumArtColorAsync();
         } catch (...) {}
 
@@ -3336,6 +3650,8 @@ void SendMediaCommand(int cmd) {
                     if (cmd == 0)      session.TrySkipPreviousAsync().get();
                     else if (cmd == 1) session.TryTogglePlayPauseAsync().get();
                     else if (cmd == 2) session.TrySkipNextAsync().get();
+                    else if (cmd == 3)
+                        session.TryChangePlaybackPositionAsync(g_mediaSeekTicks.load(std::memory_order_relaxed)).get();
                 }
             }
         } catch (...) {}
@@ -3419,6 +3735,14 @@ void LoadMediaIconSlot(const std::wstring& path, int sizePx, std::vector<BYTE>& 
 void RecreateMediaControlResources() {
     float dpiScale = GetMediaControlsDpiScale();
     int sizePx = std::max(1, (int)std::lround(g_settings.mediaIconSize * dpiScale));
+    if (g_settings.mediaCard) {
+        // The card draws its controls at a quarter of the art tile; load the
+        // icons at that size so they are not stretched up from the strip size.
+        int sp = std::max(0, (int)std::lround(g_settings.mediaIconSpacing * dpiScale));
+        int tile = g_settings.cardArtSize > 0 ? std::max(24, (int)std::lround(g_settings.cardArtSize * dpiScale))
+                                              : sizePx * 3 + sp * 2;
+        sizePx = std::max(8, tile / 4);
+    }
     g_mediaIconLoadedSize = sizePx;
     LoadMediaIconSlot(g_settings.mediaIconPrevPath, sizePx, g_mediaIconPixels[0], L"Previous");
     LoadMediaIconSlot(g_settings.mediaIconPlayPath, sizePx, g_mediaIconPixels[1], L"Play");
@@ -3543,6 +3867,400 @@ int GetMediaPlatePaddingPx() {
     return std::max(0, (int)std::lround(g_settings.mediaPlatePadding * GetMediaControlsDpiScale()));
 }
 
+// ---- Media Card (2.1) -------------------------------------------------------------------
+// Media Controls > Layout = Card turns the three-button strip into a small
+// card, after the Rainmeter media modules:
+//   album art   the current track's cover; hover it for prev / play / next
+//   seek bar    the track position; click or drag it to seek
+//   output      the speaker button lists the outputs, one click switches the
+//               Windows default (the visualizer follows if it listens to it)
+//   volume      drag the slider, or scroll anywhere on the card
+// Its look has its own settings: background, border, corner radius, art
+// size, and an accent (for the seek and volume fills) taken from the icon
+// colour, a colour of your own, the album art or the Windows accent.
+// It is the same layered window as the strip, painted in software, and only
+// repainted when something on it changes: hover, a click, a new cover, the
+// volume, or the seek bar moving by a whole pixel (checked once a second
+// while a track plays).
+
+float VizCardGetVolume();                 // default output, 0..1, or -1
+void VizCardSetVolume(float v);
+void VizCardOutputMenu(HWND hWnd, POINT screenPt);
+
+constexpr UINT_PTR kCardTimer = 0x7701;
+
+bool VizCardActive() { return g_settings.mediaCard; }
+
+struct VizCardGeom {
+    int pad, tile, gap, progY, progH, rowY, rowH, w, h;
+    float dpi;
+};
+
+VizCardGeom VizCardLayout() {
+    VizCardGeom g;
+    g.dpi = GetMediaControlsDpiScale();
+    int s = std::max(1, (int)std::lround(g_settings.mediaIconSize * g.dpi));
+    int sp = std::max(0, (int)std::lround(g_settings.mediaIconSpacing * g.dpi));
+    g.pad = std::max(GetMediaPlatePaddingPx(), (int)std::lround(8 * g.dpi));
+    g.tile = g_settings.cardArtSize > 0 ? std::max(24, (int)std::lround(g_settings.cardArtSize * g.dpi)) : s * 3 + sp * 2;
+    g.gap = std::max(4, (int)std::lround(7 * g.dpi));
+    g.progH = std::max(3, (int)std::lround(3 * g.dpi));
+    g.progY = g.pad + g.tile + g.gap;
+    g.rowH = std::max((int)std::lround(18 * g.dpi), (int)std::lround(s * 0.6f));
+    g.rowY = g.progY + g.progH + g.gap;
+    g.w = g.tile + g.pad * 2;
+    g.h = g.rowY + g.rowH + g.pad;
+    return g;
+}
+
+void VizCardSize(int* w, int* h) {
+    VizCardGeom g = VizCardLayout();
+    *w = g.w;
+    *h = g.h;
+}
+
+namespace {
+enum CardPart { kPartNone, kPartArt, kPartSeek, kPartSpeaker, kPartVolume };
+bool s_cardHover = false, s_cardTracking = false;
+int s_cardDrag = kPartNone;
+int s_cardHoverPart = kPartNone;
+float s_cardSeekPreview = -1.f;  // while dragging the seek bar
+float s_cardVolume = -1.f;
+int s_cardProgPx = -1;
+
+// Straight-alpha colour over the premultiplied buffer, with coverage.
+// A control glyph on the card: the custom icon for that slot when one is set
+// (Media Controls > icon paths), resampled to the card's size, else the
+// built-in shape. Slots: 0 previous, 1 play, 2 pause, 3 next.
+void CardGlyph(BYTE* buf, int stride, int x, int y, int s, int slot) {
+    const auto& src = g_mediaIconPixels[slot];
+    const int n = g_mediaIconLoadedSize;
+    if (n <= 0 || s <= 0 || (int)src.size() < n * n * 4) {
+        DrawBuiltinGlyph(buf, stride, x, y, s, slot);
+        return;
+    }
+    const float k = (float)n / (float)s;
+    for (int dy = 0; dy < s; dy++)
+        for (int dx = 0; dx < s; dx++) {
+            float acc[4] = {0, 0, 0, 0};
+            if (k > 1.f) {
+                // Shrinking: average the source pixels this one covers.
+                int x0 = (int)(dx * k), x1 = std::min(n, std::max(x0 + 1, (int)ceilf((dx + 1) * k)));
+                int y0 = (int)(dy * k), y1 = std::min(n, std::max(y0 + 1, (int)ceilf((dy + 1) * k)));
+                for (int sy = y0; sy < y1; sy++)
+                    for (int sx = x0; sx < x1; sx++)
+                        for (int c = 0; c < 4; c++) acc[c] += src[((size_t)sy * n + sx) * 4 + c];
+                float inv = 1.f / (float)((x1 - x0) * (y1 - y0));
+                for (float& v : acc) v *= inv;
+            } else {
+                // Growing: bilinear.
+                float u = (dx + 0.5f) * k - 0.5f, v = (dy + 0.5f) * k - 0.5f;
+                int x0 = std::clamp((int)floorf(u), 0, n - 1), y0 = std::clamp((int)floorf(v), 0, n - 1);
+                int x1 = std::min(x0 + 1, n - 1), y1 = std::min(y0 + 1, n - 1);
+                float fx = std::clamp(u - x0, 0.f, 1.f), fy = std::clamp(v - y0, 0.f, 1.f);
+                for (int c = 0; c < 4; c++) {
+                    auto px = [&](int xx, int yy) { return (float)src[((size_t)yy * n + xx) * 4 + c]; };
+                    acc[c] = (px(x0, y0) * (1 - fx) + px(x1, y0) * fx) * (1 - fy) +
+                             (px(x0, y1) * (1 - fx) + px(x1, y1) * fx) * fy;
+                }
+            }
+            BlendPremultipliedOver(buf + (size_t)(y + dy) * stride + (size_t)(x + dx) * 4, (BYTE)lroundf(acc[0]),
+                                   (BYTE)lroundf(acc[1]), (BYTE)lroundf(acc[2]), (BYTE)lroundf(acc[3]));
+        }
+}
+
+void CardBlend(BYTE* p, float r, float g, float b, float a) {
+    if (a <= 0.f) return;
+    BlendPremultipliedOver(p, (BYTE)std::lround(b * a * 255.f), (BYTE)std::lround(g * a * 255.f),
+                           (BYTE)std::lround(r * a * 255.f), (BYTE)std::lround(a * 255.f));
+}
+
+// Coverage of a pixel by a rounded rect (signed distance, one pixel of AA).
+float CardRoundCov(float px, float py, float l, float t, float r, float b, float rad) {
+    float cx = (l + r) * 0.5f, cy = (t + b) * 0.5f, hx = (r - l) * 0.5f, hy = (b - t) * 0.5f;
+    rad = std::min({rad, hx, hy});
+    float qx = fabsf(px - cx) - hx + rad, qy = fabsf(py - cy) - hy + rad;
+    float d = sqrtf(std::max(qx, 0.f) * std::max(qx, 0.f) + std::max(qy, 0.f) * std::max(qy, 0.f)) +
+              std::min(std::max(qx, qy), 0.f) - rad;
+    return std::clamp(0.5f - d, 0.f, 1.f);
+}
+
+void CardFillRound(BYTE* buf, int stride, int W, int H, float l, float t, float r, float b, float rad, float cr,
+                   float cg, float cb, float ca) {
+    int x0 = std::max(0, (int)floorf(l)), x1 = std::min(W, (int)ceilf(r));
+    int y0 = std::max(0, (int)floorf(t)), y1 = std::min(H, (int)ceilf(b));
+    for (int y = y0; y < y1; y++)
+        for (int x = x0; x < x1; x++) {
+            float cov = CardRoundCov(x + 0.5f, y + 0.5f, l, t, r, b, rad);
+            if (cov > 0.f) CardBlend(buf + (size_t)y * stride + (size_t)x * 4, cr, cg, cb, ca * cov);
+        }
+}
+
+// A small speaker: body, cone, and one or two sound waves by volume.
+void CardSpeaker(BYTE* buf, int stride, int ox, int oy, int sz, float vol, float ir, float ig, float ib, float ia) {
+    float s = (float)sz;
+    for (int y = 0; y < sz; y++)
+        for (int x = 0; x < sz; x++) {
+            float cov = 0.f;
+            for (int k = 0; k < 4; k++) {
+                float px = x + ((k & 1) + 0.5f) / 2.f, py = y + ((k >> 1) + 0.5f) / 2.f;
+                float u = px / s, v = py / s;
+                bool in = (u >= 0.14f && u <= 0.3f && v >= 0.38f && v <= 0.62f) ||
+                          PointInTriangle(px, py, s * 0.3f, s * 0.38f, s * 0.3f, s * 0.62f, s * 0.5f, s * 0.2f) ||
+                          PointInTriangle(px, py, s * 0.3f, s * 0.62f, s * 0.5f, s * 0.8f, s * 0.5f, s * 0.2f);
+                float dx = u - 0.5f, dy = v - 0.5f, rr = sqrtf(dx * dx + dy * dy);
+                bool arcs = dx > 0.05f && fabsf(dy) < dx * 1.1f;
+                if (arcs && vol > 0.01f && fabsf(rr - 0.2f) < 0.035f) in = true;
+                if (arcs && vol > 0.5f && fabsf(rr - 0.33f) < 0.035f) in = true;
+                if (in) cov += 0.25f;
+            }
+            if (cov > 0.f) CardBlend(buf + (size_t)(oy + y) * stride + (size_t)(ox + x) * 4, ir, ig, ib, ia * cov);
+        }
+}
+
+int CardHit(const VizCardGeom& g, int x, int y) {
+    int slack = (int)std::lround(5 * g.dpi);
+    if (x >= g.pad && x < g.pad + g.tile && y >= g.pad && y < g.pad + g.tile) return kPartArt;
+    if (x >= g.pad && x < g.pad + g.tile && y >= g.progY - slack && y < g.progY + g.progH + slack) return kPartSeek;
+    if (y >= g.rowY && y < g.rowY + g.rowH) {
+        if (x >= g.pad && x < g.pad + g.rowH) return kPartSpeaker;
+        if (x >= g.pad + g.rowH && x < g.pad + g.tile + slack) return kPartVolume;
+    }
+    return kPartNone;
+}
+
+float CardSliderFrac(const VizCardGeom& g, int x) {
+    float l = (float)(g.pad + g.rowH + g.gap), r = (float)(g.pad + g.tile) - 6.f * g.dpi;
+    return std::clamp((x - l) / std::max(1.f, r - l), 0.f, 1.f);
+}
+
+void CardRepaint() {
+    if (g_mediaWnd) PostMessage(g_mediaWnd, WM_APP_MEDIA_REPAINT, 0, 0);
+}
+
+// Seek to a fraction of the track, through the media command thread.
+void CardSeek(float frac) {
+    int64_t start = g_tlStart.load(std::memory_order_relaxed), end = g_tlEnd.load(std::memory_order_relaxed);
+    if (!g_tlValid.load(std::memory_order_relaxed) || end <= start) return;
+    g_mediaSeekTicks.store(start + (int64_t)((double)(end - start) * std::clamp(frac, 0.f, 1.f)),
+                           std::memory_order_relaxed);
+    SendMediaCommand(3);
+}
+}  // namespace
+
+void VizPaintCard(BYTE* buf, int stride, int W, int H) {
+    VizCardGeom g = VizCardLayout();
+    const float ir = g_settings.mediaIconColorR / 255.f, ig = g_settings.mediaIconColorG / 255.f,
+                ib = g_settings.mediaIconColorB / 255.f, ia = g_settings.mediaIconColorA / 255.f;
+    // Accent: the seek and volume fills and their knobs.
+    float ar = ir, ag = ig, ab = ib, aa = ia;
+    if (g_settings.cardAccentSource == 1) {
+        ar = g_settings.cardAccentR / 255.f;
+        ag = g_settings.cardAccentG / 255.f;
+        ab = g_settings.cardAccentB / 255.f;
+        aa = g_settings.cardAccentA / 255.f;
+    } else if (g_settings.cardAccentSource >= 2) {
+        DWORD dw = g_settings.cardAccentSource == 2 ? g_albumArtColor.load(std::memory_order_relaxed)
+                                                    : GetWindowsAccentColor();
+        ar = ((dw >> 16) & 0xFF) / 255.f;
+        ag = ((dw >> 8) & 0xFF) / 255.f;
+        ab = (dw & 0xFF) / 255.f;
+        aa = 1.f;
+    }
+    // Background, then the border drawn as a ring inside the edge. The
+    // background is never fully transparent: a layered window lets clicks
+    // through pixels with zero alpha, and the card should take every click
+    // inside it.
+    const float cardR = g_settings.cardRadius * g.dpi;
+    CardFillRound(buf, stride, W, H, 0.f, 0.f, (float)W, (float)H, cardR, g_settings.cardBgR / 255.f,
+                  g_settings.cardBgG / 255.f, g_settings.cardBgB / 255.f, std::max(1, (int)g_settings.cardBgA) / 255.f);
+    if (g_settings.cardBorderSize > 0 && g_settings.cardBorderA > 0) {
+        float bw = std::min(g_settings.cardBorderSize * g.dpi, std::min(W, H) * 0.5f);
+        for (int y = 0; y < H; y++)
+            for (int x = 0; x < W; x++) {
+                float px = x + 0.5f, py = y + 0.5f;
+                float ring = CardRoundCov(px, py, 0.f, 0.f, (float)W, (float)H, cardR) -
+                             CardRoundCov(px, py, bw, bw, W - bw, H - bw, std::max(0.f, cardR - bw));
+                if (ring > 0.f)
+                    CardBlend(buf + (size_t)y * stride + (size_t)x * 4, g_settings.cardBorderR / 255.f,
+                              g_settings.cardBorderG / 255.f, g_settings.cardBorderB / 255.f,
+                              g_settings.cardBorderA / 255.f * ring);
+            }
+    }
+
+    // Album art, scaled bilinearly into the tile with rounded corners.
+    const float tl = (float)g.pad, tt = (float)g.pad, ts = (float)g.tile;
+    const float rad = std::max(0.f, cardR - g.pad * 0.5f);  // follows the card's corners
+    bool art = false;
+    {
+        std::lock_guard<std::mutex> lock(g_artTileMutex);
+        if (!g_artTile.empty() && g_artTileW > 0 && g_artTileH > 0) {
+            art = true;
+            const int aw = g_artTileW, ah = g_artTileH;
+            for (int y = 0; y < g.tile; y++)
+                for (int x = 0; x < g.tile; x++) {
+                    float cov = CardRoundCov(tl + x + 0.5f, tt + y + 0.5f, tl, tt, tl + ts, tt + ts, rad);
+                    if (cov <= 0.f) continue;
+                    float u = (x + 0.5f) / ts * aw - 0.5f, v = (y + 0.5f) / ts * ah - 0.5f;
+                    int x0 = std::clamp((int)floorf(u), 0, aw - 1), y0 = std::clamp((int)floorf(v), 0, ah - 1);
+                    int x1 = std::min(x0 + 1, aw - 1), y1 = std::min(y0 + 1, ah - 1);
+                    float fx = std::clamp(u - x0, 0.f, 1.f), fy = std::clamp(v - y0, 0.f, 1.f);
+                    float c[4];
+                    for (int k = 0; k < 4; k++) {
+                        auto px = [&](int xx, int yy) { return g_artTile[((size_t)yy * aw + xx) * 4 + k] / 255.f; };
+                        c[k] = (px(x0, y0) * (1 - fx) + px(x1, y0) * fx) * (1 - fy) +
+                               (px(x0, y1) * (1 - fx) + px(x1, y1) * fx) * fy;
+                    }
+                    CardBlend(buf + (size_t)(g.pad + y) * stride + (size_t)(g.pad + x) * 4, c[2], c[1], c[0], c[3] * cov);
+                }
+        }
+    }
+    if (!art) CardFillRound(buf, stride, W, H, tl, tt, tl + ts, tt + ts, rad, 1.f, 1.f, 1.f, 0.06f);
+
+    // Controls over the art: on hover, or always when there is no cover.
+    if (!art || s_cardHoverPart == kPartArt) {
+        if (art) CardFillRound(buf, stride, W, H, tl, tt, tl + ts, tt + ts, rad, 0.f, 0.f, 0.f, 0.45f);
+        int gs = std::max(8, g.tile / 4);
+        int gy = g.pad + (g.tile - gs) / 2;
+        bool playing = g_mediaIsPlaying.load(std::memory_order_relaxed);
+        int slot = g.tile / 3;
+        CardGlyph(buf, stride, g.pad + (slot - gs) / 2, gy, gs, 0);
+        CardGlyph(buf, stride, g.pad + slot + (slot - gs) / 2, gy, gs, playing ? 2 : 1);
+        CardGlyph(buf, stride, g.pad + 2 * slot + (slot - gs) / 2, gy, gs, 3);
+    }
+
+    // Seek bar.
+    float prog = s_cardSeekPreview >= 0.f ? s_cardSeekPreview : VizTrackProgress();
+    bool seekHot = s_cardHoverPart == kPartSeek || s_cardDrag == kPartSeek;
+    float ph = seekHot ? g.progH + 2.f * g.dpi : (float)g.progH;
+    float py = g.progY + g.progH * 0.5f - ph * 0.5f;
+    CardFillRound(buf, stride, W, H, tl, py, tl + ts, py + ph, ph * 0.5f, ir, ig, ib, ia * 0.22f);
+    if (prog >= 0.f) {
+        float px = tl + ts * std::clamp(prog, 0.f, 1.f);
+        CardFillRound(buf, stride, W, H, tl, py, std::max(px, tl + ph), py + ph, ph * 0.5f, ar, ag, ab, aa * 0.9f);
+        if (seekHot) {
+            float kr = ph * 1.1f;
+            CardFillRound(buf, stride, W, H, px - kr, py + ph * 0.5f - kr, px + kr, py + ph * 0.5f + kr, kr, ar, ag, ab, aa);
+        }
+        s_cardProgPx = (int)lroundf(ts * std::clamp(prog, 0.f, 1.f));
+    }
+
+    // Output button and volume slider.
+    s_cardVolume = VizCardGetVolume();
+    int spk = g.rowH;
+    float spA = s_cardHoverPart == kPartSpeaker ? ia : ia * 0.8f;
+    CardSpeaker(buf, stride, g.pad, g.rowY, spk, std::max(0.f, s_cardVolume), ir, ig, ib, spA);
+    if (s_cardVolume >= 0.f) {
+        float l = (float)(g.pad + g.rowH + g.gap), r = (float)(g.pad + g.tile) - 6.f * g.dpi;
+        float cy = g.rowY + g.rowH * 0.5f, th = std::max(2.f, 3.f * g.dpi);
+        CardFillRound(buf, stride, W, H, l, cy - th * 0.5f, r, cy + th * 0.5f, th * 0.5f, ir, ig, ib, ia * 0.22f);
+        float kx = l + (r - l) * s_cardVolume;
+        CardFillRound(buf, stride, W, H, l, cy - th * 0.5f, std::max(kx, l + th), cy + th * 0.5f, th * 0.5f, ar, ag, ab, aa * 0.9f);
+        float kr = (s_cardHoverPart == kPartVolume || s_cardDrag == kPartVolume) ? 6.f * g.dpi : 4.5f * g.dpi;
+        CardFillRound(buf, stride, W, H, kx - kr, cy - kr, kx + kr, cy + kr, kr, ar, ag, ab, aa);
+    }
+}
+
+// Mouse and timer messages for the card. Returns true when handled.
+bool VizCardMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    VizCardGeom g = VizCardLayout();
+    int x = GET_X_LPARAM(lParam), y = GET_Y_LPARAM(lParam);
+    switch (msg) {
+        case WM_MOUSEMOVE: {
+            if (!s_cardTracking) {
+                TRACKMOUSEEVENT tme = {sizeof(tme), TME_LEAVE, hWnd, 0};
+                s_cardTracking = TrackMouseEvent(&tme) != FALSE;
+            }
+            s_cardHover = true;
+            int part = s_cardDrag != kPartNone ? s_cardDrag : CardHit(g, x, y);
+            bool repaint = part != s_cardHoverPart;
+            s_cardHoverPart = part;
+            if (s_cardDrag == kPartVolume) {
+                VizCardSetVolume(CardSliderFrac(g, x));
+                repaint = true;
+            } else if (s_cardDrag == kPartSeek) {
+                s_cardSeekPreview = std::clamp((x - g.pad) / (float)std::max(1, g.tile), 0.f, 1.f);
+                repaint = true;
+            }
+            if (repaint) CardRepaint();
+            return true;
+        }
+        case WM_MOUSELEAVE:
+            s_cardTracking = false;
+            s_cardHover = false;
+            if (s_cardDrag == kPartNone && s_cardHoverPart != kPartNone) {
+                s_cardHoverPart = kPartNone;
+                CardRepaint();
+            }
+            return true;
+        case WM_LBUTTONDOWN: {
+            int part = CardHit(g, x, y);
+            if (part == kPartSeek || part == kPartVolume) {
+                s_cardDrag = part;
+                SetCapture(hWnd);
+                if (part == kPartVolume) VizCardSetVolume(CardSliderFrac(g, x));
+                else s_cardSeekPreview = std::clamp((x - g.pad) / (float)std::max(1, g.tile), 0.f, 1.f);
+                CardRepaint();
+            }
+            return true;
+        }
+        case WM_LBUTTONUP: {
+            int drag = s_cardDrag;
+            s_cardDrag = kPartNone;
+            if (GetCapture() == hWnd) ReleaseCapture();
+            if (drag == kPartSeek) {
+                CardSeek(s_cardSeekPreview);
+                s_cardSeekPreview = -1.f;
+                CardRepaint();
+                return true;
+            }
+            if (drag == kPartVolume) {
+                CardRepaint();
+                return true;
+            }
+            int part = CardHit(g, x, y);
+            if (part == kPartArt) {
+                int third = std::clamp((x - g.pad) * 3 / std::max(1, g.tile), 0, 2);
+                SendMediaCommand(third);
+            } else if (part == kPartSpeaker) {
+                POINT pt;
+                GetCursorPos(&pt);
+                VizCardOutputMenu(hWnd, pt);
+                CardRepaint();
+            }
+            return true;
+        }
+        case WM_MOUSEWHEEL: {
+            float v = VizCardGetVolume();
+            if (v >= 0.f) {
+                VizCardSetVolume(v + 0.02f * (GET_WHEEL_DELTA_WPARAM(wParam) / (float)WHEEL_DELTA));
+                CardRepaint();
+            }
+            return true;
+        }
+        case WM_TIMER:
+            if (wParam != kCardTimer) return false;
+            // Repaint only when the seek bar moved by a pixel, or the volume
+            // changed from elsewhere (the volume flyout, a keyboard key).
+            if (g_mediaIsPlaying.load(std::memory_order_relaxed) && s_cardDrag == kPartNone) {
+                float p = VizTrackProgress();
+                if (p >= 0.f && (int)lroundf(g.tile * std::clamp(p, 0.f, 1.f)) != s_cardProgPx) CardRepaint();
+            }
+            if (fabsf(VizCardGetVolume() - s_cardVolume) > 0.004f) CardRepaint();
+            return true;
+    }
+    return false;
+}
+
+// The card's once-a-second check runs only while the card is showing.
+void VizCardTimer(HWND hWnd, bool on) {
+    static bool s_on = false;
+    if (on == s_on || !hWnd) return;
+    s_on = on;
+    if (on) SetTimer(hWnd, kCardTimer, 1000, nullptr);
+    else KillTimer(hWnd, kCardTimer);
+}
+
 void PaintMediaControls(int x, int y, int width, int height) {
     if (!g_mediaWnd || width <= 0 || height <= 0) return;
 
@@ -3569,6 +4287,9 @@ void PaintMediaControls(int x, int y, int width, int height) {
     BYTE* buf = (BYTE*)bits;
     int stride = width * 4;
 
+    if (VizCardActive()) {
+        VizPaintCard(buf, stride, width, height);
+    } else {
     // Optional backing plate behind the whole strip, with an optional outline.
     // v0.5.2 drew a plate unconditionally as a fix for pale icons vanishing
     // against a pale wallpaper, which meant icons that were meant to sit
@@ -3577,11 +4298,11 @@ void PaintMediaControls(int x, int y, int width, int height) {
     if (g_settings.mediaPlateA > 0 ||
         (g_settings.mediaPlateBorderSize > 0 && g_settings.mediaPlateBorderA > 0)) {
         float dpiScale = GetMediaControlsDpiScale();
-        float radius = std::min({(float)std::max(0, g_settings.mediaPlateCornerRadius) * dpiScale,
+        float radius = std::min({(float)std::max(0.f, g_settings.mediaPlateCornerRadius) * dpiScale,
                                  width * 0.5f, height * 0.5f});
         // Border draws inward from the edge, so it can never be thicker than
         // half the strip without the two sides meeting in the middle.
-        float bw = std::min({(float)std::max(0, g_settings.mediaPlateBorderSize) * dpiScale,
+        float bw = std::min({(float)std::max(0.f, g_settings.mediaPlateBorderSize) * dpiScale,
                              width * 0.5f, height * 0.5f});
         bool wantBorder = bw > 0.f && g_settings.mediaPlateBorderA > 0;
 
@@ -3684,6 +4405,8 @@ void PaintMediaControls(int x, int y, int width, int height) {
         BlitIcon(buf, stride, xNext, iconY, size, g_mediaIconPixels[3]);
     else DrawBuiltinGlyph(buf, stride, xNext, iconY, size, 3);
 
+    }  // strip
+
     HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, dib);
 
     POINT ptSrc = {0, 0};
@@ -3710,9 +4433,11 @@ bool g_mediaHiddenByCover = false;
 void RepositionAndRepaintMediaControls() {
     if (!g_mediaWnd) return;
     if (!g_settings.mediaControlsEnabled) {
+        VizCardTimer(g_mediaWnd, false);
         ShowWindow(g_mediaWnd, SW_HIDE);
         return;
     }
+    VizCardTimer(g_mediaWnd, VizCardActive());
     if (g_mediaHiddenByCover && g_settings.mediaHideWhenCovered) return;
 
     float dpiScale = GetMediaControlsDpiScale();
@@ -3721,6 +4446,7 @@ void RepositionAndRepaintMediaControls() {
     int pad = GetMediaPlatePaddingPx();
     int width = size * 3 + spacing * 2 + pad * 2;
     int height = size + pad * 2;
+    if (VizCardActive()) VizCardSize(&width, &height);
 
     HMONITOR monitor = GetMonitorById(g_settings.monitor - 1);
     if (!monitor) monitor = MonitorFromPoint({0, 0}, MONITOR_DEFAULTTONEAREST);
@@ -3765,8 +4491,13 @@ void RepositionAndRepaintMediaControls() {
     // invisible, which is indistinguishable from "the mod isn't working."
     PaintMediaControls(x, y, width, height);
 
-    BOOL posOk = SetWindowPos(g_mediaWnd, HWND_TOPMOST, x, y, width, height,
-                              SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOOWNERZORDER);
+    // Stacking: only touch the z-order when it is wrong. Raising it on every
+    // repaint put the card back over its own open menus.
+    const bool isTop = (GetWindowLongPtr(g_mediaWnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+    const bool wantTop = g_settings.mediaOnTop && !g_menuOpen.load(std::memory_order_acquire);
+    UINT zFlags = (isTop == wantTop) ? SWP_NOZORDER : 0;
+    BOOL posOk = SetWindowPos(g_mediaWnd, wantTop ? HWND_TOPMOST : HWND_NOTOPMOST, x, y, width, height,
+                              SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOOWNERZORDER | zFlags);
 
     RECT actualRect{};
     GetWindowRect(g_mediaWnd, &actualRect);
@@ -3776,7 +4507,21 @@ void RepositionAndRepaintMediaControls() {
            (int)((GetWindowLongPtr(g_mediaWnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0));
 }
 
+// While one of the mod's menus is open the strip / card leaves the topmost band
+// (menus are topmost too, and the later raise would win), then returns.
+void VizMediaMenuBegin() {
+    g_menuOpen.store(true, std::memory_order_release);
+    if (g_mediaWnd && (GetWindowLongPtr(g_mediaWnd, GWL_EXSTYLE) & WS_EX_TOPMOST))
+        SetWindowPos(g_mediaWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+}
+void VizMediaMenuEnd() {
+    g_menuOpen.store(false, std::memory_order_release);
+    if (g_mediaWnd && g_settings.mediaOnTop && IsWindowVisible(g_mediaWnd))
+        SetWindowPos(g_mediaWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+}
+
 LRESULT CALLBACK MediaWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    if (VizCardActive() && VizCardMessage(hWnd, uMsg, wParam, lParam)) return 0;
     switch (uMsg) {
         case WM_LBUTTONUP: {
             int x = GET_X_LPARAM(lParam);
@@ -6176,6 +6921,114 @@ std::vector<VizAudioEndpoint> VizListAudioEndpoints(IMMDeviceEnumerator* e) {
     return out;
 }
 
+// ---- Media Card (2.1): output switching and volume -------------------------------------
+// Windows has no public call to change the default output; IPolicyConfig is
+// the interface the Sound control panel itself uses, unchanged since Windows
+// 7 (only SetDefaultEndpoint is called; the slots before it keep the vtable
+// order).
+MIDL_INTERFACE("f8679f50-850a-41cf-9c72-430f290290c8")
+IVizPolicyConfig : public IUnknown {
+public:
+    virtual HRESULT STDMETHODCALLTYPE GetMixFormat(PCWSTR, WAVEFORMATEX**) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetDeviceFormat(PCWSTR, INT, WAVEFORMATEX**) = 0;
+    virtual HRESULT STDMETHODCALLTYPE ResetDeviceFormat(PCWSTR) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetDeviceFormat(PCWSTR, WAVEFORMATEX*, WAVEFORMATEX*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetProcessingPeriod(PCWSTR, INT, PINT64, PINT64) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetProcessingPeriod(PCWSTR, PINT64) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetShareMode(PCWSTR, void*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetShareMode(PCWSTR, void*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetPropertyValue(PCWSTR, const PROPERTYKEY&, PROPVARIANT*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetPropertyValue(PCWSTR, const PROPERTYKEY&, PROPVARIANT*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetDefaultEndpoint(PCWSTR, ERole) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetEndpointVisibility(PCWSTR, INT) = 0;
+};
+static const CLSID kCLSID_VizPolicyConfigClient = {0x870af99c, 0x171d, 0x4f9e, {0xaf, 0x0d, 0xe6, 0x3d, 0xf4, 0x0c, 0x2b, 0xc9}};
+static const IID kIID_VizPolicyConfig = {0xf8679f50, 0x850a, 0x41cf, {0x9c, 0x72, 0x43, 0x0f, 0x29, 0x02, 0x90, 0xc8}};
+
+namespace {
+// The default output's volume control, kept between calls and fetched again
+// after a switch, a failure, or every ten seconds (so a default changed
+// elsewhere is picked up). Media window thread only.
+ComPtr<IAudioEndpointVolume> s_cardVol;
+ULONGLONG s_cardVolTick = 0;
+
+// COM on the calling thread for the duration of a call, if it isn't already.
+struct VizComScope {
+    bool owned;
+    VizComScope() : owned(SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) {}
+    ~VizComScope() {
+        if (owned) CoUninitialize();
+    }
+};
+
+IAudioEndpointVolume* CardVolume() {
+    ULONGLONG now = GetTickCount64();
+    if (s_cardVol && now - s_cardVolTick < 10000) return s_cardVol.Get();
+    s_cardVol.Reset();
+    s_cardVolTick = now;
+    ComPtr<IMMDeviceEnumerator> e;
+    ComPtr<IMMDevice> d;
+    if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&e))) ||
+        FAILED(e->GetDefaultAudioEndpoint(eRender, eMultimedia, &d)) ||
+        FAILED(d->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, nullptr, (void**)s_cardVol.GetAddressOf())))
+        s_cardVol.Reset();
+    return s_cardVol.Get();
+}
+}  // namespace
+
+float VizCardGetVolume() {
+    VizComScope com;
+    IAudioEndpointVolume* v = CardVolume();
+    float level = -1.f;
+    if (v && FAILED(v->GetMasterVolumeLevelScalar(&level))) {
+        s_cardVol.Reset();
+        level = -1.f;
+    }
+    return level;
+}
+
+void VizCardSetVolume(float level) {
+    VizComScope com;
+    IAudioEndpointVolume* v = CardVolume();
+    if (v) v->SetMasterVolumeLevelScalar(std::clamp(level, 0.f, 1.f), nullptr);
+}
+
+// One click: the outputs, the current default ticked; picking one makes it
+// the default for every role, as the Sound settings page does.
+void VizCardOutputMenu(HWND hWnd, POINT pt) {
+    VizComScope com;
+    ComPtr<IMMDeviceEnumerator> e;
+    if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&e)))) return;
+    std::wstring current;
+    {
+        ComPtr<IMMDevice> d;
+        if (SUCCEEDED(e->GetDefaultAudioEndpoint(eRender, eMultimedia, &d))) current = VizDeviceId(d.Get());
+    }
+    std::vector<VizAudioEndpoint> outs;
+    for (auto& ep : VizListAudioEndpoints(e.Get()))
+        if (ep.render) outs.push_back(ep);
+    if (outs.empty()) return;
+    HMENU menu = CreatePopupMenu();
+    if (!menu) return;
+    for (size_t i = 0; i < outs.size(); i++)
+        AppendMenuW(menu, MF_STRING | (outs[i].id == current ? MF_CHECKED : 0), 1 + i, outs[i].name.c_str());
+    SetForegroundWindow(hWnd);  // so a click elsewhere closes the menu
+    VizMediaMenuBegin();
+    UINT cmd = (UINT)TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_BOTTOMALIGN, pt.x, pt.y, hWnd, nullptr);
+    VizMediaMenuEnd();
+    PostMessage(hWnd, WM_NULL, 0, 0);
+    DestroyMenu(menu);
+    if (cmd < 1 || cmd > outs.size() || outs[cmd - 1].id == current) return;
+    ComPtr<IVizPolicyConfig> pc;
+    if (FAILED(CoCreateInstance(kCLSID_VizPolicyConfigClient, nullptr, CLSCTX_ALL, kIID_VizPolicyConfig,
+                                (void**)pc.GetAddressOf())) || !pc) {
+        Wh_Log(L"[Media] output switch unavailable");
+        return;
+    }
+    for (ERole role : {eConsole, eMultimedia, eCommunications}) pc->SetDefaultEndpoint(outs[cmd - 1].id.c_str(), role);
+    s_cardVol.Reset();  // the volume now belongs to the new output
+}
+
 // Resolves a source key to a device. Falls back to the default output (and
 // says so through *fellBack) when the asked-for device isn't there, so a
 // device that was unplugged or renamed leaves the visualizer working.
@@ -6448,6 +7301,7 @@ VizMeterValues g_meters;
 std::mutex g_gonioMutex;
 std::vector<float> g_gonioXY;
 std::atomic<uint32_t> g_gonioSerial{0};
+std::atomic<uint32_t> g_vizStereoRate{48000};  // sample rate of g_gonioXY, for Stereo Field
 
 // Engine thread control.
 std::atomic<bool> g_captureWanted{false};
@@ -7349,6 +8203,7 @@ private:
             }
         }
         gonioPending_.clear();
+        g_vizStereoRate.store(sampleRate_, std::memory_order_relaxed);
         g_gonioSerial.fetch_add(1, std::memory_order_release);
     }
 
@@ -7643,6 +8498,8 @@ void UpdatePrecisionTargets(int vizBars) {
     }
 }
 
+void VizStepAfterimage(int barCount);  // Afterimage (2.1), with the styles
+
 void VizComputeBarFrame() {
     const int barCount = VizEffectiveBarCount();
     if (g_settings.engine == VizEngineKind::Precision) {
@@ -7662,6 +8519,7 @@ void VizComputeBarFrame() {
                 g_vizPeakHold[i] = 0.f;
             }
         }
+        VizStepAfterimage(barCount);
         return;
     }
 
@@ -7693,6 +8551,7 @@ void VizComputeBarFrame() {
             g_vizPeakHold[i] = 0.f;
         }
     }
+    VizStepAfterimage(barCount);
 }
 
 // Copies what the engine thread needs out of the settings, as one value, and
@@ -7756,7 +8615,8 @@ void VizPublishEngineConfig() {
     // True peak and correlation are only shown by the full loudness readout
     // (correlation also under the Goniometer), so only then are they measured.
     c.wantTruePeak = readout && g_settings.readout == VizReadout::LoudnessFull;
-    c.wantGonio = g_settings.shape == VizShape::Goniometer;
+    c.wantGonio = g_settings.shape == VizShape::Goniometer || g_settings.style == VizStyle::Vu ||
+                  g_settings.style == VizStyle::SplitLR;
     c.wantCorrelation = c.wantTruePeak || c.wantGonio;
 
     // Oscilloscope and Goniometer draw no bars, but the bands still feed the
@@ -7778,7 +8638,7 @@ void VizPublishEngineConfig() {
         s.bars = 24;
         if (!c.wantDominant) s.maxTier = 0;
     }
-    c.beat = g_settings.beatFlashEnabled;
+    c.beat = g_settings.beatFlashEnabled || g_settings.style == VizStyle::Particles;
     c.loudnessResetOnTrack = g_settings.loudnessResetOnTrack;
     {
         std::lock_guard<std::mutex> lock(g_engineCfgMutex);
@@ -8070,6 +8930,7 @@ void RenderVisualizer();
 namespace ttgfx {
 void ReleaseDevice();
 void ReleaseSurface();
+void SplitSync();
 void OnSettingsChanged();
 void PresentBlank();
 }  // namespace ttgfx
@@ -8126,7 +8987,7 @@ void UninitDirectX() {
     g_dxgiFactory.Reset();
     g_dxgiDevice.Reset();
     g_d3dDevice.Reset();
-    g_dwriteTextFormatFontSize = -1;
+    g_dwriteTextFormatFontSize = -1.f;
     g_dwriteTextFormatFontName.clear();
 }
 
@@ -8330,6 +9191,37 @@ std::vector<float> g_termHistory;  // waterfall: rows x cols levels, row 0 newes
 // (Waterfall scrolls included), so the renderer can tell a changed grid from an
 // unchanged one without hashing 65,536 cells every tick.
 uint32_t g_termGridSerial = 0;
+// Custom Terminal glyphs: code 128 + k draws g_termCustomGlyphs[k].
+std::vector<std::wstring> g_termCustomGlyphs;
+
+// The code for one character (a code point, plus a following emoji
+// presentation selector), adding it to the custom glyphs when it isn't ASCII.
+// 0 when there is no room left.
+wchar_t VizTermCodeFor(const std::wstring& glyph) {
+    if (glyph.size() == 1 && glyph[0] >= 32 && glyph[0] < 127) return glyph[0];
+    for (size_t k = 0; k < g_termCustomGlyphs.size(); k++)
+        if (g_termCustomGlyphs[k] == glyph) return (wchar_t)(128 + k);
+    if (g_termCustomGlyphs.size() >= 128) return 0;
+    g_termCustomGlyphs.push_back(glyph);
+    return (wchar_t)(128 + g_termCustomGlyphs.size() - 1);
+}
+
+// Splits text into characters as VizTermCodeFor takes them.
+std::vector<std::wstring> VizTermSplitGlyphs(const std::wstring& s) {
+    std::vector<std::wstring> out;
+    for (size_t i = 0; i < s.size();) {
+        size_t n = (IS_HIGH_SURROGATE(s[i]) && i + 1 < s.size() && IS_LOW_SURROGATE(s[i + 1])) ? 2 : 1;
+        if (i + n < s.size() && s[i + n] == 0xFE0F) n++;
+        if (s[i] >= 32 || n > 1) out.push_back(s.substr(i, n));
+        i += n;
+    }
+    return out;
+}
+
+std::wstring VizTermGlyphText(uint32_t code) {
+    if (code >= 128 && code - 128 < g_termCustomGlyphs.size()) return g_termCustomGlyphs[code - 128];
+    return std::wstring(1, (wchar_t)code);
+}
 float g_termScrollAcc = 0.f;
 
 // Cell size for the terminal font, in whole pixels so glyphs land 1:1.
@@ -8339,7 +9231,7 @@ float g_termFormatPx = -1.f;
 int g_termCellW = 8, g_termCellH = 16;
 
 bool VizTermEnsureFormat() {
-    float px = (float)std::clamp(g_settings.termFontSize, 6, 96) * g_dpiScale;
+    float px = (float)std::clamp(g_settings.termFontSize, 6.f, 96.f) * g_dpiScale;
     if (g_termFormat && g_termFormatFont == g_settings.termFont && g_termFormatPx == px) return true;
     g_termFormat.Reset();
     if (!g_dwriteFactory) return false;
@@ -8390,7 +9282,7 @@ void VizTermBox(float* w, float* h) {
 }
 
 static inline uint32_t TermCell(wchar_t c, int color) {
-    uint32_t ch = (c >= 32 && c < 127) ? (uint32_t)c : (uint32_t)'?';
+    uint32_t ch = ((c >= 32 && c < 127) || (c >= 128 && c < 256)) ? (uint32_t)c : (uint32_t)'?';
     return ch | ((uint32_t)color << 8);
 }
 
@@ -8573,7 +9465,7 @@ void VizDrawTermGridD2D(float originX, float originY) {
         int c = 0;
         while (c < g.cols) {
             uint32_t cell = g.cells[(size_t)r * g.cols + c];
-            if ((cell & 127u) <= 32u) {
+            if ((cell & 255u) <= 32u) {
                 c++;
                 continue;
             }
@@ -8582,9 +9474,10 @@ void VizDrawTermGridD2D(float originX, float originY) {
             run.clear();
             while (c < g.cols) {
                 uint32_t k = g.cells[(size_t)r * g.cols + c];
-                bool blank = (k & 127u) <= 32u;
+                bool blank = (k & 255u) <= 32u;
                 if (!blank && (int)((k >> 8) & 7u) != color) break;
-                run.push_back(blank ? L' ' : (wchar_t)(k & 127u));
+                if (blank) run.push_back(L' ');
+                else run += VizTermGlyphText(k & 255u);
                 c++;
             }
             while (!run.empty() && run.back() == L' ') run.pop_back();
@@ -8611,13 +9504,810 @@ bool PointInVisualizerBounds(POINT pt) {
     return pt.x >= l && pt.x < r && pt.y >= t && pt.y < b;
 }
 
+// ---- Styles (2.1) ---------------------------------------------------------------------
+// Eight new looks, picked from the Shape list like the shapes. Each one rides
+// on an existing shape underneath (Bloom on Radial, the rest on Stereo), so
+// the bar maths, layout, panel and settings all keep working unchanged, and
+// a style only adds what it really needs:
+//   LED Meter      segmented bars, green / amber / red, peak segment held
+//   Line Spectrum  a smooth filled curve through the bar tops, glowing edge
+//   Polar Bloom    the Radial bars joined into one filled shape
+//   Spectrogram    a scrolling colour history of the bars, with a legend
+//   VU Needles     two analog L / R meters with real VU ballistics
+//   Stereo Field   the left channel above the centre line, the right below
+//   Particles      the bars, plus sparks thrown off their tops on each beat
+// Reflection (Appearance) mirrors the bar styles onto the floor beneath them.
+//
+// Spectrogram, Stereo Field and Particles need the bar levels on the CPU, so
+// with them the analysis runs there (Hybrid), as with Terminal.
+
+static const float kVizSpecRate = 60.f;  // Spectrogram rows per second
+constexpr int kVizSpecRows = 256;        // rows kept (the texture's height)
+constexpr int kVizSparkMax = 512;
+
+bool VizParseShape(PCWSTR v, VizShape* shape, VizStyle* style) {
+    struct Entry { const wchar_t* name; VizShape shape; VizStyle style; };
+    static const Entry kEntries[] = {
+        {L"stereo", VizShape::Stereo, VizStyle::None},         {L"mountain", VizShape::Mountain, VizStyle::None},
+        {L"mirror", VizShape::Mirror, VizStyle::None},         {L"wave", VizShape::Wave, VizStyle::None},
+        {L"breathe", VizShape::Breathe, VizStyle::None},       {L"dots", VizShape::Dots, VizStyle::None},
+        {L"radial", VizShape::Radial, VizStyle::None},         {L"oscilloscope", VizShape::Oscilloscope, VizStyle::None},
+        {L"goniometer", VizShape::Goniometer, VizStyle::None}, {L"terminal", VizShape::Terminal, VizStyle::None},
+        {L"led", VizShape::Stereo, VizStyle::Led},             {L"line", VizShape::Stereo, VizStyle::Line},
+        {L"bloom", VizShape::Radial, VizStyle::Bloom},         {L"spectrogram", VizShape::Stereo, VizStyle::Spectrogram},
+        {L"vu", VizShape::Stereo, VizStyle::Vu},               {L"stereo_field", VizShape::Stereo, VizStyle::SplitLR},
+        {L"particles", VizShape::Stereo, VizStyle::Particles},
+    };
+    for (const Entry& e : kEntries) {
+        if (v && wcscmp(v, e.name) == 0) {
+            *shape = e.shape;
+            *style = e.style;
+            return true;
+        }
+    }
+    *shape = VizShape::Stereo;
+    *style = VizStyle::None;
+    return false;
+}
+
+// Position in the right-click menu's Shape list: the ten shapes, then the styles.
+int VizShapeMenuIndex() {
+    return g_settings.style != VizStyle::None ? 9 + (int)g_settings.style : (int)g_settings.shape;
+}
+
+bool VizStyleNeedsCpuBars() {
+    VizStyle s = g_settings.style;
+    return s == VizStyle::Spectrogram || s == VizStyle::SplitLR || s == VizStyle::Particles ||
+           g_settings.afterimage > 0;  // its trail is worked out with the bars, on the CPU
+}
+
+// Afterimage (2.1): each bar's trail jumps up with it and falls back over
+// Afterimage Length.
+float g_vizGhost[VIZ_BARS_MAX] = {};
+
+void VizStepAfterimage(int barCount) {
+    if (g_settings.afterimage <= 0) return;
+    float fall = g_frameDt / std::max(0.1f, g_settings.afterimageSeconds);
+    for (int i = 0; i < barCount && i < VIZ_BARS_MAX; i++) {
+        float lv = std::max(0.f, g_vizPeak[i]);
+        g_vizGhost[i] = std::max(lv, g_vizGhost[i] - fall);
+    }
+}
+
+// Reflection: horizontal bars standing on the bottom edge only, where there
+// is a floor to reflect in.
+bool VizReflectionActive() {
+    if (g_settings.reflection <= 0) return false;
+    if (g_settings.orientation != VizOrientation::Horizontal) return false;
+    if (g_settings.verticalAnchor != VizAnchor::Bottom) return false;
+    VizStyle st = g_settings.style;
+    if (!(st == VizStyle::None || st == VizStyle::Led || st == VizStyle::Line || st == VizStyle::Particles)) return false;
+    VizShape s = g_settings.shape;
+    return s == VizShape::Stereo || s == VizShape::Mountain || s == VizShape::Mirror || s == VizShape::Wave ||
+           s == VizShape::Breathe || s == VizShape::Dots;
+}
+
+float VizReflectionDepth(float maxSize) { return maxSize * std::clamp(g_settings.reflection, 0, 100) / 100.f; }
+
+// ---- Scale numbers -----------------------------------------------------------------------
+// The Spectrogram legend's quarter ticks and the VU faces carry numbers. They
+// are Direct2D text: on the Direct3D renderer they go on the text surface,
+// which only redraws when something on it changes, so a still scale costs
+// nothing per frame.
+namespace {
+ComPtr<IDWriteTextFormat> s_scaleFmt;
+float s_scaleFmtPx = 0.f;
+
+IDWriteTextFormat* VizScaleFormat(float px) {
+    if (!g_dwriteFactory) return nullptr;
+    if (!s_scaleFmt || fabsf(s_scaleFmtPx - px) > 0.01f) {
+        s_scaleFmt.Reset();
+        if (FAILED(g_dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                                                     DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, px, L"",
+                                                     &s_scaleFmt)))
+            return nullptr;
+        s_scaleFmt->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+        s_scaleFmt->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        s_scaleFmtPx = px;
+    }
+    return s_scaleFmt.Get();
+}
+}  // namespace
+
+float VizScaleLabelPx(float maxSize) { return std::clamp(maxSize * 0.07f, 8.f * g_dpiScale, 13.f * g_dpiScale); }
+
+bool VizStyleHasScale() { return g_settings.style == VizStyle::Spectrogram || g_settings.style == VizStyle::Vu; }
+
+// `thick` is the bars' span across the time axis (Spectrogram only).
+void VizDrawStyleScale(float blockX, float blockY, float maxSize, float thick, bool horizontal) {
+    if (!g_dc || !g_barBrush || !VizStyleHasScale()) return;
+    ID2D1SolidColorBrush* b = g_barBrush.Get();
+    WCHAR s[24];
+    if (g_settings.style == VizStyle::Spectrogram) {
+        float px = VizScaleLabelPx(maxSize);
+        IDWriteTextFormat* fmt = VizScaleFormat(px);
+        if (!fmt) return;
+        fmt->SetTextAlignment(horizontal ? DWRITE_TEXT_ALIGNMENT_LEADING : DWRITE_TEXT_ALIGNMENT_CENTER);
+        b->SetColor(D2D1::ColorF(0.92f, 0.92f, 0.92f, 0.85f));
+        // Precision maps Display Floor..Ceiling straight onto the bar height,
+        // so the ticks are dB; Classic has no fixed dB scale, so percent.
+        bool db = g_settings.engine == VizEngineKind::Precision;
+        float side = 3.f * g_dpiScale + 6.f * g_dpiScale;
+        for (int k = 0; k <= 4; k++) {
+            float q = k / 4.f;
+            if (db)
+                swprintf_s(s, k == 4 ? L"%d dB" : L"%d",
+                           (int)lroundf(g_settings.dbFloor + q * (g_settings.dbCeiling - g_settings.dbFloor)));
+            else
+                swprintf_s(s, L"%d%%", k * 25);
+            D2D1_RECT_F r;
+            if (horizontal) {
+                float y = std::clamp(blockY + maxSize - q * maxSize, blockY + px * 0.6f, blockY + maxSize - px * 0.6f);
+                float x = blockX + thick + side + 3.f * g_dpiScale;
+                r = D2D1::RectF(x, y - px, x + px * 4.f, y + px);
+            } else {
+                float x = std::clamp(blockX + q * maxSize, blockX + px * 1.2f, blockX + maxSize - px * 1.2f);
+                float y = blockY + thick + side + 2.f * g_dpiScale;
+                r = D2D1::RectF(x - px * 2.5f, y, x + px * 2.5f, y + px * 1.3f);
+            }
+            g_dc->DrawText(s, (UINT32)wcslen(s), fmt, r, b, D2D1_DRAW_TEXT_OPTIONS_NONE);
+        }
+        return;
+    }
+    // VU: the classic face numbers, inside the tick arc, red above 0 VU.
+    float mh = maxSize, mw = maxSize * 1.5f, gap = 8.f * g_dpiScale;
+    float px = std::max(7.f * g_dpiScale, mh * 0.075f);
+    IDWriteTextFormat* fmt = VizScaleFormat(px);
+    if (!fmt) return;
+    fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+    const float marks[7] = {-20, -10, -7, -5, -3, 0, 3};
+    for (int m = 0; m < 2; m++) {
+        float ox = blockX + (horizontal ? m * (mw + gap) : 0.f), oy = blockY + (horizontal ? 0.f : m * (mh + gap));
+        float pvx = ox + mw * 0.5f, pvy = oy + mh * 0.9f, R = mh * 0.68f * 0.74f;
+        for (float dbm : marks) {
+            float p = (powf(10.f, dbm / 20.f) - 0.1f) / (1.41254f - 0.1f);
+            float an = (-48.f + 96.f * p) * VIZ_PI / 180.f;
+            float x = pvx + sinf(an) * R, y = pvy - cosf(an) * R;
+            swprintf_s(s, dbm > 0 ? L"+%d" : L"%d", (int)fabsf(dbm));
+            b->SetColor(dbm > 0 ? D2D1::ColorF(1.f, 0.27f, 0.23f, 0.95f) : D2D1::ColorF(0.92f, 0.92f, 0.9f, 0.85f));
+            g_dc->DrawText(s, (UINT32)wcslen(s), fmt, D2D1::RectF(x - px * 1.5f, y - px * 0.7f, x + px * 1.5f, y + px * 0.7f),
+                           b, D2D1_DRAW_TEXT_OPTIONS_NONE);
+        }
+    }
+}
+
+// The styles' extra room, applied after the shapes have sized the box.
+void VizStyleBox(float* w, float* h, float maxSize, bool horizontal) {
+    switch (g_settings.style) {
+        case VizStyle::Vu: {
+            float mw = maxSize * 1.5f, gap = 8.f * g_dpiScale;
+            *w = horizontal ? mw * 2.f + gap : mw;
+            *h = horizontal ? maxSize : maxSize * 2.f + gap;
+            break;
+        }
+        case VizStyle::Spectrogram: {
+            float legend = 3.f * g_dpiScale + 6.f * g_dpiScale, px = VizScaleLabelPx(maxSize);
+            if (horizontal) *w += legend + 3.f * g_dpiScale + px * 3.4f;  // plus the scale numbers
+            else *h += legend + 2.f * g_dpiScale + px * 1.3f;
+            break;
+        }
+        default: break;
+    }
+    if (VizReflectionActive()) *h += VizReflectionDepth(maxSize);
+}
+
+// ---- Per-frame data, on the render thread ----------------------------------------------
+float g_vizSplitL[VIZ_BARS_MAX] = {}, g_vizSplitR[VIZ_BARS_MAX] = {};
+float g_vizVu[4] = {};  // needle L, R (0..1 of the scale), peak LED L, R
+std::vector<uint8_t> g_vizSpecRing;  // bars x kVizSpecRows, newest row at g_vizSpecHead
+int g_vizSpecW = 0, g_vizSpecHead = 0;
+uint32_t g_vizSpecSerial = 0;  // rows pushed so far
+float g_vizSparkBuf[kVizSparkMax * 4] = {};
+int g_vizSparkCount = 0;
+uint32_t g_vizSparkSerial = 0;
+
+namespace {
+struct VizSpark { float x, y, vx, vy, life, band, r; };
+std::vector<VizSpark> s_sparks;
+double s_styleClock = 0.0, s_specAcc = 0.0;
+uint32_t s_stereoSerial = 0;
+float s_hist[2][2048] = {};  // newest stereo samples, L and R
+int s_histPos = 0;
+float s_vuIn[2] = {}, s_vuPos[2] = {-0.03f, -0.03f}, s_vuVel[2] = {};
+double s_vuLastBlock = 0.0;
+float s_lastPulse = 0.f;
+uint32_t s_rng = 2463534242u;
+
+float Rand01() {
+    s_rng ^= s_rng << 13;
+    s_rng ^= s_rng >> 17;
+    s_rng ^= s_rng << 5;
+    return (float)(s_rng & 0xFFFFFF) / 16777216.f;
+}
+
+// VU scale position (0 at -20 VU, 1 at +3 VU) of a linear level, with
+// 0 VU = -18 dBFS. Real VU meters are close to linear in voltage, so the
+// scale's marks crowd toward the top as they do here.
+float VuPosOf(float rms) { return std::clamp((rms * 7.943f - 0.1f) / (1.41254f - 0.1f), -0.03f, 1.08f); }
+
+// New stereo samples from the engine (the Goniometer feed): VU input levels
+// and peak LEDs, and the history Stereo Field analyses.
+void TakeStereo(double now) {
+    uint32_t serial = g_gonioSerial.load(std::memory_order_acquire);
+    if (serial == s_stereoSerial) {
+        if (now - s_vuLastBlock > 0.25) s_vuIn[0] = s_vuIn[1] = 0.f;  // nothing new: the signal stopped
+        return;
+    }
+    s_stereoSerial = serial;
+    s_vuLastBlock = now;
+    double ms[2] = {0, 0};
+    float pk[2] = {0, 0};
+    size_t n = 0;
+    {
+        std::lock_guard<std::mutex> lock(g_gonioMutex);
+        n = g_gonioXY.size() / 2;
+        for (size_t i = 0; i < n; i++) {
+            float side = g_gonioXY[2 * i], mid = g_gonioXY[2 * i + 1];
+            float l = mid + side, r = mid - side;
+            ms[0] += (double)l * l;
+            ms[1] += (double)r * r;
+            pk[0] = std::max(pk[0], fabsf(l));
+            pk[1] = std::max(pk[1], fabsf(r));
+            s_hist[0][s_histPos] = l;
+            s_hist[1][s_histPos] = r;
+            s_histPos = (s_histPos + 1) & 2047;
+        }
+    }
+    if (!n) return;
+    for (int c = 0; c < 2; c++) {
+        s_vuIn[c] = VuPosOf((float)sqrt(ms[c] / (double)n));
+        if (pk[c] >= 0.708f) g_vizVu[2 + c] = 1.f;  // -3 dBFS sample peak
+    }
+}
+
+// VU ballistics, IEC 60268-17: a second-order needle, 99 % of a step in
+// 300 ms with 1.5 % overshoot (zeta 0.8, omega 13.1 rad/s).
+void StepVu(float dt) {
+    const float wn = 13.1f, z = 0.8f;
+    int steps = std::max(1, (int)ceilf(dt / 0.002f));
+    float h = dt / steps;
+    for (int c = 0; c < 2; c++) {
+        for (int s = 0; s < steps; s++) {
+            float a = wn * wn * (s_vuIn[c] - s_vuPos[c]) - 2.f * z * wn * s_vuVel[c];
+            s_vuVel[c] += a * h;
+            s_vuPos[c] += s_vuVel[c] * h;
+        }
+        s_vuPos[c] = std::clamp(s_vuPos[c], -0.04f, 1.1f);
+        g_vizVu[c] = s_vuPos[c];
+        g_vizVu[2 + c] = std::max(0.f, g_vizVu[2 + c] - dt / 0.6f);
+    }
+}
+
+// Stereo Field: a 2048-point spectrum per channel, log-spaced bars from
+// 30 Hz, 72 dB of range. Only when new samples came in.
+void StepSplit(int bars, float dt, bool fresh) {
+    static ttdsp::RealFft fft;
+    static std::vector<float> win, buf, re, im;
+    static float target[2][VIZ_BARS_MAX] = {};
+    const int N = 2048;
+    if (fft.Size() != N) {
+        fft.Init(N);
+        win.resize(N);
+        for (int i = 0; i < N; i++) win[i] = 0.5f - 0.5f * cosf(2.f * VIZ_PI * i / (N - 1));
+        buf.resize(N);
+        re.resize(N / 2 + 1);
+        im.resize(N / 2 + 1);
+    }
+    if (fresh) {
+        float sr = (float)std::max<uint32_t>(8000, g_vizStereoRate.load(std::memory_order_relaxed));
+        float fmax = std::min(18000.f, sr * 0.45f), fmin = 30.f;
+        const double norm = 1.0 / ((N / 4.0) * (N / 4.0));  // full-scale sine through Hann = 0 dB
+        for (int c = 0; c < 2; c++) {
+            for (int i = 0; i < N; i++) buf[i] = s_hist[c][(s_histPos + i) & 2047] * win[i];
+            fft.Forward(buf.data(), re.data(), im.data());
+            for (int b = 0; b < bars; b++) {
+                float f0 = fmin * powf(fmax / fmin, (float)b / bars), f1 = fmin * powf(fmax / fmin, (float)(b + 1) / bars);
+                int k0 = std::clamp((int)(f0 * N / sr), 1, N / 2), k1 = std::clamp((int)(f1 * N / sr), k0, N / 2);
+                double p = 0;
+                for (int k = k0; k <= k1; k++) p = std::max(p, (double)re[k] * re[k] + (double)im[k] * im[k]);
+                float db = 10.f * log10f((float)std::max(p * norm, 1e-12));
+                target[c][b] = std::clamp((db + 72.f) / 66.f, 0.f, 1.f);
+            }
+        }
+    }
+    float att = 1.f - expf(-dt / 0.012f);
+    float fall = dt * 1.4f;
+    for (int b = 0; b < bars; b++) {
+        float* lv[2] = {&g_vizSplitL[b], &g_vizSplitR[b]};
+        for (int c = 0; c < 2; c++) {
+            float t = target[c][b];
+            *lv[c] = t > *lv[c] ? *lv[c] + (t - *lv[c]) * att : std::max(t, *lv[c] - fall);
+        }
+    }
+}
+
+// Spectrogram: a row of the bars' levels every 1/60 s into the ring.
+void StepSpectrogram(int bars, float dt) {
+    if (bars != g_vizSpecW || (int)g_vizSpecRing.size() != bars * kVizSpecRows) {
+        g_vizSpecW = bars;
+        g_vizSpecRing.assign((size_t)bars * kVizSpecRows, 0);
+        g_vizSpecHead = 0;
+        g_vizSpecSerial += kVizSpecRows;  // a full re-upload
+        s_specAcc = 0.0;
+    }
+    s_specAcc += dt * kVizSpecRate;
+    int rows = std::min(8, (int)s_specAcc);
+    s_specAcc -= rows;
+    for (int r = 0; r < rows; r++) {
+        g_vizSpecHead = (g_vizSpecHead + 1) % kVizSpecRows;
+        uint8_t* row = &g_vizSpecRing[(size_t)g_vizSpecHead * bars];
+        for (int i = 0; i < bars; i++) row[i] = (uint8_t)lroundf(std::clamp(g_vizPeak[i], 0.f, 1.f) * 255.f);
+        g_vizSpecSerial++;
+    }
+}
+
+// Particles: on each beat, sparks leave the tops of the louder bars, thrown
+// no higher than the box, and fall back under gravity.
+void StepSparks(int bars, float dt) {
+    const bool horizontal = g_settings.orientation == VizOrientation::Horizontal;
+    const bool top = g_settings.verticalAnchor == VizAnchor::Top;
+    const float barW = std::max(1.f, VizPx((float)std::max(1.f, g_settings.barWidth)));
+    const float barGap = VizPx((float)std::max(0.f, g_settings.barGap));
+    const float maxSize = std::max(2.f, VizPx((float)std::max(2.f, g_settings.barMaxSize)));
+    const float idle = VizPx((float)std::max(0.f, g_settings.barIdleSize));
+    const float G = 900.f * g_dpiScale;
+    // Growth direction of the bars, in block coordinates.
+    const float gx = horizontal ? 0.f : (top ? -1.f : 1.f);
+    const float gy = horizontal ? (top ? 1.f : -1.f) : 0.f;
+    float pulse = g_beatPulse.load(std::memory_order_relaxed);
+    if (pulse > s_lastPulse + 0.3f && bars > 0) {
+        for (int k = 0; k < 18 && (int)s_sparks.size() < kVizSparkMax; k++) {
+            int i = std::min(bars - 1, (int)(Rand01() * bars));
+            for (int t = 0; t < 4 && g_vizPeak[i] < 0.25f; t++) i = std::min(bars - 1, (int)(Rand01() * bars));
+            float len = idle + std::max(0.f, g_vizPeak[i]) * std::max(0.f, maxSize - idle);
+            float along = i * (barW + barGap) + barW * 0.5f;
+            float base = horizontal ? (top ? 0.f : maxSize) : (top ? maxSize : 0.f);
+            float tip = base + (horizontal ? gy : gx) * len;
+            float room = std::max(0.f, maxSize - len);
+            float v = sqrtf(2.f * G * room) * (0.45f + 0.55f * Rand01());
+            float side = (Rand01() - 0.5f) * 80.f * g_dpiScale;
+            VizSpark s;
+            s.x = horizontal ? along : tip;
+            s.y = horizontal ? tip : along;
+            s.vx = gx * v + (horizontal ? side : 0.f);
+            s.vy = gy * v + (horizontal ? 0.f : side);
+            s.life = 1.f;
+            s.band = (float)i;
+            s.r = std::min(15.f, (1.2f + 1.4f * Rand01()) * g_dpiScale);
+            s_sparks.push_back(s);
+        }
+    }
+    s_lastPulse = pulse;
+    const float boxW = horizontal ? bars * (barW + barGap) - barGap : maxSize;
+    const float boxH = horizontal ? maxSize : bars * (barW + barGap) - barGap;
+    size_t out = 0;
+    for (size_t k = 0; k < s_sparks.size(); k++) {
+        VizSpark s = s_sparks[k];
+        s.vx -= gx * G * dt;
+        s.vy -= gy * G * dt;
+        s.x += s.vx * dt;
+        s.y += s.vy * dt;
+        s.life -= dt / 1.1f;
+        bool inside = s.x >= -s.r && s.y >= -s.r && s.x <= boxW + s.r && s.y <= boxH + s.r;
+        if (s.life > 0.f && inside) s_sparks[out++] = s;
+    }
+    s_sparks.resize(out);
+    g_vizSparkCount = (int)out;
+    for (size_t k = 0; k < out; k++) {
+        const VizSpark& s = s_sparks[k];
+        g_vizSparkBuf[k * 4] = s.x;
+        g_vizSparkBuf[k * 4 + 1] = s.y;
+        g_vizSparkBuf[k * 4 + 2] = s.life;
+        g_vizSparkBuf[k * 4 + 3] = s.band * 16.f + s.r;
+    }
+    if (out) g_vizSparkSerial++;
+}
+}  // namespace
+
+// Called once per drawn frame, after VizComputeBarFrame.
+void VizStylesFrame() {
+    VizStyle st = g_settings.style;
+    if (st == VizStyle::None || st == VizStyle::Led || st == VizStyle::Line || st == VizStyle::Bloom) return;
+    double now = VizClockSeconds();
+    float dt = s_styleClock > 0.0 ? (float)std::clamp(now - s_styleClock, 0.0, 0.1) : 1.f / 60.f;
+    s_styleClock = now;
+    int bars = VizEffectiveBarCount();
+    if (st == VizStyle::Vu || st == VizStyle::SplitLR) {
+        uint32_t before = s_stereoSerial;
+        TakeStereo(now);
+        if (st == VizStyle::Vu) StepVu(dt);
+        else StepSplit(bars, dt, s_stereoSerial != before);
+    } else if (st == VizStyle::Spectrogram) {
+        StepSpectrogram(bars, dt);
+    } else if (st == VizStyle::Particles) {
+        StepSparks(bars, dt);
+    }
+}
+
+// ---- Direct2D (the 1.5 path, and the fallback) ---------------------------------------------
+// The same looks drawn with plain Direct2D calls. Fine for a fallback; the
+// Direct3D 11 renderer is the one to use for these (and the only one that
+// draws Reflection).
+namespace {
+RGBA StyleBarColor(int i, int n, float fac, RGBA c1, RGBA cGrad1, RGBA c2, float rainbowBase, bool radial) {
+    RGBA col = c1;
+    VizColorMode m = g_settings.colorMode;
+    float t = n > 1 ? (float)i / (n - 1) : 0.f;
+    if (m == VizColorMode::Gradient || m == VizColorMode::Tourne) col = LerpColor(cGrad1, c2, t);
+    else if (m == VizColorMode::ReactiveGradient) col = LerpColor(cGrad1, c2, fac);
+    else if (m == VizColorMode::DynamicAlbum && !radial) col = LerpColor(cGrad1, c2, std::min(1.f, t * 0.6f + fac * 0.4f));
+    else if (m == VizColorMode::RainbowCycle)
+        col = HSVtoRGB(fmodf(rainbowBase + (radial ? (float)i / std::max(1, n) : t) * 360.f, 360.f), 0.85f, 1.0f, c1.a);
+    if (m == VizColorMode::Acrylic) col = {(BYTE)std::clamp((int)(180.f * fac), 0, 180), c1.r, c1.g, c1.b};
+    return col;
+}
+
+void SetBrush(RGBA c, float alphaScale = 1.f) {
+    g_barBrush->SetColor(D2D1::ColorF(c.r / 255.f, c.g / 255.f, c.b / 255.f, c.a / 255.f * alphaScale));
+}
+
+RGBA SpecColorCpu(float v) {
+    v = std::clamp(v, 0.f, 1.f);
+    static const float stops[5][3] = {{0, 0, 0}, {0.25f, 0.02f, 0.45f}, {0.85f, 0.15f, 0.35f}, {1, 0.6f, 0.1f}, {1, 1, 0.85f}};
+    int k = std::min(3, (int)(v * 4.f));
+    float f = v * 4.f - k;
+    auto ch = [&](int c) { return (BYTE)lroundf((stops[k][c] + (stops[k + 1][c] - stops[k][c]) * f) * 255.f); };
+    return {(BYTE)lroundf(std::clamp(v * 2.5f, 0.f, 1.f) * 255.f), ch(0), ch(1), ch(2)};
+}
+}  // namespace
+
+// Draws the current style and returns true, or returns false for the shape
+// path to draw (Particles draw their sparks here, then let the bars draw).
+bool VizDrawStyleD2D(float blockX, float blockY, float totalWidth, float totalHeight, int barCount, float barW,
+                     float barGap, float maxSize, float idleSize, bool horizontal, RGBA c1, RGBA cGrad1, RGBA c2,
+                     float rainbowBase) {
+    const VizStyle st = g_settings.style;
+    if (st == VizStyle::None || !g_dc || !g_barBrush) return false;
+    const float range = std::max(0.f, maxSize - idleSize);
+    const bool top = g_settings.verticalAnchor == VizAnchor::Top;
+    auto lenOf = [&](float lev) { return idleSize + std::max(0.f, lev) * range; };
+    // Rect of bar i between distances a and b from its base edge (SpanRect in the shader).
+    auto span = [&](int i, float a, float b) {
+        float lead = i * (barW + barGap);
+        if (horizontal) {
+            float x = blockX + lead;
+            if (top) return D2D1::RectF(x, blockY + a, x + barW, blockY + b);
+            float base = blockY + maxSize;
+            return D2D1::RectF(x, base - b, x + barW, base - a);
+        }
+        float y = blockY + lead;
+        if (top) return D2D1::RectF(blockX + maxSize - b, y, blockX + maxSize - a, y + barW);
+        return D2D1::RectF(blockX + a, y, blockX + b, y + barW);
+    };
+
+    if (st == VizStyle::Particles) {
+        for (int k = 0; k < g_vizSparkCount; k++) {
+            const float* p = &g_vizSparkBuf[k * 4];
+            int band = std::min(std::max(barCount - 1, 0), (int)(p[3] / 16.f));
+            float r = p[3] - band * 16.f;
+            SetBrush(StyleBarColor(band, barCount, 1.f, c1, cGrad1, c2, rainbowBase, false), p[2]);
+            g_dc->FillEllipse(D2D1::Ellipse(D2D1::Point2F(blockX + p[0], blockY + p[1]), r, r), g_barBrush.Get());
+        }
+        return false;
+    }
+
+    if (st == VizStyle::Led) {
+        float segH = std::max(2.f * g_dpiScale, roundf(barW * 0.5f));
+        float step = segH + std::max(1.f, roundf(1.5f * g_dpiScale));
+        int segs = std::max(1, (int)((maxSize + step - segH) / step));
+        for (int i = 0; i < barCount; i++) {
+            float lit = lenOf(g_vizPeak[i]) / step;
+            float hold = g_settings.peakHoldEnabled ? lenOf(g_vizPeakHold[i]) : 0.f;
+            int holdSeg = hold > 0.5f ? std::min(segs - 1, (int)(hold / step)) : -1;
+            for (int s = 0; s < segs; s++) {
+                float t = (s + 0.5f) / segs;
+                RGBA col = g_settings.colorMode == VizColorMode::Solid
+                               ? (t >= 0.85f ? RGBA{255, 255, 59, 48} : t >= 0.6f ? RGBA{255, 255, 176, 0} : RGBA{255, 56, 227, 107})
+                               : StyleBarColor(i, barCount, g_vizPeak[i], c1, cGrad1, c2, rainbowBase, false);
+                bool on = s + 0.5f <= lit || s == holdSeg;
+                SetBrush(col, on ? 1.f : 0.1f);
+                g_dc->FillRectangle(span(i, s * step, s * step + segH), g_barBrush.Get());
+            }
+        }
+        return true;
+    }
+
+    if (st == VizStyle::SplitLR) {
+        for (int i = 0; i < barCount; i++) {
+            float lead = i * (barW + barGap);
+            for (int c = 0; c < 2; c++) {
+                float lev = c ? g_vizSplitR[i] : g_vizSplitL[i];
+                float s = lenOf(lev) * 0.5f;
+                if (s < 0.25f) continue;
+                SetBrush(StyleBarColor(i, barCount, lev, c1, cGrad1, c2, rainbowBase, false));
+                D2D1_RECT_F r;
+                if (horizontal) {
+                    float x = blockX + lead, cy = blockY + maxSize * 0.5f;
+                    r = c ? D2D1::RectF(x, cy + 0.5f, x + barW, cy + 0.5f + s) : D2D1::RectF(x, cy - 0.5f - s, x + barW, cy - 0.5f);
+                } else {
+                    float y = blockY + lead, cx = blockX + maxSize * 0.5f;
+                    r = c ? D2D1::RectF(cx + 0.5f, y, cx + 0.5f + s, y + barW) : D2D1::RectF(cx - 0.5f - s, y, cx - 0.5f, y + barW);
+                }
+                g_dc->FillRectangle(r, g_barBrush.Get());
+            }
+        }
+        return true;
+    }
+
+    if (st == VizStyle::Line || st == VizStyle::Bloom) {
+        ComPtr<ID2D1PathGeometry> geo;
+        ComPtr<ID2D1GeometrySink> sink;
+        if (!g_d2dFactory || barCount < 3 || FAILED(g_d2dFactory->CreatePathGeometry(&geo)) || FAILED(geo->Open(&sink)))
+            return true;
+        RGBA col = StyleBarColor(barCount / 2, barCount, 0.5f, c1, cGrad1, c2, rainbowBase, st == VizStyle::Bloom);
+        if (st == VizStyle::Line) {
+            float sg = horizontal ? (top ? 1.f : -1.f) : (top ? -1.f : 1.f);
+            float base = horizontal ? (top ? blockY : blockY + maxSize) : (top ? blockX + maxSize : blockX);
+            float start = horizontal ? blockX : blockY;
+            auto val = [&](int i) { return lenOf(g_vizPeak[std::clamp(i, 0, barCount - 1)]); };
+            auto pt = [&](float along, float v) {
+                float c = base + sg * std::clamp(v, 0.f, maxSize);
+                return horizontal ? D2D1::Point2F(along, c) : D2D1::Point2F(c, along);
+            };
+            sink->BeginFigure(pt(start, 0.f), D2D1_FIGURE_BEGIN_FILLED);
+            sink->AddLine(pt(start, val(0)));
+            const int sub = 4;
+            for (int k = 0; k + 1 < barCount; k++) {
+                float p0 = val(k - 1), p1 = val(k), p2 = val(k + 1), p3 = val(k + 2);
+                for (int j = 1; j <= sub; j++) {
+                    float t = (float)j / sub, t2 = t * t, t3 = t2 * t;
+                    float v = 0.5f * (2 * p1 + (p2 - p0) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (3 * p1 - p0 - 3 * p2 + p3) * t3);
+                    sink->AddLine(pt(start + (k + t) * (barW + barGap) + barW * 0.5f, v));
+                }
+            }
+            float end = start + barCount * (barW + barGap) - barGap;
+            sink->AddLine(pt(end, val(barCount - 1)));
+            sink->AddLine(pt(end, 0.f));
+            sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+        } else {
+            float cx = blockX + totalWidth * 0.5f, cy = blockY + totalHeight * 0.5f, innerR = maxSize * 0.15f;
+            for (int i = 0; i < barCount; i++) {
+                float a = (float)i / barCount * 2.f * VIZ_PI - VIZ_PI * 0.5f, r = innerR + lenOf(g_vizPeak[i]);
+                D2D1_POINT_2F p = D2D1::Point2F(cx + cosf(a) * r, cy + sinf(a) * r);
+                if (i == 0) sink->BeginFigure(p, D2D1_FIGURE_BEGIN_FILLED);
+                else sink->AddLine(p);
+            }
+            sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+        }
+        sink->Close();
+        SetBrush(col, st == VizStyle::Line ? 0.35f : 0.55f);
+        g_dc->FillGeometry(geo.Get(), g_barBrush.Get());
+        SetBrush(col);
+        g_dc->DrawGeometry(geo.Get(), g_barBrush.Get(), std::max(1.5f, barW * 0.2f));
+        return true;
+    }
+
+    if (st == VizStyle::Spectrogram) {
+        static ComPtr<ID2D1Bitmap> bmp;
+        static ID2D1DeviceContext* bmpDc = nullptr;
+        static uint32_t bmpSerial = 0;
+        static std::vector<uint32_t> px;
+        int w = g_vizSpecW, rows = kVizSpecRows;
+        if (w <= 0) return true;
+        float thick = barCount * (barW + barGap) - barGap;
+        if (!bmp || bmpDc != g_dc.Get() || bmp->GetPixelSize().width != (UINT32)w) {
+            bmp.Reset();
+            bmpDc = g_dc.Get();
+            D2D1_BITMAP_PROPERTIES bp = D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+            if (FAILED(g_dc->CreateBitmap(D2D1::SizeU(w, rows), nullptr, 0, bp, &bmp))) return true;
+            bmpSerial = g_vizSpecSerial - 1;
+        }
+        if (bmpSerial != g_vizSpecSerial) {  // newest row first
+            bmpSerial = g_vizSpecSerial;
+            px.resize((size_t)w * rows);
+            for (int a = 0; a < rows; a++) {
+                const uint8_t* src = &g_vizSpecRing[(size_t)((g_vizSpecHead - a + rows) % rows) * w];
+                for (int i = 0; i < w; i++) {
+                    RGBA c = g_settings.colorMode == VizColorMode::Solid ? SpecColorCpu(src[i] / 255.f)
+                                                                         : LerpColor(cGrad1, c2, src[i] / 255.f);
+                    if (g_settings.colorMode != VizColorMode::Solid) c.a = (BYTE)std::min(255, src[i] * 5 / 2);
+                    float al = c.a / 255.f * c1.a / 255.f;
+                    px[(size_t)a * w + i] = ((uint32_t)lroundf(al * 255.f) << 24) | ((uint32_t)lroundf(c.r * al) << 16) |
+                                            ((uint32_t)lroundf(c.g * al) << 8) | (uint32_t)lroundf(c.b * al);
+                }
+            }
+            bmp->CopyFromMemory(nullptr, px.data(), w * 4);
+        }
+        float vis = std::min((float)rows, maxSize);
+        D2D1_RECT_F dst = horizontal ? D2D1::RectF(blockX, blockY, blockX + thick, blockY + maxSize)
+                                     : D2D1::RectF(blockX, blockY, blockX + maxSize, blockY + thick);
+        if (horizontal) {
+            g_dc->DrawBitmap(bmp.Get(), dst, 1.f, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1::RectF(0, 0, (float)w, vis));
+        } else {  // time runs left to right: rotate the image a quarter turn
+            D2D1_MATRIX_3X2_F old;
+            g_dc->GetTransform(&old);
+            D2D1_POINT_2F o = D2D1::Point2F(blockX, blockY);
+            g_dc->SetTransform(D2D1::Matrix3x2F(0, 1, 1, 0, 0, 0) * D2D1::Matrix3x2F::Translation(o.x, o.y) * old);
+            g_dc->DrawBitmap(bmp.Get(), D2D1::RectF(0, 0, thick, maxSize), 1.f, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+                             D2D1::RectF(0, 0, (float)w, vis));
+            g_dc->SetTransform(old);
+        }
+        // Legend, hot end at the top (right when vertical), quarter ticks.
+        float gap = 3.f * g_dpiScale, lw = 6.f * g_dpiScale;
+        for (int k = 0; k < 32; k++) {
+            float v = (k + 0.5f) / 32.f;
+            RGBA c = g_settings.colorMode == VizColorMode::Solid ? SpecColorCpu(v) : LerpColor(cGrad1, c2, v);
+            c.a = std::max<BYTE>(c.a, 89);  // the legend stays readable at the quiet end
+            SetBrush(c);
+            float a0 = k / 32.f, a1 = (k + 1) / 32.f;
+            D2D1_RECT_F r = horizontal ? D2D1::RectF(dst.right + gap, dst.bottom - a1 * maxSize, dst.right + gap + lw, dst.bottom - a0 * maxSize)
+                                       : D2D1::RectF(dst.left + a0 * maxSize, dst.bottom + gap, dst.left + a1 * maxSize, dst.bottom + gap + lw);
+            g_dc->FillRectangle(r, g_barBrush.Get());
+        }
+        VizDrawStyleScale(blockX, blockY, maxSize, thick, horizontal);
+        return true;
+    }
+
+    if (st == VizStyle::Vu) {
+        float mh = maxSize, mw = maxSize * 1.5f, gap = 8.f * g_dpiScale;
+        const float marks[11] = {-20, -10, -7, -5, -3, -2, -1, 0, 1, 2, 3};
+        auto posOf = [](float db) { return (powf(10.f, db / 20.f) - 0.1f) / (1.41254f - 0.1f); };
+        ID2D1SolidColorBrush* b = g_barBrush.Get();
+        for (int m = 0; m < 2; m++) {
+            float ox = blockX + (horizontal ? m * (mw + gap) : 0.f), oy = blockY + (horizontal ? 0.f : m * (mh + gap));
+            float pvx = ox + mw * 0.5f, pvy = oy + mh * 0.9f, R = mh * 0.68f, lw = std::max(1.2f, mh * 0.016f);
+            auto at = [&](float p, float r) {
+                float an = (-48.f + 96.f * p) * VIZ_PI / 180.f;
+                return D2D1::Point2F(pvx + sinf(an) * r, pvy - cosf(an) * r);
+            };
+            b->SetColor(D2D1::ColorF(0.05f, 0.05f, 0.06f, 0.6f));
+            g_dc->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(ox, oy, ox + mw, oy + mh), mh * 0.08f, mh * 0.08f), b);
+            for (int k = 0; k < 11; k++) {
+                float p = posOf(marks[k]);
+                b->SetColor(marks[k] > 0 ? D2D1::ColorF(1.f, 0.27f, 0.23f, 0.95f) : D2D1::ColorF(0.92f, 0.92f, 0.9f, 0.85f));
+                g_dc->DrawLine(at(p, (k == 0 || k == 7) ? R * 0.84f : R * 0.9f), at(p, R), b, lw);
+            }
+            for (int k = 0; k < 16; k++) {
+                bool hot = (k + 0.5f) / 16.f > posOf(0.f);
+                b->SetColor(hot ? D2D1::ColorF(1.f, 0.27f, 0.23f, 0.95f) : D2D1::ColorF(0.92f, 0.92f, 0.9f, 0.85f));
+                g_dc->DrawLine(at(k / 16.f, R * 0.9f), at((k + 1) / 16.f, R * 0.9f), b, hot ? lw * 1.8f : lw, g_roundCapStrokeStyle.Get());
+            }
+            SetBrush(RGBA{255, c1.r, c1.g, c1.b});
+            g_dc->DrawLine(at(g_vizVu[m], R * 0.12f), at(g_vizVu[m], R * 1.02f), b, std::max(1.6f, mh * 0.024f),
+                           g_roundCapStrokeStyle.Get());
+            b->SetColor(D2D1::ColorF(0.25f, 0.25f, 0.27f, 1.f));
+            g_dc->FillEllipse(D2D1::Ellipse(D2D1::Point2F(pvx, pvy), mh * 0.05f, mh * 0.05f), b);
+            b->SetColor(D2D1::ColorF(1.f, 0.18f, 0.12f, 0.18f + 0.82f * std::clamp(g_vizVu[2 + m], 0.f, 1.f)));
+            g_dc->FillEllipse(D2D1::Ellipse(D2D1::Point2F(ox + mw - mh * 0.12f, oy + mh * 0.12f), mh * 0.045f, mh * 0.045f), b);
+        }
+        VizDrawStyleScale(blockX, blockY, maxSize, 0.f, horizontal);
+        return true;
+    }
+    return false;
+}
+
+// ---- Reflection and Shadow on the Direct2D renderer -------------------------------------
+// The bars go into an offscreen bitmap the size of the target, which is then
+// drawn up to three times: a Shadow effect of it, offset; the bitmap as is;
+// and mirrored about the base line through a layer whose opacity fades from
+// 40 % to nothing over the reflection depth, as on Direct3D 11. Skipped for
+// the frames where the whole scene fades in or out, since the target can't
+// change under a pushed layer.
+namespace {
+ComPtr<ID2D1Bitmap1> s_reflBmp;
+ComPtr<ID2D1Image> s_reflOld;
+ComPtr<ID2D1LinearGradientBrush> s_reflFade;
+ComPtr<ID2D1Effect> s_shadowFx;
+ID2D1DeviceContext* s_reflDc = nullptr;
+float s_reflDpi = 96.f;
+const CLSID kVizClsidShadow = {0xC67EA361, 0x1863, 0x4E69, {0x89, 0xDB, 0x69, 0x5D, 0x3E, 0x9A, 0x5B, 0x6B}};
+}  // namespace
+
+bool VizFxD2DBegin(bool fadeLayer) {
+    if (fadeLayer || !g_dc || !(VizReflectionActive() || g_settings.fxShadow > 0)) return false;
+    ComPtr<ID2D1Image> old;
+    g_dc->GetTarget(&old);
+    ComPtr<ID2D1Bitmap1> tb;
+    if (!old || FAILED(old.As(&tb))) return false;
+    D2D1_SIZE_U sz = tb->GetPixelSize();
+    if (!s_reflBmp || s_reflDc != g_dc.Get() || s_reflBmp->GetPixelSize().width != sz.width ||
+        s_reflBmp->GetPixelSize().height != sz.height) {
+        s_reflBmp.Reset();
+        s_reflFade.Reset();
+        s_shadowFx.Reset();
+        float dx = 96.f, dy = 96.f;
+        tb->GetDpi(&dx, &dy);
+        s_reflDpi = dx > 0.f ? dx : 96.f;
+        D2D1_BITMAP_PROPERTIES1 bp = D2D1::BitmapProperties1(
+            D2D1_BITMAP_OPTIONS_TARGET, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), dx, dy);
+        if (FAILED(g_dc->CreateBitmap(sz, nullptr, 0, bp, &s_reflBmp))) return false;
+        D2D1_GRADIENT_STOP stops[2] = {{0.f, D2D1::ColorF(0, 0, 0, 0.4f)}, {1.f, D2D1::ColorF(0, 0, 0, 0.f)}};
+        ComPtr<ID2D1GradientStopCollection> sc;
+        if (FAILED(g_dc->CreateGradientStopCollection(stops, 2, &sc)) ||
+            FAILED(g_dc->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties(D2D1::Point2F(0, 0), D2D1::Point2F(0, 1)),
+                                                   sc.Get(), &s_reflFade))) {
+            s_reflBmp.Reset();
+            return false;
+        }
+        if (SUCCEEDED(g_dc->CreateEffect(kVizClsidShadow, &s_shadowFx))) s_shadowFx->SetInput(0, s_reflBmp.Get());
+        s_reflDc = g_dc.Get();
+    }
+    s_reflOld = old;
+    g_dc->SetTarget(s_reflBmp.Get());
+    g_dc->Clear(D2D1::ColorF(0, 0, 0, 0));
+    return true;
+}
+
+// `baseY` is the bars' base line in the drawing's own coordinates.
+void VizFxD2DEnd(float baseY, float depth) {
+    g_dc->SetTarget(s_reflOld.Get());
+    s_reflOld.Reset();
+    D2D1_MATRIX_3X2_F old;
+    g_dc->GetTransform(&old);
+    g_dc->SetTransform(D2D1::IdentityMatrix());  // the bitmap is already in target space
+    if (g_settings.fxShadow > 0 && s_shadowFx) {
+        const float toDip = 96.f / s_reflDpi * g_dpiScale;  // settings px -> target DIPs
+        s_shadowFx->SetValue(D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION, std::max(0.01f, g_settings.fxShadowSoft * 0.5f * toDip));
+        s_shadowFx->SetValue(D2D1_SHADOW_PROP_COLOR,
+                             D2D1::Vector4F(g_settings.fxShadowR / 255.f, g_settings.fxShadowG / 255.f,
+                                            g_settings.fxShadowB / 255.f, g_settings.fxShadow / 100.f));
+        g_dc->DrawImage(s_shadowFx.Get(), D2D1::Point2F(g_settings.fxShadowX * toDip, g_settings.fxShadowY * toDip));
+    }
+    g_dc->DrawImage(s_reflBmp.Get());
+    float base = old._22 * baseY + old._32, d = depth * fabsf(old._22);
+    if (VizReflectionActive() && d >= 1.f) {
+        D2D1_SIZE_F ts = g_dc->GetSize();
+        s_reflFade->SetStartPoint(D2D1::Point2F(0, base));
+        s_reflFade->SetEndPoint(D2D1::Point2F(0, base + d));
+        g_dc->PushLayer(D2D1::LayerParameters1(D2D1::RectF(0, base, ts.width, base + d), nullptr,
+                                               D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::IdentityMatrix(), 1.f,
+                                               s_reflFade.Get()),
+                        nullptr);
+        g_dc->SetTransform(D2D1::Matrix3x2F::Scale(1.f, -1.f, D2D1::Point2F(0, base)));
+        g_dc->DrawImage(s_reflBmp.Get());
+        g_dc->SetTransform(D2D1::IdentityMatrix());
+        g_dc->PopLayer();
+    }
+    g_dc->SetTransform(old);
+}
+
+// ---- Album colours ease in -------------------------------------------------------------
+// A new cover's colours fade in over 0.6 s instead of jumping (smoothstep).
+// Render thread only. It moves only while frames are drawing, which they are
+// while a track plays.
+DWORD VizAlbumColorShown(int which) {
+    static DWORD from[2], to[2], shown[2];
+    static ULONGLONG t0[2];
+    static bool init[2];
+    DWORD target = (which ? g_albumArtColorSecondary : g_albumArtColor).load(std::memory_order_relaxed);
+    ULONGLONG now = GetTickCount64();
+    if (!init[which]) {
+        init[which] = true;
+        from[which] = to[which] = shown[which] = target;
+    }
+    if (target != to[which]) {
+        from[which] = shown[which];
+        to[which] = target;
+        t0[which] = now;
+    }
+    float t = std::clamp((float)(now - t0[which]) / 600.f, 0.f, 1.f);
+    t = t * t * (3.f - 2.f * t);
+    DWORD out = 0;
+    for (int sh = 0; sh < 32; sh += 8) {
+        float a = (float)((from[which] >> sh) & 0xFF), b = (float)((to[which] >> sh) & 0xFF);
+        out |= (DWORD)lroundf(a + (b - a) * t) << sh;
+    }
+    shown[which] = out;
+    return out;
+}
+
 bool ComputeVizLayout(VizLayout* out) {
     if (!out) return false;
 
     int barCount  = VizEffectiveBarCount();
-    float barW    = std::max(1.f, VizPx((float)std::max(1, g_settings.barWidth)));
-    float barGap  = VizPx((float)std::max(0, g_settings.barGap));
-    float maxSize = std::max(2.f, VizPx((float)std::max(2, g_settings.barMaxSize)));
+    float barW    = std::max(1.f, VizPx((float)std::max(1.f, g_settings.barWidth)));
+    float barGap  = VizPx((float)std::max(0.f, g_settings.barGap));
+    float maxSize = std::max(2.f, VizPx((float)std::max(2.f, g_settings.barMaxSize)));
 
     bool horizontal = (g_settings.orientation == VizOrientation::Horizontal);
     float barsThickness = barCount * barW + (barCount - 1) * barGap;
@@ -8631,6 +10321,7 @@ bool ComputeVizLayout(VizLayout* out) {
         totalWidth  = horizontal ? barsThickness : maxSize;
         totalHeight = horizontal ? maxSize       : barsThickness;
     }
+    VizStyleBox(&totalWidth, &totalHeight, maxSize, horizontal);
 
     HMONITOR monitor = g_cachedMonitor;
     if (!monitor) monitor = MonitorFromPoint({0, 0}, MONITOR_DEFAULTTONEAREST);
@@ -8653,6 +10344,14 @@ bool ComputeVizLayout(VizLayout* out) {
 
     float blockX = waLeft + (workWidth  - totalWidth)  * (hPercent / 100.0f);
     float blockY = waTop  + (workHeight - totalHeight) * (vPercent / 100.0f);
+    if (!g_settings.dockApp.empty() && g_dockActive.load(std::memory_order_relaxed)) {
+        // Docked: beside the app's window, kept inside the work area like any
+        // other position.
+        float dx, dy;
+        VizDockPlace(totalWidth, totalHeight, &dx, &dy);
+        blockX = std::clamp(dx - vsx, waLeft, std::max(waLeft, waLeft + workWidth - totalWidth));
+        blockY = std::clamp(dy - vsy, waTop, std::max(waTop, waTop + workHeight - totalHeight));
+    }
     // Pixel Snap: the block on a whole pixel. With the sizes above already
     // whole, every bar edge and the panel then sit exactly on the grid.
     if (g_settings.pixelSnap) {
@@ -8674,7 +10373,7 @@ bool ComputeVizLayout(VizLayout* out) {
 
     // Text overlays can sit outside the bars, so the box reserves room for them.
     // Without this they fall outside the render surface and get clipped away.
-    float fontPx = (float)std::max(6, g_settings.nowPlayingFontSize) * g_dpiScale;
+    float fontPx = (float)std::max(6.f, g_settings.nowPlayingFontSize) * g_dpiScale;
     float textTop = 0.f, textBottom = 0.f, textSide = 0.f;
 
     // textAnchorSide is where the draw code hangs the text off the bar group and
@@ -8723,7 +10422,7 @@ bool ComputeVizLayout(VizLayout* out) {
         extraSide  = std::max(extraSide, npOffX);
     }
     if (g_settings.progressEnabled) {
-        float need = (float)(std::max(1, g_settings.progressHeight) + g_settings.progressGap) * g_dpiScale +
+        float need = (float)(std::max(1.f, g_settings.progressHeight) + g_settings.progressGap) * g_dpiScale +
                      2.0f * g_dpiScale;
         if (g_settings.progressPlacement == VizProgressPlacement::Above) textTop += need;
         else if (g_settings.progressPlacement == VizProgressPlacement::Below) textBottom = std::max(textBottom, need);
@@ -8875,7 +10574,13 @@ bool CreateSwapChainResources() {
     g_compositionVisual->SetOffsetX(layout.originX);
     g_compositionVisual->SetOffsetY(layout.originY);
 
-    hr = g_compositionTarget->SetRoot(g_rootVisual.Get());
+    hr = g_compositionDevice->CreateVisual(&g_splitTop);
+    if (FAILED(hr)) return false;
+    hr = g_splitTop->AddVisual(g_rootVisual.Get(), FALSE, nullptr);
+    if (FAILED(hr)) return false;
+    g_split = {};
+
+    hr = g_compositionTarget->SetRoot(g_splitTop.Get());
     if (FAILED(hr)) return false;
 
     hr = g_compositionDevice->Commit();
@@ -8953,6 +10658,8 @@ float g_dragStartH = 50.0f, g_dragStartV = 50.0f;
 ULONGLONG g_dragLastClickTick = 0;
 POINT g_dragLastClickPos{};
 
+void VizCollectSnapLines();
+
 void BeginDrag(POINT pt) {
     g_dragInProgress = true;
     g_dragMoved = false;
@@ -8964,6 +10671,7 @@ void BeginDrag(POINT pt) {
                        ? g_dragOverrideV.load(std::memory_order_relaxed)
                        : g_settings.verticalPosition;
     g_dragRenderPauseActive.store(true, std::memory_order_relaxed);
+    VizCollectSnapLines();
 
     Wh_Log(L"[Drag] BEGIN cursor=(%d,%d) startH=%.2f startV=%.2f",
            pt.x, pt.y, g_dragStartH, g_dragStartV);
@@ -8980,9 +10688,9 @@ bool GetVizTravelRange(float* travelX, float* travelY) {
     if (!GetMonitorInfo(monitor, &mi)) return false;
 
     int barCount = VizEffectiveBarCount();
-    float barW = std::max(1.f, VizPx((float)std::max(1, g_settings.barWidth)));
-    float barGap = VizPx((float)std::max(0, g_settings.barGap));
-    float maxSize = std::max(2.f, VizPx((float)std::max(2, g_settings.barMaxSize)));
+    float barW = std::max(1.f, VizPx((float)std::max(1.f, g_settings.barWidth)));
+    float barGap = VizPx((float)std::max(0.f, g_settings.barGap));
+    float maxSize = std::max(2.f, VizPx((float)std::max(2.f, g_settings.barMaxSize)));
     bool horizontal = (g_settings.orientation == VizOrientation::Horizontal);
     float barsThickness = barCount * barW + (barCount - 1) * barGap;
     float totalWidth, totalHeight;
@@ -8994,10 +10702,211 @@ bool GetVizTravelRange(float* travelX, float* travelY) {
         totalWidth  = horizontal ? barsThickness : maxSize;
         totalHeight = horizontal ? maxSize       : barsThickness;
     }
+    VizStyleBox(&totalWidth, &totalHeight, maxSize, horizontal);
 
     *travelX = (float)(mi.rcWork.right  - mi.rcWork.left) - totalWidth;
     *travelY = (float)(mi.rcWork.bottom - mi.rcWork.top)  - totalHeight;
     return true;
+}
+
+// ---- Drag snapping ---------------------------------------------------------
+// Lines the box can catch on while it is dragged, in screen pixels. Gathered once
+// when a drag starts (the taskbar does not move mid-drag), then each move only
+// compares a handful of numbers.
+std::vector<float> g_snapLinesX, g_snapLinesY;
+
+// ---- Dock to an app window -------------------------------------------------
+HWND g_dockTarget = nullptr;
+HWINEVENTHOOK g_dockHook = nullptr;
+std::wstring g_dockFor;  // the app name the current target was found for
+
+void VizDockRedraw() {
+    if (g_overlayWnd) PostMessage(g_overlayWnd, WM_APP_FORCE_REDRAW, 0, 0);
+}
+
+// Reads the target's frame; false while it is minimized, hidden or gone.
+bool VizDockReadRect() {
+    HWND w = g_dockTarget;
+    RECT r{};
+    bool ok = w && IsWindow(w) && IsWindowVisible(w) && !IsIconic(w);
+    if (ok && FAILED(DwmGetWindowAttribute(w, DWMWA_EXTENDED_FRAME_BOUNDS, &r, sizeof(r))))
+        ok = GetWindowRect(w, &r) != 0;
+    ok = ok && r.right > r.left && r.bottom > r.top;
+    bool was = g_dockActive.load(std::memory_order_relaxed);
+    if (ok) {
+        bool moved = r.left != g_dockL.load(std::memory_order_relaxed) || r.top != g_dockT.load(std::memory_order_relaxed) ||
+                     r.right != g_dockR.load(std::memory_order_relaxed) || r.bottom != g_dockB.load(std::memory_order_relaxed);
+        g_dockL.store(r.left, std::memory_order_relaxed);
+        g_dockT.store(r.top, std::memory_order_relaxed);
+        g_dockR.store(r.right, std::memory_order_relaxed);
+        g_dockB.store(r.bottom, std::memory_order_relaxed);
+        g_dockActive.store(true, std::memory_order_relaxed);
+        if (moved || !was) VizDockRedraw();
+    } else if (was) {
+        g_dockActive.store(false, std::memory_order_relaxed);
+        VizDockRedraw();
+    }
+    return ok;
+}
+
+void CALLBACK VizDockEventProc(HWINEVENTHOOK, DWORD, HWND hwnd, LONG idObject, LONG idChild, DWORD, DWORD) {
+    if (hwnd == g_dockTarget && idObject == OBJID_WINDOW && idChild == CHILDID_SELF) VizDockReadRect();
+}
+
+void VizDockStop() {
+    if (g_dockHook) UnhookWinEvent(g_dockHook);
+    g_dockHook = nullptr;
+    g_dockTarget = nullptr;
+    if (g_dockActive.exchange(false)) VizDockRedraw();
+}
+
+static bool VizProcessNameIs(DWORD pid, const std::wstring& want) {
+    HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!p) return false;
+    WCHAR path[MAX_PATH];
+    DWORD n = MAX_PATH;
+    bool match = false;
+    if (QueryFullProcessImageNameW(p, 0, path, &n)) {
+        std::wstring name = path;
+        size_t slash = name.find_last_of(L"\\/");
+        if (slash != std::wstring::npos) name = name.substr(slash + 1);
+        for (auto& ch : name) ch = (WCHAR)towlower(ch);
+        if (name.size() > 4 && name.compare(name.size() - 4, 4, L".exe") == 0) name.resize(name.size() - 4);
+        match = name == want;
+    }
+    CloseHandle(p);
+    return match;
+}
+
+struct VizDockFind { const std::wstring* want; HWND found; DWORD lastPid; };
+
+BOOL CALLBACK VizDockEnumProc(HWND w, LPARAM lp) {
+    auto* f = (VizDockFind*)lp;
+    if (!IsWindowVisible(w) || GetWindow(w, GW_OWNER) || IsIconic(w)) return TRUE;
+    if (GetWindowLongPtr(w, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) return TRUE;
+    if (GetWindowTextLengthW(w) == 0) return TRUE;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(w, &pid);
+    if (!pid || pid == f->lastPid || pid == GetCurrentProcessId()) return TRUE;
+    f->lastPid = pid;
+    if (!VizProcessNameIs(pid, *f->want)) return TRUE;
+    f->found = w;
+    return FALSE;
+}
+
+// Called on the 1 s watch timer: finds the app's main window when there is none
+// yet (the app may start later), and watches it move through a WinEvent hook
+// scoped to that one process, so following it costs nothing while it sits still.
+void VizDockRefresh() {
+    const std::wstring& want = g_settings.dockApp;
+    if (want != g_dockFor) { VizDockStop(); g_dockFor = want; }
+    if (want.empty()) return;
+    if (g_dockTarget && IsWindow(g_dockTarget)) { VizDockReadRect(); return; }
+    VizDockStop();
+
+    VizDockFind f{&want, nullptr, 0};
+    EnumWindows(VizDockEnumProc, (LPARAM)&f);
+    if (!f.found) return;
+
+    g_dockTarget = f.found;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(f.found, &pid);
+    g_dockHook = SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE, nullptr,
+                                 VizDockEventProc, pid, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    Wh_Log(L"[Dock] following %s (hwnd=%p hook=%p)", want.c_str(), f.found, g_dockHook);
+    VizDockReadRect();
+}
+
+// Where the docked box goes, in screen pixels, for a box of the given size.
+void VizDockPlace(float boxW, float boxH, float* x, float* y) {
+    float l = (float)g_dockL.load(std::memory_order_relaxed), t = (float)g_dockT.load(std::memory_order_relaxed);
+    float r = (float)g_dockR.load(std::memory_order_relaxed), b = (float)g_dockB.load(std::memory_order_relaxed);
+    float gap = g_settings.dockGap * g_dpiScale, shift = g_settings.dockShift * g_dpiScale;
+    int side = g_settings.dockSide, align = g_settings.dockAlign;
+    if (side <= 1) {
+        *x = (align == 0 ? l : align == 2 ? r - boxW : (l + r - boxW) * 0.5f) + shift;
+        *y = side == 0 ? b + gap : t - boxH - gap;
+    } else {
+        *y = (align == 0 ? t : align == 2 ? b - boxH : (t + b - boxH) * 0.5f) + shift;
+        *x = side == 3 ? r + gap : l - boxW - gap;
+    }
+}
+
+void VizSnapAddWindow(HWND w, bool xOnly) {
+    RECT r;
+    if (!w || !IsWindowVisible(w) || !GetWindowRect(w, &r) || r.right <= r.left || r.bottom <= r.top) return;
+    g_snapLinesX.push_back((float)r.left);
+    g_snapLinesX.push_back((float)r.right);
+    g_snapLinesX.push_back((r.left + r.right) * 0.5f);
+    if (xOnly) return;
+    g_snapLinesY.push_back((float)r.top);
+    g_snapLinesY.push_back((float)r.bottom);
+}
+
+void VizCollectSnapLines() {
+    g_snapLinesX.clear();
+    g_snapLinesY.clear();
+    if (!g_settings.dragSnap) return;
+    HMONITOR monitor = g_cachedMonitor;
+    if (!monitor) monitor = MonitorFromPoint({0, 0}, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi{.cbSize = sizeof(mi)};
+    if (!GetMonitorInfo(monitor, &mi)) return;
+    const RECT& wk = mi.rcWork;
+    g_snapLinesX = {(float)wk.left, (float)wk.right, (wk.left + wk.right) * 0.5f};
+    g_snapLinesY = {(float)wk.top, (float)wk.bottom, (wk.top + wk.bottom) * 0.5f};
+
+    // This monitor's taskbar: its edge, then the tray and the Start button along it.
+    for (PCWSTR cls : {L"Shell_TrayWnd", L"Shell_SecondaryTrayWnd"}) {
+        for (HWND tb = FindWindowEx(nullptr, nullptr, cls, nullptr); tb;
+             tb = FindWindowEx(nullptr, tb, cls, nullptr)) {
+            if (MonitorFromWindow(tb, MONITOR_DEFAULTTONULL) != monitor) continue;
+            RECT r;
+            if (GetWindowRect(tb, &r)) {
+                g_snapLinesY.push_back((float)r.top);
+                g_snapLinesY.push_back((float)r.bottom);
+            }
+            VizSnapAddWindow(FindWindowEx(tb, nullptr, L"TrayNotifyWnd", nullptr), true);
+            VizSnapAddWindow(FindWindowEx(tb, nullptr, L"Start", nullptr), true);
+        }
+    }
+}
+
+bool VizSnapBypassHeld() {
+    int key = g_settings.dragModifier == VizDragModifier::Shift ? VK_MENU : VK_SHIFT;
+    return (GetAsyncKeyState(key) & 0x8000) != 0;
+}
+
+// Moves a box [lo, lo+size] so its nearest edge or centre sits on a line within
+// reach. Returns the adjusted lo.
+float VizSnapAxis(float lo, float size, const std::vector<float>& lines, float reach) {
+    float best = reach + 1.f, shift = 0.f;
+    for (float line : lines) {
+        for (float a : {lo, lo + size * 0.5f, lo + size}) {
+            float d = line - a;
+            if (std::abs(d) < best) { best = std::abs(d); shift = d; }
+        }
+    }
+    return best <= reach ? lo + shift : lo;
+}
+
+void VizApplyDragSnap(float* h, float* v, float travelX, float travelY) {
+    if (!g_settings.dragSnap || g_snapLinesX.empty() || VizSnapBypassHeld()) return;
+    HMONITOR monitor = g_cachedMonitor;
+    if (!monitor) monitor = MonitorFromPoint({0, 0}, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi{.cbSize = sizeof(mi)};
+    if (!GetMonitorInfo(monitor, &mi)) return;
+    const RECT& wk = mi.rcWork;
+    float reach = g_settings.dragSnapDistance * g_dpiScale;
+    if (travelX > 1.0f) {
+        float boxW = (float)(wk.right - wk.left) - travelX;
+        float lo = VizSnapAxis(wk.left + travelX * *h / 100.0f, boxW, g_snapLinesX, reach);
+        *h = std::clamp((lo - wk.left) / travelX * 100.0f, 0.0f, 100.0f);
+    }
+    if (travelY > 1.0f) {
+        float boxH = (float)(wk.bottom - wk.top) - travelY;
+        float lo = VizSnapAxis(wk.top + travelY * *v / 100.0f, boxH, g_snapLinesY, reach);
+        *v = std::clamp((lo - wk.top) / travelY * 100.0f, 0.0f, 100.0f);
+    }
 }
 
 void UpdateDrag(POINT pt) {
@@ -9012,8 +10921,11 @@ void UpdateDrag(POINT pt) {
     float dxPercent = (travelX > 1.0f) ? ((float)(pt.x - g_dragStartCursor.x) / travelX) * 100.0f : 0.f;
     float dyPercent = (travelY > 1.0f) ? ((float)(pt.y - g_dragStartCursor.y) / travelY) * 100.0f : 0.f;
 
-    g_dragOverrideH.store(std::clamp(g_dragStartH + dxPercent, 0.0f, 100.0f), std::memory_order_relaxed);
-    g_dragOverrideV.store(std::clamp(g_dragStartV + dyPercent, 0.0f, 100.0f), std::memory_order_relaxed);
+    float newH = std::clamp(g_dragStartH + dxPercent, 0.0f, 100.0f);
+    float newV = std::clamp(g_dragStartV + dyPercent, 0.0f, 100.0f);
+    VizApplyDragSnap(&newH, &newV, travelX, travelY);
+    g_dragOverrideH.store(newH, std::memory_order_relaxed);
+    g_dragOverrideV.store(newV, std::memory_order_relaxed);
     g_dragOverrideActive.store(true, std::memory_order_relaxed);
 
     static int s_dragLogCounter = 0;
@@ -9142,6 +11054,7 @@ bool GetMediaTravelRange(float* travelX, float* travelY) {
     int pad = GetMediaPlatePaddingPx();
     int width = size * 3 + spacing * 2 + pad * 2;
     int height = size + pad * 2;
+    if (VizCardActive()) VizCardSize(&width, &height);
 
     HMONITOR monitor = GetMonitorById(g_settings.monitor - 1);
     if (!monitor) monitor = MonitorFromPoint({0, 0}, MONITOR_DEFAULTTONEAREST);
@@ -9242,19 +11155,21 @@ LRESULT CALLBACK MoveKeyboardHookProc(int nCode, WPARAM wParam, LPARAM lParam) {
         bool isDown = (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN);
         bool isUp   = (wParam == WM_KEYUP   || wParam == WM_SYSKEYUP);
 
-        if ((isDown || isUp) && ModKeysHeld(g_settings.keyMoveModifier)) {
+        if ((isDown || isUp) && !g_fullscreenPaused.load(std::memory_order_relaxed) &&
+            ModKeysHeld(g_settings.keyMoveModifier)) {
             int dx = 0, dy = 0;
             if (KeyMoveDirection(kb->vkCode, &dx, &dy)) {
                 if (isDown) {
                     bool fast = g_settings.keyMoveFastKey != VIZ_MOD_NONE &&
                                 ModKeysHeld(g_settings.keyMoveFastKey);
-                    int step = fast ? g_settings.keyMoveFastStep : g_settings.keyMoveStep;
+                    float fstep = fast ? g_settings.keyMoveFastStep : g_settings.keyMoveStep;
+                    int step = std::max(1, (int)lroundf(fstep));  // the strip and the text: whole pixels
                     // Fine: a fraction of a pixel. Only the visualizer can sit
                     // between pixels; the strip and the text move whole pixels.
                     bool fine = !fast && (g_settings.keyMoveFine ||
                                           (g_settings.keyMoveFineKey != VIZ_MOD_NONE &&
                                            ModKeysHeld(g_settings.keyMoveFineKey)));
-                    float vstep = fine ? g_settings.keyMoveFineStep : (float)step;
+                    float vstep = fine ? g_settings.keyMoveFineStep : fstep;
                     if (g_keyMoveTarget == VizMoveTarget::Visualizer) {
                         NudgeVisualizerPx(dx * vstep, dy * vstep);
                     } else if (g_keyMoveTarget == VizMoveTarget::MediaControls) {
@@ -9362,9 +11277,72 @@ bool VizMenuHook(WPARAM wParam, const MSLLHOOKSTRUCT* info) {
     return false;
 }
 
+// ---- Click to Seek (2.1) -----------------------------------------------------------------
+// A left press on the progress bar jumps there; dragging and releasing jumps
+// again where it's let go. The cursor moves freely meanwhile (moves are
+// never swallowed). The app list is checked against running processes at
+// most every 3 s, and only on a press that lands on the bar.
+bool VizSeekAppsAllow() {
+    const auto& apps = g_settings.progressSeekApps;
+    if (apps.empty()) return true;
+    static ULONGLONG s_tick = 0;
+    static bool s_anyRunning = false;
+    ULONGLONG now = GetTickCount64();
+    if (s_tick == 0 || now - s_tick > 3000) {
+        s_tick = now;
+        s_anyRunning = false;
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snap != INVALID_HANDLE_VALUE) {
+            PROCESSENTRY32W pe = {sizeof(pe)};
+            for (BOOL more = Process32FirstW(snap, &pe); more && !s_anyRunning; more = Process32NextW(snap, &pe)) {
+                std::wstring n = pe.szExeFile;
+                for (auto& ch : n) ch = (WCHAR)towlower(ch);
+                if (n.size() > 4 && n.compare(n.size() - 4, 4, L".exe") == 0) n.resize(n.size() - 4);
+                for (const auto& a : apps)
+                    if (n == a) s_anyRunning = true;
+            }
+            CloseHandle(snap);
+        }
+    }
+    return g_settings.progressSeekOnlyListed ? s_anyRunning : !s_anyRunning;
+}
+
+void VizSeekAtX(LONG x) {
+    LONG l = g_seekRectL.load(std::memory_order_relaxed), r = g_seekRectR.load(std::memory_order_relaxed);
+    if (r > l) CardSeek((float)(x - l) / (float)(r - l));
+}
+
+bool VizSeekHook(WPARAM wParam, const MSLLHOOKSTRUCT* info) {
+    static bool s_seeking = false;
+    if (s_seeking) {
+        if (wParam == WM_LBUTTONUP) {
+            s_seeking = false;
+            VizSeekAtX(info->pt.x);
+            return true;
+        }
+        return false;
+    }
+    if (wParam != WM_LBUTTONDOWN || !g_settings.progressSeek || !g_seekRectValid.load(std::memory_order_relaxed))
+        return false;
+    if (g_settings.dragEnabled && DragButtonDownMsg() == WM_LBUTTONDOWN && DragModifierHeld()) return false;
+    if (g_fullscreenPaused.load(std::memory_order_relaxed) || g_vizSceneHidden.load(std::memory_order_relaxed))
+        return false;
+    POINT pt = info->pt;
+    if (pt.x < g_seekRectL.load(std::memory_order_relaxed) || pt.x >= g_seekRectR.load(std::memory_order_relaxed) ||
+        pt.y < g_seekRectT.load(std::memory_order_relaxed) || pt.y >= g_seekRectB.load(std::memory_order_relaxed))
+        return false;
+    if (!g_tlValid.load(std::memory_order_relaxed) || !VizDesktopUnderPoint(pt) || !VizSeekAppsAllow()) return false;
+    s_seeking = true;
+    VizSeekAtX(pt.x);
+    return true;
+}
+
 LRESULT CALLBACK DragMouseHookProc(int nCode, WPARAM wParam, LPARAM lParam) {
     if (nCode == HC_ACTION && !g_unloading.load(std::memory_order_relaxed) &&
         VizMenuHook(wParam, (const MSLLHOOKSTRUCT*)lParam))
+        return 1;
+    if (nCode == HC_ACTION && !g_unloading.load(std::memory_order_relaxed) &&
+        VizSeekHook(wParam, (const MSLLHOOKSTRUCT*)lParam))
         return 1;
     if (nCode == HC_ACTION && !g_unloading.load(std::memory_order_relaxed) &&
         g_settings.dragEnabled) {
@@ -9373,7 +11351,9 @@ LRESULT CALLBACK DragMouseHookProc(int nCode, WPARAM wParam, LPARAM lParam) {
         UINT upMsg = DragButtonUpMsg();
 
         if (!g_dragInProgress) {
-            if (wParam == downMsg && DragModifierHeld() && PointInVisualizerBounds(info->pt)) {
+            if (wParam == downMsg && DragModifierHeld() && PointInVisualizerBounds(info->pt) &&
+                !g_fullscreenPaused.load(std::memory_order_relaxed) &&
+                !g_vizSceneHidden.load(std::memory_order_relaxed) && VizDesktopUnderPoint(info->pt)) {
                 BeginDrag(info->pt);
                 return 1;
             }
@@ -9597,6 +11577,8 @@ void ReleaseSwapChainResources() {
     g_spriteBatch.Reset();
     g_dc3.Reset();
     g_compositionVisual.Reset();
+    g_split = {};
+    g_splitTop.Reset();
     g_rootVisual.Reset();
     g_compositionTarget.Reset();
     g_compositionDevice.Reset();
@@ -9698,7 +11680,7 @@ bool RecreateVisualResources() {
         g_dc->CreateSolidColorBrush(npColor, &g_nowPlayingBrush);
         g_dc->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 1), &g_npArtistBrush);
 
-        int fontSize = std::max(6, g_settings.nowPlayingFontSize);
+        float fontSize = std::max(6.f, g_settings.nowPlayingFontSize);
         if (g_dwriteFactory && (!g_dwriteTextFormat || g_dwriteTextFormatFontSize != fontSize ||
                                  g_dwriteTextFormatFontName != g_settings.nowPlayingFont)) {
             g_dwriteTextFormat.Reset();
@@ -9824,7 +11806,7 @@ HRESULT CreateRoundedRectPath(ID2D1Factory1* factory, const D2D1_RECT_F& r,
 struct TextPanelStyle {
     BYTE fillA, fillR, fillG, fillB;
     BYTE borderA, borderR, borderG, borderB;
-    int padding, cornerRadius, borderSize;
+    float padding, cornerRadius, borderSize;
 };
 
 // Draws a text overlay, optionally on a panel fitted to the text.
@@ -10243,6 +12225,34 @@ TT_CBUFFER(FrameCB, b0) {
     float4 fTermGeom;   // origin x, origin y, cell width, cell height
     float4 fTermAtlas;  // atlas width, atlas height, -, -
     uint fTermCols, fTermRows, fTermAtlasCols, fTermPad;
+    // Styles (2.1): which one (0 none, 1 LED, 2 Line, 3 Bloom, 4 Spectrogram,
+    // 5 VU, 6 Stereo Field, 7 Particles), LED segments per bar, Line
+    // subdivisions per bar gap, Spectrogram history rows in use.
+    uint fStyle, fSegs, fSubdiv, fSpecRows;
+    // Reflection: base line y, direction (+1 down), depth px, start opacity.
+    float fReflBase, fReflDir, fReflDepth, fReflAlpha;
+    // LED segment pitch and height, Line glow radius and fill opacity.
+    float fSegStep, fSegH, fGlowR, fFillA;
+    float4 fVu;     // VU needle L, R (0..1 of the scale), peak LED L, R (0..1)
+    float4 fVuBox;  // one meter's width, height, offset of the second meter x, y
+    uint fSpecW, fSpecHead, fSpecTex, fSpecPad;  // bars per row, newest row, rows in the texture
+    // FX (2.1): Glow strength 0..1 and radius px, Bloom strength 0..1 and
+    // radius px; texel size of the quarter-res bloom target and of the scene.
+    float fFxGlow, fFxGlowR, fFxBloom, fFxBloomR;
+    float4 fFxTexel;
+    // Outline and Shadow (FX, 2.1): outline colour (straight alpha), shadow
+    // colour (alpha = strength), then outline width, shadow offset x, y and
+    // softness, all px.
+    float4 fFxLineColor;
+    float4 fFxShadowColor;
+    float fFxLineW, fFxShadowX, fFxShadowY, fFxShadowSoft;
+    // Bar modifiers (2.1): dash and gap length px, tilt (shear per px of
+    // height), the base line it leans from; Afterimage opacity, Hollow line
+    // width px, Mirror gap px (Middle anchor), flags: 1 hollow, 2 dashed,
+    // 4 tilted, 8 mirror gap.
+    float fBarDash, fBarDashGap, fBarTiltK, fBarPivot;
+    float fGhostA, fHollowW, fMirrorGap;
+    uint fModFlags;
 }
 TT_CBUFFER_END
 
@@ -10276,6 +12286,10 @@ Texture2D<float4> gPlate REG(t4);           // baked background panel, premultip
 SamplerState gSamp REG(s0);
 StructuredBuffer<uint> gCells REG(t10);     // Terminal: glyph cells only, char | colour << 8 | grid index << 16
 Texture2D<float4> gGlyphs REG(t11);         // Terminal: printable ASCII baked white, premultiplied
+Texture2D<float> gSpec REG(t12);            // Spectrogram: bar levels, one row per 1/60 s, ring
+Texture2D<float4> gFxSrc REG(t13);          // FX: the texture a bloom pass reads
+Texture2D<float4> gFxBloom REG(t14);        // FX: the blurred bloom, for the composite
+SamplerState gLin REG(s1);                  // FX: bilinear, clamped
 
 // Analysis (compute shaders, Workload = GPU).
 StructuredBuffer<float> gTierIn REG(t5);     // 3 x N newest samples, one block per tier
@@ -10403,12 +12417,11 @@ Prim CapsulePrim(float ax, float ay, float bx, float by, float radius, float4 co
 
 float BarRange() { return max(0.0f, fMaxSize - fIdleSize); }
 
-Prim BarPrim(uint i) {
-    if (i >= fBarCount) return NoPrim();
-    float fac = max(0.0f, gBars[i].x);
+Prim BarPrimAt(uint i, float fac, float alpha) {
     float size = fIdleSize + fac * BarRange();
     float lead = (float)i * (fBarW + fBarGap);
     float4 col = BarColor(i, fac, false);
+    col.w = col.w * alpha;
     if (fVertical == 0u) {
         float x = fBlock.x + lead;
         float y0, y1;
@@ -10424,6 +12437,19 @@ Prim BarPrim(uint i) {
     else { x0 = fBlock.x; x1 = fBlock.x + size; }
     return RectPrim(x0, y, x1, y + fBarW, fRadii, col);
 }
+
+Prim BarPrim(uint i) {
+    if (i >= fBarCount) return NoPrim();
+    return BarPrimAt(i, max(0.0f, gBars[i].x), 1.0f);
+}
+
+// Afterimage (2.1): the bar again at its slowly falling trail level (carried
+// where the peak hold usually is), see-through, drawn before the bar.
+Prim GhostPrim(uint i) {
+    if (i >= fBarCount || fGhostA <= 0.0f) return NoPrim();
+    return BarPrimAt(i, max(0.0f, gBars[i].y), fGhostA);
+}
+
 
 Prim CapPrim(uint i) {
     if (i >= fBarCount || (fFlags & 1u) == 0u) return NoPrim();
@@ -10559,7 +12585,7 @@ Prim CorrPrim(uint j) {
 Prim TermPrim(uint id) {
     uint cols = max(fTermCols, 1u);
     uint cell = gCells[id];
-    uint ch = cell & 127u;
+    uint ch = cell & 255u;  // 33-126 ASCII, 128-255 the custom glyphs (2.1)
     uint idx = cell >> 16u;
     if (ch <= 32u || idx >= cols * fTermRows) return NoPrim();
     uint ci = min((cell >> 8u) & 7u, 4u);
@@ -10580,6 +12606,301 @@ Prim TermPrim(uint id) {
     return p;
 }
 
+// ---- Styles (2.1) ----------------------------------------------------------------
+//
+// Each style is one more pass over the same instanced quad. Bars, peak caps
+// and the frame constants are shared with the shapes above, so a style costs
+// one draw call and no new per-frame upload unless it has data of its own
+// (Spectrogram rows, Stereo Field levels, Particles).
+
+// The part of bar i that lies between distances a and b from its base edge.
+// Middle anchor is drawn from the bottom (or left) edge here: segmented and
+// filled styles read as meters, and a meter grows from one end.
+float4 SpanRect(uint i, float a, float b) {
+    float lead = (float)i * (fBarW + fBarGap);
+    if (fVertical == 0u) {
+        float x = fBlock.x + lead;
+        if (fAnchor == 0u) return float4(x, fBlock.y + a, x + fBarW, fBlock.y + b);
+        float base = fBlock.y + fMaxSize;
+        return float4(x, base - b, x + fBarW, base - a);
+    }
+    float y = fBlock.y + lead;
+    if (fAnchor == 0u) {
+        float base = fBlock.x + fMaxSize;
+        return float4(base - b, y, base - a, y + fBarW);
+    }
+    return float4(fBlock.x + a, y, fBlock.x + b, y + fBarW);
+}
+
+Prim RectPrimV(float4 r, float4 radii, float4 color) { return RectPrim(r.x, r.y, r.z, r.w, radii, color); }
+
+// LED Meter: green to 60 %, amber to 85 %, red above, like a hardware meter.
+// Unlit segments stay faintly visible; the peak-hold segment stays lit.
+float4 LedZone(float t) {
+    if (t >= 0.85f) return float4(1.0f, 0.23f, 0.19f, 1.0f);
+    if (t >= 0.6f) return float4(1.0f, 0.69f, 0.0f, 1.0f);
+    return float4(0.22f, 0.89f, 0.42f, 1.0f);
+}
+
+Prim LedPrim(uint id) {
+    uint segs = max(fSegs, 1u);
+    uint i = id / segs;
+    uint s = id % segs;
+    if (i >= fBarCount) return NoPrim();
+    float fac = max(0.0f, gBars[i].x);
+    float lit = (fIdleSize + fac * BarRange()) / max(fSegStep, 1.0f);
+    float4 col = (fColorMode == 0u) ? BeatFlash(LedZone(((float)s + 0.5f) / (float)segs)) : BarColor(i, fac, false);
+    bool on = (float)s + 0.5f <= lit;
+    if (!on && (fFlags & 1u) != 0u) {
+        float hold = fIdleSize + gBars[i].y * BarRange();
+        on = hold > 0.5f && (uint)min(floor(hold / max(fSegStep, 1.0f)), (float)(segs - 1u)) == s;
+    }
+    if (!on) col.w = col.w * 0.1f;
+    float a = (float)s * fSegStep;
+    return RectPrimV(SpanRect(i, a, a + fSegH), fRadii, col);
+}
+
+// Line Spectrum: a Catmull-Rom curve through the bar tops, filled down to the
+// base and lit along its edge. Each instance is one column between two
+// curve points (kind 5); columns tile exactly in x, so the translucent fill
+// and glow are never blended twice where they meet.
+float LineSign() {
+    if (fVertical == 0u) return (fAnchor == 0u) ? 1.0f : -1.0f;
+    return (fAnchor == 0u) ? -1.0f : 1.0f;
+}
+float LineBase() {
+    if (fVertical == 0u) return (fAnchor == 0u) ? fBlock.y : fBlock.y + fMaxSize;
+    return (fAnchor == 0u) ? fBlock.x + fMaxSize : fBlock.x;
+}
+float LineVal(int i) {
+    int n = (int)fBarCount;
+    i = clamp(i, 0, n - 1);
+    return fIdleSize + max(0.0f, gBars[(uint)i].x) * BarRange();
+}
+float LineAlong(float k) {
+    return ((fVertical == 0u) ? fBlock.x : fBlock.y) + k * (fBarW + fBarGap) + fBarW * 0.5f;
+}
+float CatRom(float p0, float p1, float p2, float p3, float t) {
+    float t2 = t * t, t3 = t2 * t;
+    return 0.5f * (2.0f * p1 + (p2 - p0) * t + (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3) * t2 +
+                   (3.0f * p1 - p0 - 3.0f * p2 + p3) * t3);
+}
+
+Prim LinePrim(uint id) {
+    uint sub = max(fSubdiv, 1u);
+    uint seg = id / sub;
+    uint j = id % sub;
+    if (fBarCount < 2u || seg + 1u >= fBarCount) return NoPrim();
+    int k = (int)seg;
+    float p0 = LineVal(k - 1), p1 = LineVal(k), p2 = LineVal(k + 1), p3 = LineVal(k + 2);
+    float t0 = (float)j / (float)sub, t1 = (float)(j + 1u) / (float)sub;
+    float v0 = clamp(CatRom(p0, p1, p2, p3, t0), 0.0f, fMaxSize);
+    float v1 = clamp(CatRom(p0, p1, p2, p3, t1), 0.0f, fMaxSize);
+    float u0 = LineAlong((float)seg + t0), u1 = LineAlong((float)seg + t1);
+    // The first and last columns reach the ends of the bar row.
+    float start = (fVertical == 0u) ? fBlock.x : fBlock.y;
+    if (seg == 0u && j == 0u) u0 = start;
+    if (seg + 2u == fBarCount && j + 1u == sub) u1 = start + (float)fBarCount * (fBarW + fBarGap) - fBarGap;
+    float base = LineBase(), sg = LineSign();
+    Prim p;
+    p.kind = 5u;
+    p.a = float4(u0, base + sg * v0, u1, base + sg * v1);
+    p.radii = float4(base, max(1.5f, fBarW * 0.2f), fGlowR, fFillA);
+    p.color = BarColor(seg + ((t0 >= 0.5f) ? 1u : 0u), max(0.0f, gBars[seg].x), false);
+    return p;
+}
+
+// Polar Bloom: the Radial bars joined into one filled flower. One wedge per
+// bar (kind 6) from the centre to this bar's tip and the next one's. The
+// two straight sides are shared with the neighbours and tested with the
+// same expression from both sides, so every pixel lands in exactly one
+// wedge; only the outer edge is antialiased.
+float Cross2(float ax, float ay, float bx, float by) { return ax * by - ay * bx; }
+
+Prim BloomPrim(uint i) {
+    uint n = fBarCount;
+    if (n < 3u || i >= n) return NoPrim();
+    uint j = (i + 1u) % n;
+    float li = fIdleSize + max(0.0f, gBars[i].x) * BarRange();
+    float lj = fIdleSize + max(0.0f, gBars[j].x) * BarRange();
+    float ai = (float)i / (float)n * 2.0f * TT_PI - TT_PI * 0.5f;
+    float aj = (float)j / (float)n * 2.0f * TT_PI - TT_PI * 0.5f;
+    float ri = fInnerR + li, rj = fInnerR + lj;
+    Prim p;
+    p.kind = 6u;
+    p.a = float4(fCenter.x + cos(ai) * ri, fCenter.y + sin(ai) * ri, fCenter.x + cos(aj) * rj,
+                 fCenter.y + sin(aj) * rj);
+    p.radii = float4(max(1.0f, fBarW * 0.35f), 0.0f, 0.0f, 0.0f);
+    p.color = BarColor(i, max(0.0f, gBars[i].x), true);
+    return p;
+}
+
+// Spectrogram: one quad (kind 7) reading a history texture, a row of bar
+// levels per 1/60 s, newest at the top (left when vertical), plus a colour
+// legend with quarter ticks beside it.
+float4 SpecColor(float v) {
+    v = saturate(v);
+    float4 c;
+    if (fColorMode != 0u) {
+        c = lerp(fGrad1, fC2, v);
+    } else if (v < 0.25f) {
+        c = lerp(float4(0.0f, 0.0f, 0.0f, 1.0f), float4(0.25f, 0.02f, 0.45f, 1.0f), v * 4.0f);
+    } else if (v < 0.5f) {
+        c = lerp(float4(0.25f, 0.02f, 0.45f, 1.0f), float4(0.85f, 0.15f, 0.35f, 1.0f), (v - 0.25f) * 4.0f);
+    } else if (v < 0.75f) {
+        c = lerp(float4(0.85f, 0.15f, 0.35f, 1.0f), float4(1.0f, 0.6f, 0.1f, 1.0f), (v - 0.5f) * 4.0f);
+    } else {
+        c = lerp(float4(1.0f, 0.6f, 0.1f, 1.0f), float4(1.0f, 1.0f, 0.85f, 1.0f), (v - 0.75f) * 4.0f);
+    }
+    c.w = saturate(v * 2.5f) * fC1.w;
+    return c;
+}
+
+Prim SpecPrim(uint id) {
+    if (id > 1u || fSpecW == 0u) return NoPrim();
+    float thick = (float)fBarCount * (fBarW + fBarGap) - fBarGap;
+    float w = (fVertical == 0u) ? thick : fMaxSize;
+    float h = (fVertical == 0u) ? fMaxSize : thick;
+    Prim p;
+    p.kind = 7u;
+    p.radii = float4((float)id, 0.0f, 0.0f, 0.0f);
+    p.color = float4(1.0f, 1.0f, 1.0f, 1.0f);
+    if (id == 0u) {
+        p.a = float4(fBlock.x, fBlock.y, fBlock.x + w, fBlock.y + h);
+    } else if (fVertical == 0u) {
+        float x = fBlock.x + w + fVuBox.x;
+        p.a = float4(x, fBlock.y, x + fVuBox.y, fBlock.y + h);
+    } else {
+        float y = fBlock.y + h + fVuBox.x;
+        p.a = float4(fBlock.x, y, fBlock.x + w, y + fVuBox.y);
+    }
+    return p;
+}
+
+// VU Needles: two analog meters (L, R) built from rects and capsules, 32
+// instances each: face, 11 scale marks, a 16-piece arc (red from 0 VU),
+// needle, pivot and peak LED. The needle positions come from the CPU with
+// real VU ballistics (99 % in 300 ms, 1.5 % overshoot).
+float VuPos(float db) { return (pow(10.0f, db / 20.0f) - 0.1f) / (1.41254f - 0.1f); }
+float VuMark(uint k) {
+    if (k == 0u) return -20.0f;
+    if (k == 1u) return -10.0f;
+    if (k == 2u) return -7.0f;
+    if (k == 3u) return -5.0f;
+    if (k == 4u) return -3.0f;
+    if (k == 5u) return -2.0f;
+    if (k == 6u) return -1.0f;
+    if (k == 7u) return 0.0f;
+    if (k == 8u) return 1.0f;
+    if (k == 9u) return 2.0f;
+    return 3.0f;
+}
+
+Prim VuPrim(uint id) {
+    uint m = id / 32u, k = id % 32u;
+    if (m > 1u) return NoPrim();
+    float ox = fBlock.x + (float)m * fVuBox.z, oy = fBlock.y + (float)m * fVuBox.w;
+    float w = fVuBox.x, h = fVuBox.y;
+    float pvx = ox + w * 0.5f, pvy = oy + h * 0.9f;
+    float R = h * 0.68f;
+    float lw = max(0.6f, h * 0.008f);
+    float4 ink = float4(0.92f, 0.92f, 0.9f, 0.85f);
+    float4 red = float4(1.0f, 0.27f, 0.23f, 0.95f);
+    float zero = VuPos(0.0f);
+    if (k == 0u) {
+        float rr = h * 0.08f;
+        return RectPrim(ox, oy, ox + w, oy + h, float4(rr, rr, rr, rr), float4(0.05f, 0.05f, 0.06f, 0.6f));
+    }
+    if (k <= 11u) {
+        float db = VuMark(k - 1u);
+        float an = (-48.0f + 96.0f * VuPos(db)) * TT_PI / 180.0f;
+        float dx = sin(an), dy = -cos(an);
+        float r0 = (k == 1u || k == 8u) ? R * 0.84f : R * 0.9f;
+        return CapsulePrim(pvx + dx * r0, pvy + dy * r0, pvx + dx * R, pvy + dy * R, lw, db > 0.0f ? red : ink);
+    }
+    if (k <= 27u) {
+        float t0 = (float)(k - 12u) / 16.0f, t1 = (float)(k - 11u) / 16.0f;
+        float a0 = (-48.0f + 96.0f * t0) * TT_PI / 180.0f, a1 = (-48.0f + 96.0f * t1) * TT_PI / 180.0f;
+        bool hot = (t0 + t1) * 0.5f > zero;
+        float ra = R * 0.9f;
+        return CapsulePrim(pvx + sin(a0) * ra, pvy - cos(a0) * ra, pvx + sin(a1) * ra, pvy - cos(a1) * ra,
+                           hot ? lw * 1.8f : lw, hot ? red : ink);
+    }
+    float pos = (m == 0u) ? fVu.x : fVu.y;
+    if (k == 28u) {
+        float an = (-48.0f + 96.0f * pos) * TT_PI / 180.0f;
+        float dx = sin(an), dy = -cos(an);
+        float4 col = BeatFlash(fC1);
+        col.w = 1.0f;
+        return CapsulePrim(pvx + dx * R * 0.12f, pvy + dy * R * 0.12f, pvx + dx * R * 1.02f, pvy + dy * R * 1.02f,
+                           max(0.8f, h * 0.012f), col);
+    }
+    if (k == 29u) {
+        float r = h * 0.05f;
+        return RectPrim(pvx - r, pvy - r, pvx + r, pvy + r, float4(r, r, r, r), float4(0.25f, 0.25f, 0.27f, 1.0f));
+    }
+    if (k == 30u) {
+        float led = (m == 0u) ? fVu.z : fVu.w;
+        float r = h * 0.045f;
+        float cx = ox + w - h * 0.12f, cy = oy + h * 0.12f;
+        return RectPrim(cx - r, cy - r, cx + r, cy + r, float4(r, r, r, r),
+                        float4(1.0f, 0.18f, 0.12f, lerp(0.18f, 1.0f, saturate(led))));
+    }
+    return NoPrim();
+}
+
+// Stereo Field: left channel grows up from the centre line, right channel
+// down (left and right when vertical). gBars holds L in x and R in y.
+Prim SplitPrim(uint id) {
+    uint i = id >> 1u, ch = id & 1u;
+    if (i >= fBarCount) return NoPrim();
+    float lev = max(0.0f, (ch == 0u) ? gBars[i].x : gBars[i].y);
+    float s = (fIdleSize + lev * BarRange()) * 0.5f;
+    if (s < 0.25f) return NoPrim();
+    float lead = (float)i * (fBarW + fBarGap);
+    float4 col = BarColor(i, lev, false);
+    if (fVertical == 0u) {
+        float x = fBlock.x + lead, cy = fBlock.y + fMaxSize * 0.5f;
+        if (ch == 0u) return RectPrim(x, cy - 0.5f - s, x + fBarW, cy - 0.5f, fRadii, col);
+        return RectPrim(x, cy + 0.5f, x + fBarW, cy + 0.5f + s, fRadii, col);
+    }
+    float y = fBlock.y + lead, cx = fBlock.x + fMaxSize * 0.5f;
+    if (ch == 0u) return RectPrim(cx - 0.5f - s, y, cx - 0.5f, y + fBarW, fRadii, col);
+    return RectPrim(cx + 0.5f, y, cx + 0.5f + s, y + fBarW, fRadii, col);
+}
+
+// Particles: sparks thrown off the bar tops on each beat, simulated on the
+// CPU and uploaded as (x, y, alpha, bar * 16 + radius) relative to the block.
+Prim SparkPrim(uint j) {
+    float4 p = gPoints[j];
+    if (p.z <= 0.002f) return NoPrim();
+    float band = floor(p.w / 16.0f);
+    float r = p.w - band * 16.0f;
+    float x = fBlock.x + p.x, y = fBlock.y + p.y;
+    float4 col = BarColor(min((uint)band, max(fBarCount, 1u) - 1u), 1.0f, false);
+    col.w = col.w * saturate(p.z);
+    return RectPrim(x - r, y - r, x + r, y + r, float4(r, r, r, r), col);
+}
+
+// Reflection: the pass mirrored about the base line, faded out over
+// fReflDepth in the pixel shader (flag 16 on the kind).
+Prim ReflectPrim(Prim p) {
+    float B2 = 2.0f * fReflBase;
+    uint kb = p.kind & 15u;  // the glow flag may be set
+    if (kb == 0u) {
+        p.a = float4(p.a.x, B2 - p.a.w, p.a.z, B2 - p.a.y);
+        p.radii = float4(p.radii.w, p.radii.z, p.radii.y, p.radii.x);
+    } else if (kb == 5u) {
+        p.a = float4(p.a.x, B2 - p.a.y, p.a.z, B2 - p.a.w);
+        p.radii.x = B2 - p.radii.x;
+    } else {
+        return NoPrim();
+    }
+    p.color.w = p.color.w * fReflAlpha;
+    p.kind = p.kind | 16u;
+    return p;
+}
+
 Prim BuildPrim(uint passId, uint id) {
     if (passId == 0u) {
         Prim p = RectPrim(fPlateRect.x, fPlateRect.y, fPlateRect.z, fPlateRect.w,
@@ -10595,6 +12916,14 @@ Prim BuildPrim(uint passId, uint id) {
     if (passId == 6u) return GonioPrim(id);
     if (passId == 7u) return CorrPrim(id);
     if (passId == 8u) return TermPrim(id);
+    if (passId == 9u) return LedPrim(id);
+    if (passId == 10u) return LinePrim(id);
+    if (passId == 11u) return BloomPrim(id);
+    if (passId == 12u) return SpecPrim(id);
+    if (passId == 13u) return VuPrim(id);
+    if (passId == 14u) return SplitPrim(id);
+    if (passId == 15u) return SparkPrim(id);
+    if (passId == 16u) return GhostPrim(id);
     return NoPrim();
 }
 
@@ -10604,7 +12933,7 @@ struct VsOut {
     NOINTERP float4 shape SEM(TEXCOORD1);
     NOINTERP float4 radii SEM(TEXCOORD2);
     NOINTERP float4 color SEM(TEXCOORD3);
-    NOINTERP uint kind SEM(TEXCOORD4);
+    NOINTERP uint kind SEM(TEXCOORD4);  // low 4 bits: Prim kind; 16: reflected; 32: FX; 64: dash/hollow; 128: tilt
 };
 
 // Quad corner `vid` (triangle strip 0..3) of the primitive's bounds. The
@@ -10613,16 +12942,42 @@ struct VsOut {
 VsOut EmitVertex(Prim p, uint vid) {
     VsOut o;
     float2 lo, hi;
-    if (p.kind == 1u) {
+    uint kb = p.kind & 15u;
+    if (kb == 5u) {
+        float c0 = min(min(p.a.y, p.a.w), p.radii.x) - p.radii.z * 2.0f - 1.0f;
+        float c1 = max(max(p.a.y, p.a.w), p.radii.x) + p.radii.z * 2.0f + 1.0f;
+        lo = (fVertical == 0u) ? float2(p.a.x - 1.0f, c0) : float2(c0, p.a.x - 1.0f);
+        hi = (fVertical == 0u) ? float2(p.a.z + 1.0f, c1) : float2(c1, p.a.z + 1.0f);
+    } else if (kb == 6u) {
+        lo = float2(min(fCenter.x, min(p.a.x, p.a.z)) - 1.5f, min(fCenter.y, min(p.a.y, p.a.w)) - 1.5f);
+        hi = float2(max(fCenter.x, max(p.a.x, p.a.z)) + 1.5f, max(fCenter.y, max(p.a.y, p.a.w)) + 1.5f);
+    } else if (kb == 1u) {
         float r = p.radii.x + 1.0f;
         lo = float2(min(p.a.x, p.a.z) - r, min(p.a.y, p.a.w) - r);
         hi = float2(max(p.a.x, p.a.z) + r, max(p.a.y, p.a.w) + r);
-    } else if (p.kind == 2u || p.kind == 4u) {
+    } else if (kb == 2u || kb == 4u || kb == 7u) {
         lo = float2(p.a.x, p.a.y);
         hi = float2(p.a.z, p.a.w);
     } else {
         lo = float2(p.a.x - 1.0f, p.a.y - 1.0f);
         hi = float2(p.a.z + 1.0f, p.a.w + 1.0f);
+    }
+    if ((p.kind & 128u) != 0u) {  // Tilt: the sheared shape's reach
+        if (fVertical == 0u) {
+            float d0 = fBarTiltK * (fBarPivot - lo.y), d1 = fBarTiltK * (fBarPivot - hi.y);
+            lo.x = lo.x + min(min(d0, d1), 0.0f) - 1.0f;
+            hi.x = hi.x + max(max(d0, d1), 0.0f) + 1.0f;
+        } else {
+            float d0 = fBarTiltK * (lo.x - fBarPivot), d1 = fBarTiltK * (hi.x - fBarPivot);
+            lo.y = lo.y + min(min(d0, d1), 0.0f) - 1.0f;
+            hi.y = hi.y + max(max(d0, d1), 0.0f) + 1.0f;
+        }
+    }
+    if ((p.kind & 32u) != 0u) {  // room for the glow and the shadow
+        float gr = max(fFxGlow > 0.0f ? fFxGlowR * 2.0f : 0.0f,
+                       fFxShadowColor.w > 0.0f ? fFxShadowSoft + max(abs(fFxShadowX), abs(fFxShadowY)) + 1.0f : 0.0f);
+        lo = float2(lo.x - gr, lo.y - gr);
+        hi = float2(hi.x + gr, hi.y + gr);
     }
     float cx = ((vid & 1u) != 0u) ? 1.0f : 0.0f;
     float cy = ((vid & 2u) != 0u) ? 1.0f : 0.0f;
@@ -10638,7 +12993,76 @@ VsOut EmitVertex(Prim p, uint vid) {
 }
 
 VsOut VSMain(uint vid SEM(SV_VertexID), uint iid SEM(SV_InstanceID)) {
-    return EmitVertex(BuildPrim(pPass, iid), vid);
+    Prim p = BuildPrim(pPass, iid);
+    // Glow: passes created with pPad1 = 1, rects and capsules only.
+    if (pPad1 != 0u && (fFxGlow > 0.0f || fFxLineW > 0.0f || fFxShadowColor.w > 0.0f) && (p.kind == 0u || p.kind == 1u))
+        p.kind = p.kind | 32u;
+    // Bar modifiers: the bars and their Afterimage; the caps tilt with them.
+    bool barPass = pPass == 1u || pPass == 16u;
+    if (barPass && (fModFlags & 11u) != 0u && (p.kind & 15u) <= 1u)
+        p.kind = p.kind | 64u;
+    if ((barPass || pPass == 2u) && (fModFlags & 4u) != 0u && (p.kind & 15u) <= 1u)
+        p.kind = p.kind | 128u;
+    if (pPad0 != 0u) p = ReflectPrim(p);
+    return EmitVertex(p, vid);
+}
+
+float4 LineShade(VsOut i) {
+    float u = (fVertical == 0u) ? i.pix.x : i.pix.y;
+    float c = (fVertical == 0u) ? i.pix.y : i.pix.x;
+    float4 a = i.shape;
+    float base = i.radii.x;
+    float xcov = saturate(min(u + 0.5f, a.z) - max(u - 0.5f, a.x));
+    float k = (a.w - a.y) / max(a.z - a.x, 1e-4f);
+    float cl = a.y + k * (u - a.x);
+    float sb = (base >= cl) ? 1.0f : -1.0f;
+    float d = (c - cl) / sqrt(1.0f + k * k);  // perpendicular distance to the curve
+    float dd = d * sb;                         // positive toward the base
+    float depth = max(abs(base - cl), 1.0f);
+    float fill = saturate(dd + 0.5f) * saturate((base - c) * sb + 0.5f) * i.radii.w *
+                 lerp(1.0f, 0.15f, saturate(dd / depth));
+    float edge = saturate(i.radii.y * 0.5f + 0.5f - abs(d));
+    float glow = 0.0f;
+    if (i.radii.z > 0.0f) glow = 0.4f * exp(-(d * d) / (i.radii.z * i.radii.z * 0.5f));
+    float alpha = 1.0f - (1.0f - edge) * (1.0f - fill) * (1.0f - glow);
+    return i.color * (alpha * xcov);
+}
+
+float4 BloomShade(VsOut i) {
+    float px = i.pix.x - fCenter.x, py = i.pix.y - fCenter.y;
+    float dix = i.shape.x - fCenter.x, diy = i.shape.y - fCenter.y;
+    float djx = i.shape.z - fCenter.x, djy = i.shape.w - fCenter.y;
+    if (!(Cross2(dix, diy, px, py) >= 0.0f && Cross2(djx, djy, px, py) < 0.0f)) return float4(0.0f, 0.0f, 0.0f, 0.0f);
+    float ex = djx - dix, ey = djy - diy;
+    float el = max(sqrt(ex * ex + ey * ey), 1e-4f);
+    float dOut = Cross2(ex, ey, px - dix, py - diy) / el;  // distance inside the outer edge
+    float cov = saturate(dOut + 0.5f);
+    float r = sqrt(px * px + py * py) / max(sqrt(dix * dix + diy * diy), 1.0f);
+    float fill = lerp(0.2f, 0.75f, saturate(r));
+    float rim = saturate(i.radii.x + 0.5f - dOut);
+    return i.color * (max(fill, rim) * cov);
+}
+
+float4 SpecShade(VsOut i) {
+    float rx = saturate((i.pix.x - i.shape.x) / max(1.0f, i.shape.z - i.shape.x));
+    float ry = saturate((i.pix.y - i.shape.y) / max(1.0f, i.shape.w - i.shape.y));
+    if (i.radii.x > 0.5f) {  // legend: hot end at the top (right when vertical)
+        float v = (fVertical == 0u) ? 1.0f - ry : rx;
+        float len = (fVertical == 0u) ? i.shape.w - i.shape.y : i.shape.z - i.shape.x;
+        float q = v * 4.0f;
+        bool tick = abs(q - floor(q + 0.5f)) * len * 0.25f < 0.5f;
+        float4 c = SpecColor(v);
+        c.w = max(c.w, 0.35f);
+        if (tick) c = float4(1.0f, 1.0f, 1.0f, 0.9f);
+        return Premul(c);
+    }
+    float along = (fVertical == 0u) ? rx : ry;
+    float age = (fVertical == 0u) ? ry : rx;
+    uint w = max(fSpecW, 1u), rows = max(fSpecRows, 1u), tex = max(fSpecTex, 1u);
+    uint bar = min((uint)(along * (float)w), w - 1u);
+    uint ago = min((uint)(age * (float)rows), rows - 1u);
+    uint row = (fSpecHead + tex - ago) % tex;
+    return Premul(SpecColor(gSpec.Load(int3((int)bar, (int)row, 0))));
 }
 
 // Coverage of the pixel centred at `pix` by a rectangle with a separate radius
@@ -10677,26 +13101,157 @@ float SdCapsule(float2 pix, float4 seg, float radius) {
     return length(float2(pa.x - ba.x * h, pa.y - ba.y * h)) - radius;
 }
 
-float Coverage(VsOut i) {
-    if (i.kind == 1u) return saturate(0.5f - SdCapsule(i.pix, i.shape, i.radii.x));
+// Glow (FX, 2.1): signed distance to a rounded rect (negative inside), so
+// the glow can fall off with the distance outside the shape.
+float SdRoundRect(float2 pix, float4 rect, float4 radii) {
+    float cx = (rect.x + rect.z) * 0.5f, cy = (rect.y + rect.w) * 0.5f;
+    float hx = (rect.z - rect.x) * 0.5f, hy = (rect.w - rect.y) * 0.5f;
+    float px = pix.x - cx, py = pix.y - cy;
+    float r = (px > 0.0f) ? ((py > 0.0f) ? radii.z : radii.y) : ((py > 0.0f) ? radii.w : radii.x);
+    r = clamp(r, 0.0f, min(hx, hy));
+    float qx = abs(px) - hx + r, qy = abs(py) - hy + r;
+    return length(float2(max(qx, 0.0f), max(qy, 0.0f))) + min(max(qx, qy), 0.0f) - r;
+}
+
+float ShapeCoverage(VsOut i, uint kb) {
+    if (kb == 1u) return saturate(0.5f - SdCapsule(i.pix, i.shape, i.radii.x));
     return RectCoverage(i.pix, i.shape, i.radii);
 }
 
-float4 PSMain(VsOut i) SEM(SV_Target) {
-    if (i.kind == 2u) {
+// The bar's own pixels, with Hollow (only a band just inside the edge) and
+// Dashed (gaps along the growth direction, fixed to the base line so the
+// dashes stay still while the bar grows) applied.
+float Coverage(VsOut i, uint kb) {
+    float cov = ShapeCoverage(i, kb);
+    if ((i.kind & 64u) == 0u) return cov;
+    if ((fModFlags & 1u) != 0u) {
+        float d = (kb == 1u) ? SdCapsule(i.pix, i.shape, i.radii.x) : SdRoundRect(i.pix, i.shape, i.radii);
+        float w = max(fHollowW, 0.25f);
+        cov = min(cov, saturate(0.5f - (abs(d + w * 0.5f) - w * 0.5f)));
+    }
+    if ((fModFlags & 2u) != 0u) {
+        float period = max(fBarDash + fBarDashGap, 1.0f);
+        float t = (fVertical == 0u) ? abs(i.pix.y - fBarPivot) : abs(i.pix.x - fBarPivot);
+        float u = t - floor(t / period) * period;
+        float m = saturate(fBarDash - u + 0.5f) * saturate(u + 0.5f) + saturate(u - period + 0.5f);
+        cov = cov * saturate(m);
+    }
+    if ((fModFlags & 8u) != 0u) {  // Mirror: the two halves pulled apart from the centre line
+        float t = (fVertical == 0u) ? abs(i.pix.y - fBarPivot) : abs(i.pix.x - fBarPivot);
+        cov = cov * saturate(t - fMirrorGap * 0.5f + 0.5f);
+    }
+    return cov;
+}
+
+// Tilt: the pixel back in the unsheared bar's space.
+float2 Untilt(float2 pix) {
+    if (fVertical == 0u) return float2(pix.x - fBarTiltK * (fBarPivot - pix.y), pix.y);
+    return float2(pix.x, pix.y - fBarTiltK * (pix.x - fBarPivot));
+}
+
+
+// Glow, Outline and Shadow together, from one signed distance (and one more
+// for the shadow's offset copy). Outline is a band just inside the edge, so
+// it never changes a bar's size; the shadow sits behind the bar's own pixels.
+float4 FxShade(VsOut i, uint kb) {
+    float d = (kb == 1u) ? SdCapsule(i.pix, i.shape, i.radii.x) : SdRoundRect(i.pix, i.shape, i.radii);
+    float cov = Coverage(i, kb);
+    float4 col = i.color * cov;
+    if (fFxLineW > 0.0f) {
+        float o = saturate(0.5f - (abs(d + fFxLineW * 0.5f) - fFxLineW * 0.5f)) * fFxLineColor.w * i.color.w;
+        col = col * (1.0f - o) + float4(fFxLineColor.x, fFxLineColor.y, fFxLineColor.z, 1.0f) * o;
+    }
+    if (fFxGlow > 0.0f && d > 0.0f) {
+        float g = exp(-(d * d) / max(fFxGlowR * fFxGlowR * 0.5f, 0.01f));
+        col = col + i.color * ((1.0f - cov) * fFxGlow * 0.65f * g);
+    }
+    if (fFxShadowColor.w > 0.0f) {
+        float2 sp = float2(i.pix.x - fFxShadowX, i.pix.y - fFxShadowY);
+        float ds = (kb == 1u) ? SdCapsule(sp, i.shape, i.radii.x) : SdRoundRect(sp, i.shape, i.radii);
+        float s = saturate((fFxShadowSoft * 0.5f + 0.5f - ds) / (fFxShadowSoft + 1.0f)) * fFxShadowColor.w * i.color.w;
+        col = col + float4(fFxShadowColor.x, fFxShadowColor.y, fFxShadowColor.z, 1.0f) * (s * (1.0f - col.w));
+    }
+    return col;
+}
+
+float4 PSMain(VsOut iIn) SEM(SV_Target) {
+    VsOut i = iIn;
+    if ((i.kind & 128u) != 0u) i.pix = Untilt(i.pix);
+    uint kb = i.kind & 15u;
+    float fade = 1.0f;
+    if ((i.kind & 16u) != 0u) fade = saturate(1.0f - (i.pix.y - fReflBase) * fReflDir / max(fReflDepth, 1.0f));
+    if (kb == 5u) return LineShade(i) * (fade * fSceneAlpha);
+    if (kb == 6u) return BloomShade(i) * fSceneAlpha;
+    if (kb == 7u) return SpecShade(i) * fSceneAlpha;
+    if (kb == 2u) {
         float2 uv = float2((i.pix.x - i.shape.x) / max(1.0f, i.shape.z - i.shape.x),
                            (i.pix.y - i.shape.y) / max(1.0f, i.shape.w - i.shape.y));
         return gPlate.SampleLevel(gSamp, uv, 0.0f) * fSceneAlpha;
     }
-    if (i.kind == 4u) {
+    if (kb == 4u) {
         float fx = (i.pix.x - i.shape.x) / max(1.0f, i.shape.z - i.shape.x);
         float fy = (i.pix.y - i.shape.y) / max(1.0f, i.shape.w - i.shape.y);
         float2 uv = float2(i.radii.x + (i.radii.z - i.radii.x) * fx, i.radii.y + (i.radii.w - i.radii.y) * fy);
         float cov = gGlyphs.SampleLevel(gSamp, uv, 0.0f).w;
         return i.color * (cov * fSceneAlpha);
     }
-    return i.color * (Coverage(i) * fSceneAlpha);
+    if ((i.kind & 32u) != 0u) return FxShade(i, kb) * (fade * fSceneAlpha);
+    float cov = Coverage(i, kb);
+    return i.color * (cov * fade * fSceneAlpha);
 }
+
+// ---- Bloom (FX, 2.1) ---------------------------------------------------------------
+// The bars are drawn into a scene texture, which is box-filtered down to a
+// quarter of its size, blurred there in two 9-tap Gaussian passes (five
+// bilinear reads each), and added back over the scene as light. All four
+// passes are one full-surface triangle and run only on frames that draw.
+struct FxOut {
+    float4 pos SEM(SV_Position);
+    float2 uv SEM(TEXCOORD0);
+};
+
+FxOut VSFull(uint vid SEM(SV_VertexID)) {
+    FxOut o;
+    float u = (vid == 1u) ? 2.0f : 0.0f;
+    float v = (vid == 2u) ? 2.0f : 0.0f;
+    o.uv = float2(u, v);
+    o.pos = float4(u * 2.0f - 1.0f, 1.0f - v * 2.0f, 0.0f, 1.0f);
+    return o;
+}
+
+// Scene to quarter size: four bilinear reads cover the 4 x 4 block.
+float4 PSBloomDown(FxOut i) SEM(SV_Target) {
+    float tx = fFxTexel.z, ty = fFxTexel.w;
+    float4 a = gFxSrc.SampleLevel(gLin, float2(i.uv.x - tx, i.uv.y - ty), 0.0f);
+    float4 b = gFxSrc.SampleLevel(gLin, float2(i.uv.x + tx, i.uv.y - ty), 0.0f);
+    float4 c = gFxSrc.SampleLevel(gLin, float2(i.uv.x - tx, i.uv.y + ty), 0.0f);
+    float4 d = gFxSrc.SampleLevel(gLin, float2(i.uv.x + tx, i.uv.y + ty), 0.0f);
+    return (a + b + c + d) * 0.25f;
+}
+
+float4 BloomBlur(float2 uv, float dx, float dy) {
+    // Weights of a 9-tap Gaussian folded into 5 bilinear reads.
+    float4 s = gFxSrc.SampleLevel(gLin, uv, 0.0f) * 0.2270270f;
+    s = s + gFxSrc.SampleLevel(gLin, float2(uv.x + dx * 1.3846154f, uv.y + dy * 1.3846154f), 0.0f) * 0.3162162f;
+    s = s + gFxSrc.SampleLevel(gLin, float2(uv.x - dx * 1.3846154f, uv.y - dy * 1.3846154f), 0.0f) * 0.3162162f;
+    s = s + gFxSrc.SampleLevel(gLin, float2(uv.x + dx * 3.2307692f, uv.y + dy * 3.2307692f), 0.0f) * 0.0702703f;
+    s = s + gFxSrc.SampleLevel(gLin, float2(uv.x - dx * 3.2307692f, uv.y - dy * 3.2307692f), 0.0f) * 0.0702703f;
+    return s;
+}
+
+// The step between taps grows with Bloom Radius (in quarter-size texels).
+float BloomStep() { return max(1.0f, fFxBloomR / 16.0f); }
+float4 PSBloomH(FxOut i) SEM(SV_Target) { return BloomBlur(i.uv, fFxTexel.x * BloomStep(), 0.0f); }
+float4 PSBloomV(FxOut i) SEM(SV_Target) { return BloomBlur(i.uv, 0.0f, fFxTexel.y * BloomStep()); }
+
+// Scene plus its bloom as light, then blended "over" whatever is beneath
+// (the plate). Premultiplied: the bloom adds colour and some coverage.
+float4 PSBloomComposite(FxOut i) SEM(SV_Target) {
+    float4 sc = gFxSrc.SampleLevel(gLin, i.uv, 0.0f);
+    float4 bl = gFxBloom.SampleLevel(gLin, i.uv, 0.0f) * (fFxBloom * 1.5f);
+    return float4(sc.x + bl.x, sc.y + bl.y, sc.z + bl.z, saturate(sc.w + bl.w * (1.0f - sc.w)));
+}
+
 
 // ---- Analysis on the GPU (Workload = GPU) ----------------------------------------
 //
@@ -11011,6 +13566,20 @@ struct FrameCB {
     float termGeom[4];   // origin x, origin y, cell width, cell height
     float termAtlas[4];  // atlas width, atlas height, -, -
     uint32_t termCols, termRows, termAtlasCols, termPad;
+    uint32_t style, segs, subdiv, specRows;
+    float reflBase, reflDir, reflDepth, reflAlpha;
+    float segStep, segH, glowR, fillA;
+    float vu[4];
+    float vuBox[4];
+    uint32_t specW, specHead, specTex, specPad;
+    float fxGlow, fxGlowR, fxBloom, fxBloomR;
+    float fxTexel[4];
+    float fxLineColor[4];
+    float fxShadowColor[4];
+    float fxLineW, fxShadowX, fxShadowY, fxShadowSoft;
+    float barDash, barDashGap, barTiltK, barPivot;
+    float ghostA, hollowW, mirrorGap;
+    uint32_t modFlags;
 };
 struct PassCB {
     uint32_t pass, count, pad0, pad1;
@@ -11027,11 +13596,14 @@ struct CsCB {
     float fmin, fmax, breatheUp, breatheDown;
 };
 #pragma pack(pop)
-static_assert(sizeof(FrameCB) == 26 * 16, "FrameCB must match tt_cb.hlsl");
+static_assert(sizeof(FrameCB) == 39 * 16, "FrameCB must match tt_cb.hlsl");
 static_assert(sizeof(PassCB) == 16, "PassCB must match tt_cb.hlsl");
 static_assert(sizeof(CsCB) == 9 * 16, "CsCB must match tt_cb.hlsl");
 
-enum Pass : uint32_t { kPlate = 0, kBars, kCaps, kDots, kRadial, kScope, kGonio, kCorr, kTerm, kPassCount };
+enum Pass : uint32_t {
+    kPlate = 0, kBars, kCaps, kDots, kRadial, kScope, kGonio, kCorr, kTerm,
+    kLed, kLine, kBloom, kSpectro, kVu, kSplit, kSpark, kGhost, kPassCount
+};
 constexpr int kMaxPoints = 8192;
 constexpr int kGonioFrames = 6;  // persistence: this frame and the five before it
 
@@ -11053,12 +13625,22 @@ struct State {
     ComPtr<ID3D11VertexShader> vs;
     ComPtr<ID3D11PixelShader> ps;
     ComPtr<ID3D11ComputeShader> cs[4];
-    ComPtr<ID3D11Buffer> frameCB, passCB[kPassCount], csCB;
+    ComPtr<ID3D11Buffer> frameCB, passCB[kPassCount], passCBRefl[kPassCount], csCB;
     ComPtr<ID3D11Buffer> barsDyn, globalsDyn, waveDyn, pointsDyn;
     ComPtr<ID3D11ShaderResourceView> barsDynSRV, globalsDynSRV, waveSRV, pointsSRV;
     ComPtr<ID3D11SamplerState> sampler;
     ComPtr<ID3D11BlendState> blend;
     ComPtr<ID3D11BlendState> blendOff;  // the plate: it is the first thing drawn, so it only overwrites
+    // FX (2.1). The bloom shaders compile on first use; its targets follow
+    // the surface size: the scene, and two quarter-size ping-pong buffers.
+    bool fxCompileTried = false, fxCompileOk = false;
+    ComPtr<ID3D11VertexShader> vsFull;
+    ComPtr<ID3D11PixelShader> psFx[4];  // down, blur H, blur V, composite
+    ComPtr<ID3D11SamplerState> samplerLin;
+    ComPtr<ID3D11Texture2D> fxTex[3];  // scene, quarter A, quarter B
+    ComPtr<ID3D11RenderTargetView> fxRtv[3];
+    ComPtr<ID3D11ShaderResourceView> fxSrv[3];
+    UINT fxW = 0, fxH = 0;
     ComPtr<ID3D11RasterizerState> raster;
 
     // What each dynamic buffer holds, so one whose contents haven't changed
@@ -11072,6 +13654,12 @@ struct State {
     uint32_t cellsSerial = 0;
     uint64_t cellsShape = 0;
     UINT termCount = 0;  // non-blank cells uploaded (the Terminal draw's instance count)
+    uint32_t sparkSerial = 0;
+    // Spectrogram history (2.1): bars x kVizSpecRows, R8, one row per 1/60 s.
+    ComPtr<ID3D11Texture2D> specTex;
+    ComPtr<ID3D11ShaderResourceView> specSRV;
+    int specW = 0, specHead = 0;
+    uint32_t specSerial = 0;
     bool frameCBValid = false;
     FrameCB frameCBLast = {};
 
@@ -11246,8 +13834,14 @@ bool EnsureDevice() {
         return false;
     if (FAILED(MakeCB(sizeof(FrameCB), true, nullptr, g.frameCB))) return false;
     for (uint32_t p = 0; p < kPassCount; p++) {
-        PassCB pc = {p, 0, 0, 0};
+        // pPad1 = 1: this pass's rects and capsules take the Glow FX.
+        const uint32_t glow = (p == kBars || p == kCaps || p == kDots || p == kRadial || p == kScope || p == kLed ||
+                               p == kSplit || p == kSpark || p == kGhost) ? 1u : 0u;
+        PassCB pc = {p, 0, 0, glow};
         if (FAILED(MakeCB(sizeof(PassCB), false, &pc, g.passCB[p]))) return false;
+        // The same pass mirrored for Reflection: pPad0 = 1.
+        PassCB pr = {p, 0, 1, glow};
+        if (FAILED(MakeCB(sizeof(PassCB), false, &pr, g.passCBRefl[p]))) return false;
     }
     if (FAILED(MakeStructured(8, VIZ_BARS_MAX, true, false, nullptr, g.barsDyn, &g.barsDynSRV, nullptr)) ||
         FAILED(MakeStructured(16, 4, true, false, nullptr, g.globalsDyn, &g.globalsDynSRV, nullptr)) ||
@@ -11321,6 +13915,121 @@ void ShowTextSurface(bool show) {
     g.textDetached = !show;
 }
 
+// Split into two pieces: keeps the second piece's copies of the text and panel
+// surfaces in step with the originals, and the cut where the settings put it.
+// Runs every tick but commits only when something changed.
+void SplitSync() {
+    auto& s = g_split;
+    if (!g_compositionDevice || !g_splitTop || !g_rootVisual || !g_compositionVisual) return;
+    bool want = g_settings.splitEnabled && (g_settings.splitGap != 0.f || g_settings.splitShift != 0.f);
+    VizLayout L;
+    if (want && !ComputeVizLayout(&L)) want = false;
+    bool dirty = false;
+    if (!want) {
+        if (s.on) {
+            g_rootVisual->SetClip((IDCompositionClip*)nullptr);
+            g_splitTop->RemoveVisual(s.p2.Get());
+            s.on = false;
+            g_compositionDevice->Commit();
+            VizPerf(kPerfCommits);
+        }
+        return;
+    }
+    if (!s.built) {
+        if (FAILED(g_compositionDevice->CreateVisual(&s.p2)) || FAILED(g_compositionDevice->CreateVisual(&s.text2)) ||
+            FAILED(g_compositionDevice->CreateVisual(&s.gfx2)) ||
+            FAILED(g_compositionDevice->CreateRectangleClip(&s.c1)) ||
+            FAILED(g_compositionDevice->CreateRectangleClip(&s.c2)) ||
+            FAILED(s.p2->AddVisual(s.text2.Get(), FALSE, nullptr)))
+            return;
+        s.gfx2->SetBorderMode(DCOMPOSITION_BORDER_MODE_SOFT);
+        s.p2->SetClip(s.c2.Get());
+        s.built = true;
+        s.line = NAN;
+    }
+    if (!s.on) {
+        if (FAILED(g_splitTop->AddVisual(s.p2.Get(), TRUE, g_rootVisual.Get()))) return;
+        g_rootVisual->SetClip(s.c1.Get());
+        s.on = true;
+        dirty = true;
+    }
+
+    // Where the cut goes, in overlay pixels. Bar shapes cut in the middle of
+    // the gap between two bars; the rest at that fraction of the box.
+    const VizShape sh = g_settings.shape;
+    const bool vert = g_settings.orientation == VizOrientation::Vertical && sh != VizShape::Radial &&
+                      sh != VizShape::Goniometer && sh != VizShape::Terminal;
+    const bool barish = sh != VizShape::Radial && sh != VizShape::Goniometer && sh != VizShape::Terminal &&
+                        sh != VizShape::Oscilloscope;
+    float start = vert ? g_visualOffsetY + L.blockY : g_visualOffsetX + L.blockX;
+    float len = vert ? L.totalHeight : L.totalWidth;
+    float line = start + len * g_settings.splitAt / 100.f;
+    if (barish) {
+        int n = VizEffectiveBarCount();
+        float bw = std::max(1.f, VizPx(std::max(1.f, g_settings.barWidth)));
+        float gap = VizPx(std::max(0.f, g_settings.barGap));
+        if (n >= 2) {
+            int k = std::clamp((int)lroundf(n * g_settings.splitAt / 100.f), 1, n - 1);
+            line = start + k * (bw + gap) - gap * 0.5f;
+        }
+    }
+    float along = g_settings.splitGap * g_dpiScale, across = g_settings.splitShift * g_dpiScale;
+    float dx = vert ? across : along, dy = vert ? along : across;
+    if (line != s.line || dx != s.dx || dy != s.dy || vert != s.vert) {
+        const float big = 1e6f;
+        s.c1->SetLeft(-big); s.c1->SetTop(-big); s.c1->SetRight(big); s.c1->SetBottom(big);
+        s.c2->SetLeft(-big); s.c2->SetTop(-big); s.c2->SetRight(big); s.c2->SetBottom(big);
+        if (vert) { s.c1->SetBottom(line); s.c2->SetTop(line); }
+        else      { s.c1->SetRight(line);  s.c2->SetLeft(line); }
+        s.p2->SetOffsetX(dx);
+        s.p2->SetOffsetY(dy);
+        s.line = line; s.dx = dx; s.dy = dy; s.vert = vert;
+        dirty = true;
+    }
+
+    // The text surface again (the whole scene, on the Direct2D renderer).
+    IUnknown* tc = g.textDetached ? nullptr : (IUnknown*)g_swapChain.Get();
+    if (tc != s.textC) { s.text2->SetContent(tc); s.textC = tc; dirty = true; }
+    if (g_visualOffsetX != s.tx || g_visualOffsetY != s.ty) {
+        s.text2->SetOffsetX(g_visualOffsetX);
+        s.text2->SetOffsetY(g_visualOffsetY);
+        s.tx = g_visualOffsetX; s.ty = g_visualOffsetY;
+        dirty = true;
+    }
+
+    // The Direct3D 11 panel surface again, sharing its clip object.
+    bool gin = g.visualAttached && g.sc;
+    if (gin) {
+        if (!s.gfxIn) {
+            if (FAILED(s.p2->AddVisual(s.gfx2.Get(), FALSE, s.text2.Get()))) return;
+            s.gfxIn = true;
+            dirty = true;
+        }
+        if ((IUnknown*)g.sc.Get() != s.gfxC) { s.gfx2->SetContent(g.sc.Get()); s.gfxC = g.sc.Get(); dirty = true; }
+        if (g.dcOffX != s.gx || g.dcOffY != s.gy) {
+            s.gfx2->SetOffsetX(g.dcOffX);
+            s.gfx2->SetOffsetY(g.dcOffY);
+            s.gx = g.dcOffX; s.gy = g.dcOffY;
+            dirty = true;
+        }
+        if (g.dcClipOn != s.gClip) {
+            s.gfx2->SetClip(g.dcClipOn ? (IDCompositionClip*)g.clip.Get() : nullptr);
+            s.gClip = g.dcClipOn;
+            dirty = true;
+        }
+    } else if (s.gfxIn) {
+        s.p2->RemoveVisual(s.gfx2.Get());
+        s.gfx2->SetContent(nullptr);
+        s.gfxC = nullptr;
+        s.gfxIn = false;
+        dirty = true;
+    }
+    if (dirty) {
+        g_compositionDevice->Commit();
+        VizPerf(kPerfCommits);
+    }
+}
+
 // The panel surface and its visual. Called before the composition device goes.
 void ReleaseSurface() {
     ShowTextSurface(true);  // the Direct2D path draws everything on the text surface
@@ -11342,6 +14051,12 @@ void ReleaseSurface() {
     g.plateTex.Reset();
     g.plateSRV.Reset();
     g.plateValid = false;
+    for (int k = 0; k < 3; k++) {
+        g.fxTex[k].Reset();
+        g.fxRtv[k].Reset();
+        g.fxSrv[k].Reset();
+    }
+    g.fxW = g.fxH = 0;
     g.w = g.h = 0;
     g.forcePresent = true;
     g.textForce = true;
@@ -11356,11 +14071,16 @@ void ReleaseDevice() {
     for (auto& c : g.cs) c.Reset();
     g.frameCB.Reset(); g.csCB.Reset();
     for (auto& p : g.passCB) p.Reset();
+    for (auto& p : g.passCBRefl) p.Reset();
     g.barsDyn.Reset(); g.globalsDyn.Reset(); g.waveDyn.Reset(); g.pointsDyn.Reset();
     g.barsDynSRV.Reset(); g.globalsDynSRV.Reset(); g.waveSRV.Reset(); g.pointsSRV.Reset();
     g.cellsDyn.Reset(); g.cellsSRV.Reset(); g.glyphTex.Reset(); g.glyphSRV.Reset();
+    g.specTex.Reset(); g.specSRV.Reset(); g.specW = 0;
     g.glyphKey = 0;
     g.sampler.Reset(); g.blend.Reset(); g.blendOff.Reset(); g.raster.Reset();
+    g.vsFull.Reset(); g.samplerLin.Reset();
+    for (auto& ps : g.psFx) ps.Reset();
+    g.fxCompileTried = false;
     g.uploadsValid = g.cellsValid = g.frameCBValid = false;
     if (g.ctx) g.ctx->ClearState();
     g.ctx.Reset();
@@ -11840,7 +14560,7 @@ int BuildGonioPoints(float* out4, int maxPoints) {
 // point filtering: a pixel font stays pixel-exact, and the whole grid is one
 // instanced draw. Rebaked only when the font, its size or the text rendering
 // mode changes.
-constexpr UINT kAtlasCols = 16, kAtlasRows = 6;
+constexpr UINT kAtlasCols = 16, kAtlasRows = 14;  // ASCII, then 128 custom glyphs
 
 bool EnsureTermResources() {
     if (!g.cellsDyn) {
@@ -11854,6 +14574,8 @@ bool EnsureTermResources() {
     MixF(key, g_termFormatPx, 64.f);
     Mix(key, (uint64_t)g_termCellW * 4096u + (uint64_t)g_termCellH);
     Mix(key, g_settings.textPixel ? 1u : 0u);
+    for (const auto& gl : g_termCustomGlyphs)
+        for (wchar_t c : gl) Mix(key, 0x10000u + (uint64_t)c);
     if (g.glyphSRV && key == g.glyphKey) return true;
     g.glyphSRV.Reset();
     g.glyphTex.Reset();
@@ -11895,6 +14617,14 @@ bool EnsureTermResources() {
         dc->DrawText(&c, 1, g_termFormat.Get(), D2D1::RectF(x, y, x + g_termCellW, y + g_termCellH), white.Get(),
                      D2D1_DRAW_TEXT_OPTIONS_CLIP);
     }
+    for (UINT k = 0; k < (UINT)g_termCustomGlyphs.size() && k < 128; k++) {
+        UINT i = 96 + k;  // code 128 + k
+        UINT col = i % kAtlasCols, row = i / kAtlasCols;
+        float x = (float)(col * (UINT)g_termCellW), y = (float)(row * (UINT)g_termCellH);
+        const std::wstring& gl = g_termCustomGlyphs[k];
+        dc->DrawText(gl.c_str(), (UINT32)gl.size(), g_termFormat.Get(),
+                     D2D1::RectF(x, y, x + g_termCellW, y + g_termCellH), white.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    }
     if (FAILED(dc->EndDraw())) {
         g.glyphTex.Reset();
         return false;
@@ -11926,6 +14656,66 @@ struct FrameInputs {
     float correlation;
 };
 
+// Bloom: shaders on first use, targets at the surface size. False leaves
+// the frame without bloom.
+bool EnsureFx() {
+    if (!g.fxCompileTried) {
+        g.fxCompileTried = true;
+        g.fxCompileOk = false;
+        HMODULE lib = LoadLibraryExW(L"d3dcompiler_47.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+        auto fn = lib ? (PFN_D3DCompile)(void*)GetProcAddress(lib, "D3DCompile") : nullptr;
+        if (!fn) return false;
+        auto one = [&](const char* entry, const char* target, ComPtr<ID3DBlob>& out) {
+            ComPtr<ID3DBlob> err;
+            HRESULT hr = fn(kShaderSource, sizeof(kShaderSource) - 1, "tourne-table.hlsl", nullptr, nullptr, entry,
+                            target, 1u << 15, 0, &out, &err);
+            if (FAILED(hr) && err) Wh_Log(L"[D3D11] %S failed: %S", entry, (const char*)err->GetBufferPointer());
+            return SUCCEEDED(hr);
+        };
+        ComPtr<ID3DBlob> vsb, psb[4];
+        const char* ps[4] = {"PSBloomDown", "PSBloomH", "PSBloomV", "PSBloomComposite"};
+        if (!one("VSFull", "vs_5_0", vsb)) return false;
+        for (int k = 0; k < 4; k++)
+            if (!one(ps[k], "ps_5_0", psb[k])) return false;
+        if (FAILED(g_d3dDevice->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &g.vsFull)))
+            return false;
+        for (int k = 0; k < 4; k++)
+            if (FAILED(g_d3dDevice->CreatePixelShader(psb[k]->GetBufferPointer(), psb[k]->GetBufferSize(), nullptr,
+                                                      &g.psFx[k])))
+                return false;
+        D3D11_SAMPLER_DESC sd = {};
+        sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+        sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+        sd.MaxLOD = D3D11_FLOAT32_MAX;
+        if (FAILED(g_d3dDevice->CreateSamplerState(&sd, &g.samplerLin))) return false;
+        g.fxCompileOk = true;
+    }
+    if (!g.fxCompileOk) return false;
+    if (g.fxTex[0] && g.fxW == g.w && g.fxH == g.h) return true;
+    for (int k = 0; k < 3; k++) {
+        g.fxTex[k].Reset();
+        g.fxRtv[k].Reset();
+        g.fxSrv[k].Reset();
+        D3D11_TEXTURE2D_DESC td = {};
+        td.Width = k ? std::max(1u, g.w / 4) : g.w;
+        td.Height = k ? std::max(1u, g.h / 4) : g.h;
+        td.MipLevels = td.ArraySize = 1;
+        td.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;  // smooth gradients through the blur
+        td.SampleDesc.Count = 1;
+        td.Usage = D3D11_USAGE_DEFAULT;
+        td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+        if (FAILED(g_d3dDevice->CreateTexture2D(&td, nullptr, &g.fxTex[k])) ||
+            FAILED(g_d3dDevice->CreateRenderTargetView(g.fxTex[k].Get(), nullptr, &g.fxRtv[k])) ||
+            FAILED(g_d3dDevice->CreateShaderResourceView(g.fxTex[k].Get(), nullptr, &g.fxSrv[k]))) {
+            g.fxTex[0].Reset();
+            return false;
+        }
+    }
+    g.fxW = g.w;
+    g.fxH = g.h;
+    return true;
+}
+
 // Returns false if nothing could be drawn this way (the caller then uses the
 // Direct2D path for this frame).
 bool Render(const FrameInputs& in) {
@@ -11934,16 +14724,26 @@ bool Render(const FrameInputs& in) {
     const bool horizontal = g_settings.orientation == VizOrientation::Horizontal;
     const VizShape shape = g_settings.shape;
     const int bars = VizEffectiveBarCount();
-    const float barW = std::max(1.f, VizPx((float)std::max(1, g_settings.barWidth)));
-    const float barGap = VizPx((float)std::max(0, g_settings.barGap));
-    const float maxSize = std::max(2.f, VizPx((float)std::max(2, g_settings.barMaxSize)));
-    const float idleSize = VizPx((float)std::max(0, g_settings.barIdleSize));
+    const float barW = std::max(1.f, VizPx((float)std::max(1.f, g_settings.barWidth)));
+    const float barGap = VizPx((float)std::max(0.f, g_settings.barGap));
+    const float maxSize = std::max(2.f, VizPx((float)std::max(2.f, g_settings.barMaxSize)));
+    const float idleSize = VizPx((float)std::max(0.f, g_settings.barIdleSize));
     const bool roundShape = shape == VizShape::Radial || shape == VizShape::Goniometer;
     const bool term = shape == VizShape::Terminal;
 
     // ---- Surface: the panel, or the bars plus their bleed without one -----
     float margin = std::max(4.0f * g_dpiScale, barW);
     if (shape == VizShape::Radial) margin += maxSize * 0.15f;
+    if (g_settings.style == VizStyle::Line) margin += 6.f * g_dpiScale;  // the edge glow
+    const float fxGlowR = g_settings.fxGlow > 0 ? g_settings.fxGlowRadius * g_dpiScale : 0.f;
+    const float fxBloomR = g_settings.fxBloom > 0 ? g_settings.fxBloomRadius * g_dpiScale : 0.f;
+    const bool fxShadow = g_settings.fxShadow > 0;
+    const float fxShadowReach = fxShadow ? (g_settings.fxShadowSoft + std::max(fabsf(g_settings.fxShadowX), fabsf(g_settings.fxShadowY))) *
+                                               g_dpiScale + 1.f
+                                         : 0.f;
+    margin += std::max({fxGlowR * 2.f, fxBloomR, fxShadowReach});
+    if (fabsf(g_settings.barTilt) > 0.01f)  // tilted bars lean out past the block
+        margin += maxSize * fabsf(tanf(g_settings.barTilt * 3.14159265f / 180.f));  // room for the light and shade to spread
     D2D1_RECT_F content = D2D1::RectF(L.blockX - margin, L.blockY - margin, L.blockX + L.totalWidth + margin,
                                       L.blockY + L.totalHeight + margin);
     D2D1_RECT_F want = content;
@@ -12002,7 +14802,7 @@ bool Render(const FrameInputs& in) {
     // The Terminal grid is built on the CPU from the bar levels, so that
     // shape keeps the analysis there (Hybrid).
     const bool gpuWork = g_settings.workload == VizWorkload::Gpu && g_settings.engine == VizEngineKind::Precision &&
-                         !in.dragPause && !term;
+                         !in.dragPause && !term && !VizStyleNeedsCpuBars();
     bool gpuOk = false;
     if (gpuWork) {
         int st = EnsureGpuAnalysis();
@@ -12103,6 +14903,98 @@ bool Render(const FrameInputs& in) {
     f.plateRect[2] = (float)g.w;
     f.plateRect[3] = (float)g.h;
 
+    // Styles (2.1): only the constants the chosen style reads, so the others
+    // stay zero and never change (or re-upload) the frame constants.
+    const VizStyle style = g_settings.style;
+    const bool split = style == VizStyle::SplitLR;
+    f.style = (uint32_t)style;
+    if (style == VizStyle::Led) {
+        f.segH = std::max(2.f * g_dpiScale, roundf(barW * 0.5f));
+        f.segStep = f.segH + std::max(1.f, roundf(1.5f * g_dpiScale));
+        f.segs = (uint32_t)std::max(1, (int)((maxSize + f.segStep - f.segH) / f.segStep));
+    } else if (style == VizStyle::Line) {
+        f.subdiv = 4;
+        f.glowR = 5.f * g_dpiScale;
+        f.fillA = 0.35f;
+    } else if (style == VizStyle::Vu) {
+        // Quantised to 1/2048 of the scale, far below a pixel: a resting
+        // needle leaves the frame constants, and so the frame, unchanged.
+        for (int k = 0; k < 4; k++) f.vu[k] = roundf(g_vizVu[k] * 2048.f) / 2048.f;
+        float mw = maxSize * 1.5f, gap = 8.f * g_dpiScale;
+        f.vuBox[0] = mw;
+        f.vuBox[1] = maxSize;
+        f.vuBox[2] = horizontal ? mw + gap : 0.f;
+        f.vuBox[3] = horizontal ? 0.f : maxSize + gap;
+    } else if (style == VizStyle::Spectrogram) {
+        f.vuBox[0] = 3.f * g_dpiScale;  // legend gap and width
+        f.vuBox[1] = 6.f * g_dpiScale;
+        f.specW = (uint32_t)g_vizSpecW;
+        f.specTex = (uint32_t)kVizSpecRows;
+        f.specRows = (uint32_t)std::clamp((int)maxSize, 1, kVizSpecRows);  // one row per pixel
+        f.specHead = (uint32_t)g_vizSpecHead;
+    }
+    f.fxGlow = g_settings.fxGlow / 100.f;
+    f.fxGlowR = fxGlowR;
+    f.fxBloom = g_settings.fxBloom / 100.f;
+    f.fxBloomR = fxBloomR;
+    if (g_settings.fxOutlineWidth > 0.f && g_settings.fxOutlineA > 0) {
+        f.fxLineW = g_settings.fxOutlineWidth * g_dpiScale;
+        f.fxLineColor[0] = g_settings.fxOutlineR / 255.f;
+        f.fxLineColor[1] = g_settings.fxOutlineG / 255.f;
+        f.fxLineColor[2] = g_settings.fxOutlineB / 255.f;
+        f.fxLineColor[3] = g_settings.fxOutlineA / 255.f;
+    }
+    {
+        // Bar modifiers (2.1).
+        const bool horiz = g_settings.orientation == VizOrientation::Horizontal;
+        const int anchor = (int)f.anchor;
+        if (horiz) f.barPivot = anchor == 0 ? f.block[1] : anchor == 1 ? f.block[1] + maxSize * 0.5f : f.block[1] + maxSize;
+        else f.barPivot = anchor == 0 ? f.block[0] + maxSize : anchor == 1 ? f.block[0] + maxSize * 0.5f : f.block[0];
+        uint32_t mf = 0;
+        if (g_settings.barHollow) {
+            mf |= 1u;
+            f.hollowW = std::max(0.25f, g_settings.barHollowWidth * g_dpiScale);
+        }
+        if (g_settings.barDash > 0.f) {
+            mf |= 2u;
+            f.barDash = g_settings.barDash * g_dpiScale;
+            f.barDashGap = g_settings.barDashGap * g_dpiScale;
+        }
+        if (fabsf(g_settings.barTilt) > 0.01f) {
+            mf |= 4u;
+            f.barTiltK = tanf(g_settings.barTilt * 3.14159265f / 180.f);
+        }
+        if (g_settings.barMirrorGap > 0.f && anchor == 1) {
+            mf |= 8u;
+            f.mirrorGap = g_settings.barMirrorGap * g_dpiScale;
+        }
+        f.modFlags = mf;
+        f.ghostA = g_settings.afterimage / 100.f;
+    }
+    if (fxShadow) {
+        f.fxShadowColor[0] = g_settings.fxShadowR / 255.f;
+        f.fxShadowColor[1] = g_settings.fxShadowG / 255.f;
+        f.fxShadowColor[2] = g_settings.fxShadowB / 255.f;
+        f.fxShadowColor[3] = g_settings.fxShadow / 100.f;
+        f.fxShadowX = g_settings.fxShadowX * g_dpiScale;
+        f.fxShadowY = g_settings.fxShadowY * g_dpiScale;
+        f.fxShadowSoft = g_settings.fxShadowSoft * g_dpiScale;
+    }
+    if (f.fxBloom > 0.f) {
+        UINT qw = std::max(1u, g.w / 4), qh = std::max(1u, g.h / 4);
+        f.fxTexel[0] = 1.f / qw;
+        f.fxTexel[1] = 1.f / qh;
+        f.fxTexel[2] = 1.f / g.w;
+        f.fxTexel[3] = 1.f / g.h;
+    }
+    const bool refl = VizReflectionActive();
+    if (refl) {
+        f.reflBase = f.block[1] + maxSize;
+        f.reflDir = 1.f;
+        f.reflDepth = VizReflectionDepth(maxSize);
+        f.reflAlpha = 0.4f;
+    }
+
     // ---- Did anything change? ---------------------------------------------------------
     // Hashed from the CPU-side inputs first; the dynamic buffers are mapped
     // only when the frame will actually be drawn, and then only the ones
@@ -12126,6 +15018,13 @@ bool Render(const FrameInputs& in) {
     if (g_settings.colorMode == VizColorMode::RainbowCycle) MixF(hash, in.rainbowBase, 2.f);
     if (g_settings.beatFlashEnabled) MixF(hash, pulse, 128.f);
     Mix(hash, in.dragPause);
+    Mix(hash, (uint64_t)style * 1009u + (uint64_t)g_settings.reflection);
+    for (int k = 0; k < 4; k++) MixF(hash, f.vu[k], 2048.f);
+    Mix(hash, (uint64_t)g_settings.fxGlow * 1000003u + (uint64_t)g_settings.fxBloom * 1009u);
+    MixF(hash, g_settings.fxGlowRadius + g_settings.fxBloomRadius * 257.f, 64.f);
+    MixF(hash, f.fxLineW, 64.f);
+    for (int k = 0; k < 4; k++) MixF(hash, f.fxLineColor[k] + f.fxShadowColor[k] * 7.f, 1024.f);
+    MixF(hash, f.fxShadowX + f.fxShadowY * 1013.f + f.fxShadowSoft * 7919.f, 64.f);
 
     const bool drawBars = !in.dragPause;
     const bool cpuBars = !gpuOk && drawBars;
@@ -12138,13 +15037,18 @@ bool Render(const FrameInputs& in) {
     const float glPulse = g_settings.beatFlashEnabled ? pulse : 0.f;
     const bool glZones = g_settings.oscilloscopeMultibandEnabled;
     const float glZ[3] = {glZones ? in.zones[0] : 0.f, glZones ? in.zones[1] : 0.f, glZones ? in.zones[2] : 0.f};
+    // Stereo Field puts the left channel's levels where the bars go and the
+    // right channel's where the peak caps go.
+    const float* barLv = split ? g_vizSplitL : g_vizPeak;
+    // Afterimage carries its trail levels where the peak hold usually goes.
+    const float* barHv = split ? g_vizSplitR : (g_settings.afterimage > 0 ? g_vizGhost : g_vizPeakHold);
     if (cpuBars) {
         barsKey = 1469598103934665603ull;
-        Mix(barsKey, (uint64_t)bars);
-        const bool caps = g_settings.peakHoldEnabled;
+        Mix(barsKey, (uint64_t)bars * 2u + (split ? 1u : 0u));
+        const bool caps = g_settings.peakHoldEnabled || split || g_settings.afterimage > 0;
         for (int i = 0; i < bars; i++) {
-            MixF(barsKey, std::max(0.f, g_vizPeak[i]) * rangePx, 4.f);
-            if (caps) MixF(barsKey, g_vizPeakHold[i] * rangePx, 4.f);
+            MixF(barsKey, std::max(0.f, barLv[i]) * rangePx, 4.f);
+            if (caps) MixF(barsKey, barHv[i] * rangePx, 4.f);
         }
         Mix(hash, barsKey);
         globalsKey = 1469598103934665603ull;
@@ -12182,6 +15086,14 @@ bool Render(const FrameInputs& in) {
         MixF(hash, in.correlation, 256.f);
     }
 
+    const bool sparks = style == VizStyle::Particles && drawBars;
+    if (sparks) {
+        Mix(hash, g_vizSparkSerial);
+        Mix(hash, (uint64_t)g_vizSparkCount);
+    }
+    const bool spec = style == VizStyle::Spectrogram && drawBars && g_vizSpecW > 0;
+    if (spec) Mix(hash, g_vizSpecSerial);
+
     if (!g.forcePresent && hash == g.lastHash) {  // nothing changed: no upload, no draw, no present
         VizPerf(kPerfSkipped);
         return true;
@@ -12196,8 +15108,8 @@ bool Render(const FrameInputs& in) {
             if (SUCCEEDED(g.ctx->Map(g.barsDyn.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
                 float* p = (float*)ms.pData;
                 for (int i = 0; i < bars; i++) {
-                    p[2 * i] = std::max(0.f, g_vizPeak[i]);
-                    p[2 * i + 1] = g_vizPeakHold[i];
+                    p[2 * i] = std::max(0.f, barLv[i]);
+                    p[2 * i + 1] = barHv[i];
                 }
                 g.ctx->Unmap(g.barsDyn.Get(), 0);
                 VizPerf(kPerfMaps);
@@ -12233,7 +15145,7 @@ bool Render(const FrameInputs& in) {
             for (size_t i = 0; i < n; i++) {  // branch-free: k <= i, always in bounds
                 uint32_t cell = src[i];
                 out[k] = (cell & 0xFFFFu) | ((uint32_t)i << 16);
-                k += ((cell & 127u) > 32u) ? 1u : 0u;
+                k += ((cell & 255u) > 32u) ? 1u : 0u;
             }
             g.ctx->Unmap(g.cellsDyn.Get(), 0);
             VizPerf(kPerfMaps);
@@ -12253,6 +15165,57 @@ bool Render(const FrameInputs& in) {
             VizPerf(kPerfMaps);
             g.pointsCount = points;
             g.pointsSerial = gonioSerial;
+        }
+    }
+    if (sparks && (!g.uploadsValid || g.sparkSerial != g_vizSparkSerial)) {
+        if (SUCCEEDED(g.ctx->Map(g.pointsDyn.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
+            memcpy(ms.pData, g_vizSparkBuf, sizeof(float) * 4 * (size_t)g_vizSparkCount);
+            g.ctx->Unmap(g.pointsDyn.Get(), 0);
+            VizPerf(kPerfMaps);
+            g.sparkSerial = g_vizSparkSerial;
+            g.pointsSerial = 0xFFFFFFFFu;  // the Goniometer's points are gone
+        }
+    }
+    bool specReady = false;
+    if (spec) {
+        const int W = g_vizSpecW, R = kVizSpecRows;
+        if (!g.specTex || g.specW != W) {
+            g.specTex.Reset();
+            g.specSRV.Reset();
+            D3D11_TEXTURE2D_DESC td = {};
+            td.Width = (UINT)W;
+            td.Height = (UINT)R;
+            td.MipLevels = td.ArraySize = 1;
+            td.Format = DXGI_FORMAT_R8_UNORM;
+            td.SampleDesc.Count = 1;
+            td.Usage = D3D11_USAGE_DEFAULT;
+            td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+            if (SUCCEEDED(g_d3dDevice->CreateTexture2D(&td, nullptr, &g.specTex)) &&
+                SUCCEEDED(g_d3dDevice->CreateShaderResourceView(g.specTex.Get(), nullptr, &g.specSRV))) {
+                g.specW = W;
+                g.specSerial = g_vizSpecSerial - (uint32_t)R;  // everything is new
+            } else {
+                g.specTex.Reset();
+                g.specSRV.Reset();
+            }
+        }
+        if (g.specTex) {
+            // Only the rows pushed since the last upload: a row is a few
+            // hundred bytes, the whole history a few hundred kilobytes.
+            uint32_t fresh = g_vizSpecSerial - g.specSerial;
+            if (fresh >= (uint32_t)R) {
+                g.ctx->UpdateSubresource(g.specTex.Get(), 0, nullptr, g_vizSpecRing.data(), (UINT)W, 0);
+            } else {
+                for (uint32_t k = fresh; k > 0; k--) {
+                    int row = (g_vizSpecHead - (int)k + 1 + R) % R;
+                    D3D11_BOX box = {0, (UINT)row, 0, (UINT)W, (UINT)row + 1, 1};
+                    g.ctx->UpdateSubresource(g.specTex.Get(), 0, &box, &g_vizSpecRing[(size_t)row * W], (UINT)W, 0);
+                }
+            }
+            if (fresh) VizPerf(kPerfMaps);
+            g.specSerial = g_vizSpecSerial;
+            g.specHead = g_vizSpecHead;
+            specReady = true;
         }
     }
     g.uploadsValid = true;
@@ -12298,6 +15261,10 @@ bool Render(const FrameInputs& in) {
         g.ctx->VSSetShaderResources(10, 1, &cells);
         g.ctx->PSSetShaderResources(11, 1, &glyphs);
     }
+    if (specReady) {
+        ID3D11ShaderResourceView* sv = g.specSRV.Get();
+        g.ctx->PSSetShaderResources(12, 1, &sv);
+    }
     ID3D11SamplerState* smp = g.sampler.Get();
     g.ctx->PSSetSamplers(0, 1, &smp);
     ID3D11Buffer* fcb = g.frameCB.Get();
@@ -12314,7 +15281,47 @@ bool Render(const FrameInputs& in) {
         draw(kPlate, 1);
     }
     g.ctx->OMSetBlendState(g.blend.Get(), nullptr, 0xffffffff);
+    // Bloom: everything after the plate goes into the scene texture first.
+    const bool bloom = drawBars && f.fxBloom > 0.f && EnsureFx();
+    if (bloom) {
+        const float zero[4] = {0, 0, 0, 0};
+        ID3D11RenderTargetView* srt = g.fxRtv[0].Get();
+        g.ctx->OMSetRenderTargets(1, &srt, nullptr);
+        g.ctx->ClearRenderTargetView(srt, zero);
+    }
+    // Reflection first, under the bars it mirrors.
+    auto drawRefl = [&](Pass p, UINT count) {
+        if (!count) return;
+        ID3D11Buffer* pcb = g.passCBRefl[p].Get();
+        g.ctx->VSSetConstantBuffers(1, 1, &pcb);
+        g.ctx->DrawInstanced(4, count, 0, 0);
+    };
+    const UINT lineCount = bars > 1 ? (UINT)(bars - 1) * f.subdiv : 0u;
+    if (drawBars && refl) {
+        if (style == VizStyle::Led) drawRefl(kLed, (UINT)bars * f.segs);
+        else if (style == VizStyle::Line) drawRefl(kLine, lineCount);
+        else if (shape == VizShape::Dots) drawRefl(kDots, (UINT)bars * f.dotSlots);
+        else {
+            if (g_settings.afterimage > 0) drawRefl(kGhost, (UINT)bars);
+            drawRefl(kBars, (UINT)bars);
+            if (g_settings.peakHoldEnabled) drawRefl(kCaps, (UINT)bars);
+        }
+    }
+    bool styled = drawBars;
     if (drawBars) {
+        switch (style) {
+            case VizStyle::Led: draw(kLed, (UINT)bars * f.segs); break;
+            case VizStyle::Line: draw(kLine, lineCount); break;
+            case VizStyle::Bloom: draw(kBloom, (UINT)bars); break;
+            case VizStyle::Spectrogram:
+                if (specReady) draw(kSpectro, 2);
+                break;
+            case VizStyle::Vu: draw(kVu, 64); break;
+            case VizStyle::SplitLR: draw(kSplit, (UINT)bars * 2u); break;
+            default: styled = false; break;
+        }
+    }
+    if (drawBars && !styled) {
         switch (shape) {
             case VizShape::Dots: draw(kDots, (UINT)bars * f.dotSlots); break;
             case VizShape::Radial: draw(kRadial, (UINT)bars); break;
@@ -12327,10 +15334,40 @@ bool Render(const FrameInputs& in) {
                 draw(kCorr, 2);
                 break;
             default:
+                if (g_settings.afterimage > 0) draw(kGhost, (UINT)bars);
                 draw(kBars, (UINT)bars);
                 if (g_settings.peakHoldEnabled) draw(kCaps, (UINT)bars);
                 break;
         }
+        if (sparks) draw(kSpark, (UINT)g_vizSparkCount);
+    }
+    if (bloom) {
+        // Down to a quarter, blur across, blur down, then the scene plus its
+        // light over the plate.
+        ID3D11ShaderResourceView* none[2] = {};
+        auto pass = [&](int rt, int src, int ps, UINT vw, UINT vh) {
+            g.ctx->PSSetShaderResources(13, 2, none);
+            ID3D11RenderTargetView* t = rt < 0 ? rtv : g.fxRtv[rt].Get();
+            g.ctx->OMSetRenderTargets(1, &t, nullptr);
+            D3D11_VIEWPORT v = {0, 0, (float)vw, (float)vh, 0, 1};
+            g.ctx->RSSetViewports(1, &v);
+            ID3D11ShaderResourceView* srcs[2] = {g.fxSrv[src].Get(), rt < 0 ? g.fxSrv[1].Get() : nullptr};
+            g.ctx->PSSetShaderResources(13, 2, srcs);
+            g.ctx->PSSetShader(g.psFx[ps].Get(), nullptr, 0);
+            g.ctx->Draw(3, 0);
+        };
+        const UINT qw = std::max(1u, g.w / 4), qh = std::max(1u, g.h / 4);
+        g.ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        g.ctx->VSSetShader(g.vsFull.Get(), nullptr, 0);
+        ID3D11SamplerState* lin = g.samplerLin.Get();
+        g.ctx->PSSetSamplers(1, 1, &lin);
+        g.ctx->OMSetBlendState(g.blendOff.Get(), nullptr, 0xffffffff);
+        pass(1, 0, 0, qw, qh);
+        pass(2, 1, 1, qw, qh);
+        pass(1, 2, 2, qw, qh);
+        g.ctx->OMSetBlendState(g.blend.Get(), nullptr, 0xffffffff);
+        pass(-1, 0, 3, g.w, g.h);
+        g.ctx->PSSetShaderResources(13, 2, none);
     }
     ID3D11ShaderResourceView* nullSrv[5] = {};
     g.ctx->VSSetShaderResources(0, 4, nullSrv);
@@ -12339,6 +15376,7 @@ bool Render(const FrameInputs& in) {
         g.ctx->VSSetShaderResources(10, 1, nullSrv);
         g.ctx->PSSetShaderResources(11, 1, nullSrv);
     }
+    if (specReady) g.ctx->PSSetShaderResources(12, 1, nullSrv);
 
     HRESULT hr = g.sc->Present(0, 0);
     VizCheckDeviceLost(S_OK, hr);
@@ -12352,9 +15390,24 @@ bool Render(const FrameInputs& in) {
 
 // Publishes the bounds of what is actually visible, for the occlusion check
 // (see the note where 1.4 introduced this).
+bool VizProgressRect(const VizLayout& layout, D2D1_RECT_F* out);
+
 void VizPublishDrawRect(const VizLayout& layout) {
     int virtualScreenX = GetSystemMetrics(SM_XVIRTUALSCREEN);
     int virtualScreenY = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    {
+        // Click to Seek: the bar, made at least 10 px tall to hit.
+        D2D1_RECT_F pr;
+        bool ok = g_settings.progressEnabled && g_settings.progressSeek && VizProgressRect(layout, &pr);
+        if (ok) {
+            float cy = (pr.top + pr.bottom) * 0.5f, hh = std::max((pr.bottom - pr.top) * 0.5f, 5.f * g_dpiScale);
+            g_seekRectL.store((LONG)lroundf(layout.originX + pr.left) + virtualScreenX, std::memory_order_relaxed);
+            g_seekRectR.store((LONG)lroundf(layout.originX + pr.right) + virtualScreenX, std::memory_order_relaxed);
+            g_seekRectT.store((LONG)lroundf(layout.originY + cy - hh) + virtualScreenY, std::memory_order_relaxed);
+            g_seekRectB.store((LONG)lroundf(layout.originY + cy + hh) + virtualScreenY, std::memory_order_relaxed);
+        }
+        g_seekRectValid.store(ok, std::memory_order_relaxed);
+    }
     float padL = g_settings.backgroundEnabled ? VizPx((float)g_settings.bgPaddingL) : 0.f;
     float padR = g_settings.backgroundEnabled ? VizPx((float)g_settings.bgPaddingR) : 0.f;
     float padT = g_settings.backgroundEnabled ? VizPx((float)g_settings.bgPaddingT) : 0.f;
@@ -12438,7 +15491,7 @@ void VizResolveColors(RGBA* c1, RGBA* cGrad1, RGBA* c2) {
         DWORD dw = GetWindowsAccentColor();
         *c1 = {0xFF, (BYTE)((dw >> 16) & 0xFF), (BYTE)((dw >> 8) & 0xFF), (BYTE)(dw & 0xFF)};
     } else if (g_settings.colorMode == VizColorMode::AlbumArt || g_settings.colorMode == VizColorMode::DynamicAlbum) {
-        DWORD dw = g_albumArtColor.load(std::memory_order_relaxed);
+        DWORD dw = VizAlbumColorShown(0);
         *c1 = {0xFF, (BYTE)((dw >> 16) & 0xFF), (BYTE)((dw >> 8) & 0xFF), (BYTE)(dw & 0xFF)};
     }
     *c2 = {g_settings.grad2A, g_settings.grad2R, g_settings.grad2G, g_settings.grad2B};
@@ -12448,7 +15501,7 @@ void VizResolveColors(RGBA* c1, RGBA* cGrad1, RGBA* c2) {
         *c2 = {255, 200, 29, 51};
     }
     if (g_settings.colorMode == VizColorMode::DynamicAlbum) {
-        DWORD dw = g_albumArtColorSecondary.load(std::memory_order_relaxed);
+        DWORD dw = VizAlbumColorShown(1);
         *c2 = {0xFF, (BYTE)((dw >> 16) & 0xFF), (BYTE)((dw >> 8) & 0xFF), (BYTE)(dw & 0xFF)};
         *cGrad1 = *c1;
     }
@@ -12595,7 +15648,7 @@ void VizBuildTextFrame(VizTextFrame& t) {
 // Rough single-line width for the room a wide readout needs, used when sizing
 // the layout before any text has been measured.
 float VizReadoutWidthEstimate() {
-    float fontPx = (float)std::max(6, g_settings.nowPlayingFontSize) * g_dpiScale;
+    float fontPx = (float)std::max(6.f, g_settings.nowPlayingFontSize) * g_dpiScale;
     int chars = 0;
     switch (g_settings.readout) {
         case VizReadout::Loudness: chars = 32; break;
@@ -12608,7 +15661,7 @@ float VizReadoutWidthEstimate() {
 
 // Where the track progress bar goes, layout-local. False when it isn't shown.
 bool VizProgressRect(const VizLayout& layout, D2D1_RECT_F* out) {
-    float h = (float)std::max(1, g_settings.progressHeight) * g_dpiScale;
+    float h = (float)std::max(1.f, g_settings.progressHeight) * g_dpiScale;
     float gap = (float)g_settings.progressGap * g_dpiScale;
     D2D1_RECT_F panel;
     float radii[4];
@@ -12668,7 +15721,7 @@ void VizDrawTextOverlays(const VizTextFrame& t, const VizLayout& layout, bool sm
             g_npArtistBrush->SetColor(D2D1::ColorF(g_settings.npArtistR / 255.0f, g_settings.npArtistG / 255.0f,
                                                    g_settings.npArtistB / 255.0f,
                                                    (g_settings.npArtistA / 255.0f) * t.npAlpha));
-        const float fontPx = (float)std::max(6, g_settings.nowPlayingFontSize) * g_dpiScale;
+        const float fontPx = (float)std::max(6.f, g_settings.nowPlayingFontSize) * g_dpiScale;
         const bool two = g_settings.npLayout == VizNpLayout::TwoLines && !t.npTitle.empty() && !t.npArtist.empty();
         // Two lines: title, then artist. One line: "Artist - Title", the
         // artist part in the artist colour.
@@ -12753,7 +15806,7 @@ void VizDrawTextOverlays(const VizTextFrame& t, const VizLayout& layout, bool sm
         g_nowPlayingBrush->SetColor(D2D1::ColorF(g_settings.nowPlayingR / 255.0f, g_settings.nowPlayingG / 255.0f,
                                                  g_settings.nowPlayingB / 255.0f, g_settings.nowPlayingA / 255.0f));
         float pfMargin = 4.0f * g_dpiScale;
-        float pfHeight = (float)std::max(6, g_settings.nowPlayingFontSize) * g_dpiScale * 1.4f;
+        float pfHeight = (float)std::max(6.f, g_settings.nowPlayingFontSize) * g_dpiScale * 1.4f;
         float pfWidth = t.pfWide ? totalWidth + 2.0f * layout.textAnchorSide
                                  : std::min(120.0f * g_dpiScale, totalWidth + 2.0f * layout.textAnchorSide);
         float pfOffX = EffectivePeakFreqOffsetX();
@@ -12814,6 +15867,7 @@ bool RenderVisualizerD3D(float sceneAlpha) {
             VizComputeBarFrame();
             if (g_settings.shape == VizShape::Oscilloscope) VizUpdateScopeTrace();
             if (g_settings.shape == VizShape::Terminal) VizBuildTermGrid();
+        VizStylesFrame();
         }
         VizResolveColors(&in.c1, &in.cGrad1, &in.c2);
         in.rainbowBase = VizClockPhase(VizClockSeconds(), (double)g_settings.rainbowSpeed, 360.0);
@@ -12857,11 +15911,27 @@ bool RenderVisualizerD3D(float sceneAlpha) {
     ttgfx::MixF(key, layout.blockX, 64.f);
     ttgfx::MixF(key, layout.blockY, 64.f);
     ttgfx::Mix(key, (uint64_t)g_swapChainWidth * 65536u + g_swapChainHeight);
+    // Scale numbers (Spectrogram, VU): fixed by the settings and the size.
+    const bool scale = VizStyleHasScale();
+    const bool scaleHorizontal = g_settings.orientation == VizOrientation::Horizontal;
+    const float scaleMax = std::max(2.f, VizPx((float)std::max(2.f, g_settings.barMaxSize)));
+    const int scaleBars = VizEffectiveBarCount();
+    const float scaleBarW = std::max(1.f, VizPx((float)std::max(1.f, g_settings.barWidth)));
+    const float scaleGap = VizPx((float)std::max(0.f, g_settings.barGap));
+    const float scaleThick = scaleBars * (scaleBarW + scaleGap) - scaleGap;
+    if (scale) {
+        ttgfx::Mix(key, 7u + (uint64_t)g_settings.style * 131u + (uint64_t)(g_settings.dbFloor + 200) * 1009u +
+                            (uint64_t)(g_settings.dbCeiling + 200) * 65537u + (uint64_t)g_settings.engine);
+        ttgfx::MixF(key, scaleMax, 64.f);
+        ttgfx::MixF(key, scaleThick, 64.f);
+        ttgfx::Mix(key, scaleHorizontal ? 1u : 2u);
+    }
     if (!ttgfx::g.textForce && key == ttgfx::g.textKey) return true;
     ttgfx::g.textKey = key;
     ttgfx::g.textForce = false;
     // Nothing to show: take the surface off rather than present a clear one.
-    const bool textEmpty = tf.pf.empty() && tf.progress < 0.f && (tf.np.empty() || tf.npAlpha <= 0.01f);
+    const bool textEmpty = tf.pf.empty() && tf.progress < 0.f && (tf.np.empty() || tf.npAlpha <= 0.01f)
+                           && !(scale && sceneAlpha > 0.001f);
     if (textEmpty) {
         ttgfx::ShowTextSurface(false);
         return true;
@@ -12874,6 +15944,7 @@ bool RenderVisualizerD3D(float sceneAlpha) {
                                               D2D1::IdentityMatrix(), sceneAlpha),
                         nullptr);
     VizDrawTextOverlays(tf, layout, true);
+    if (scale && sceneAlpha > 0.001f) VizDrawStyleScale(layout.blockX, layout.blockY, scaleMax, scaleThick, scaleHorizontal);
     if (fade) g_dc->PopLayer();
     HRESULT hrEnd = g_dc->EndDraw();
     HRESULT hrPresent = g_swapChain->Present(0, 0);
@@ -12894,6 +15965,7 @@ void RenderVisualizer() {
     // the box and its background visibly fell out of sync until the next
     // tick caught up. Cheap to call defensively when nothing has moved.
     UpdateSwapChainForLayout();
+    ttgfx::SplitSync();
 
     // Smooth Mode: how late is this frame, relative to the Target FPS interval
     // the motion constants were tuned against? Measured against the user's
@@ -12966,13 +16038,14 @@ void RenderVisualizer() {
     if (!g_dragRenderPauseActive.load(std::memory_order_relaxed)) {
         VizComputeBarFrame();
         if (g_settings.shape == VizShape::Terminal) VizBuildTermGrid();
+        VizStylesFrame();
     }
 
     int barCount = VizEffectiveBarCount();
-    float barW = std::max(1.f, VizPx((float)std::max(1, g_settings.barWidth)));
-    float barGap = VizPx((float)std::max(0, g_settings.barGap));
-    float maxSize = std::max(2.f, VizPx((float)std::max(2, g_settings.barMaxSize)));
-    float idleSize = VizPx((float)std::max(0, g_settings.barIdleSize));
+    float barW = std::max(1.f, VizPx((float)std::max(1.f, g_settings.barWidth)));
+    float barGap = VizPx((float)std::max(0.f, g_settings.barGap));
+    float maxSize = std::max(2.f, VizPx((float)std::max(2.f, g_settings.barMaxSize)));
+    float idleSize = VizPx((float)std::max(0.f, g_settings.barIdleSize));
     float rTL = g_settings.barRadiusTL * g_dpiScale;
     float rTR = g_settings.barRadiusTR * g_dpiScale;
     float rBR = g_settings.barRadiusBR * g_dpiScale;
@@ -12994,6 +16067,7 @@ void RenderVisualizer() {
         totalWidth  = horizontal ? groupThickness : groupExtent;
         totalHeight = horizontal ? groupExtent    : groupThickness;
     }
+    VizStyleBox(&totalWidth, &totalHeight, maxSize, horizontal);
 
     float animTime = (float)GetTickCount64() * 0.001f;
     // Rainbow hue offset, degrees. With Smooth Mode off this is the 1.4
@@ -13160,10 +16234,10 @@ void RenderVisualizer() {
                 DWORD dw = GetWindowsAccentColor();
                 c1 = {0xFF, (BYTE)((dw>>16)&0xFF), (BYTE)((dw>>8)&0xFF), (BYTE)(dw&0xFF)};
             } else if (g_settings.colorMode == VizColorMode::AlbumArt) {
-                DWORD dw = g_albumArtColor.load(std::memory_order_relaxed);
+                DWORD dw = VizAlbumColorShown(0);
                 c1 = {0xFF, (BYTE)((dw>>16)&0xFF), (BYTE)((dw>>8)&0xFF), (BYTE)(dw&0xFF)};
             } else if (g_settings.colorMode == VizColorMode::DynamicAlbum) {
-                DWORD dw = g_albumArtColor.load(std::memory_order_relaxed);
+                DWORD dw = VizAlbumColorShown(0);
                 c1 = {0xFF, (BYTE)((dw>>16)&0xFF), (BYTE)((dw>>8)&0xFF), (BYTE)(dw&0xFF)};
             }
         }
@@ -13174,12 +16248,16 @@ void RenderVisualizer() {
             c2     = {255, 200, 29, 51};
         }
         if (g_settings.colorMode == VizColorMode::DynamicAlbum) {
-            DWORD dw = g_albumArtColorSecondary.load(std::memory_order_relaxed);
+            DWORD dw = VizAlbumColorShown(1);
             c2    = {0xFF, (BYTE)((dw>>16)&0xFF), (BYTE)((dw>>8)&0xFF), (BYTE)(dw&0xFF)};
             cGrad1 = c1;
         }
 
-        if (g_settings.shape == VizShape::Dots) {
+        const bool reflD2D = VizFxD2DBegin(useFadeLayer);
+        if (VizDrawStyleD2D(blockX, blockY, totalWidth, totalHeight, barCount, barW, barGap, maxSize, idleSize,
+                            horizontal, c1, cGrad1, c2, rainbowBase)) {
+            // drawn by the style
+        } else if (g_settings.shape == VizShape::Dots) {
             float dotR  = barW * 0.5f;
             float step  = barW + barGap;
             float dTL = g_settings.barRadiusTL * g_dpiScale;
@@ -13642,6 +16720,7 @@ void RenderVisualizer() {
                 for (const auto& cap : s_capRects) g_dc->FillRectangle(cap, g_barBrush2.Get());
             }
         }
+        if (reflD2D) VizFxD2DEnd(blockY + maxSize, VizReflectionDepth(maxSize));
 
         {
             VizTextFrame tf;
@@ -14210,7 +17289,11 @@ static const VizMenuOption kShapes[] = {
     {L"stereo", L"Stereo"},     {L"mountain", L"Mountain"},         {L"mirror", L"Mirror"},
     {L"wave", L"Wave"},         {L"breathe", L"Breathe"},           {L"dots", L"Dots"},
     {L"radial", L"Radial"},     {L"oscilloscope", L"Oscilloscope"}, {L"goniometer", L"Goniometer"},
-    {L"terminal", L"Terminal"}};
+    {L"terminal", L"Terminal"},
+    // Styles (2.1), in VizStyle order after the shapes (see VizShapeMenuIndex).
+    {L"led", L"LED Meter"},     {L"line", L"Line Spectrum"},        {L"bloom", L"Polar Bloom"},
+    {L"spectrogram", L"Spectrogram"}, {L"vu", L"VU Needles"},       {L"stereo_field", L"Stereo Field"},
+    {L"particles", L"Particles"}};
 static const VizMenuOption kColorModes[] = {
     {L"solid", L"Solid"},          {L"gradient", L"Gradient"},           {L"reactive_gradient", L"Reactive Gradient"},
     {L"accent", L"Windows Accent"}, {L"album_art", L"Album Art"},         {L"dynamic_album", L"Dynamic Album"},
@@ -14243,11 +17326,7 @@ void VizApplyMenuOverrides() {
         PCWSTR v = kv.second.c_str();
         auto is = [&](PCWSTR s) { return wcscmp(v, s) == 0; };
         if (k == L"shape") {
-            g_settings.shape = is(L"mountain") ? VizShape::Mountain : is(L"mirror") ? VizShape::Mirror
-                             : is(L"wave") ? VizShape::Wave : is(L"breathe") ? VizShape::Breathe
-                             : is(L"dots") ? VizShape::Dots : is(L"radial") ? VizShape::Radial
-                             : is(L"oscilloscope") ? VizShape::Oscilloscope : is(L"goniometer") ? VizShape::Goniometer
-                             : is(L"terminal") ? VizShape::Terminal : VizShape::Stereo;
+            VizParseShape(v, &g_settings.shape, &g_settings.style);
         } else if (k == L"colorMode") {
             g_settings.colorMode = is(L"gradient") ? VizColorMode::Gradient
                                  : is(L"reactive_gradient") ? VizColorMode::ReactiveGradient
@@ -14306,6 +17385,32 @@ void VizApplyMenuOverrides() {
             g_settings.pixelSnap = is(L"1");
         } else if (k == L"fineNudge") {
             g_settings.keyMoveFine = is(L"1");
+        // The look, from the Style Editor and saved styles (2.1).
+        } else if (k == L"barWidth") {
+            g_settings.barWidth = std::clamp((float)_wtof(v), 0.1f, 400.f);
+        } else if (k == L"barGap") {
+            g_settings.barGap = std::clamp((float)_wtof(v), 0.f, 400.f);
+        } else if (k == L"barMaxSize") {
+            g_settings.barMaxSize = std::clamp((float)_wtof(v), 2.f, 4000.f);
+        } else if (k == L"barRadius") {
+            float rad = std::clamp((float)_wtof(v), 0.f, 100.f);
+            g_settings.barRadiusTL = g_settings.barRadiusTR = g_settings.barRadiusBR = g_settings.barRadiusBL = rad;
+        } else if (k == L"reflection") {
+            g_settings.reflection = std::clamp(_wtoi(v), 0, 100);
+        } else if (k == L"fxGlow") {
+            g_settings.fxGlow = std::clamp(_wtoi(v), 0, 100);
+        } else if (k == L"fxGlowRadius") {
+            g_settings.fxGlowRadius = std::clamp((float)_wtof(v), 0.5f, 32.f);
+        } else if (k == L"fxBloom") {
+            g_settings.fxBloom = std::clamp(_wtoi(v), 0, 100);
+        } else if (k == L"fxBloomRadius") {
+            g_settings.fxBloomRadius = std::clamp((float)_wtof(v), 4.f, 64.f);
+        } else if (k == L"color") {
+            ParseColorHex(v, &g_settings.colorA, &g_settings.colorR, &g_settings.colorG, &g_settings.colorB);
+        } else if (k == L"grad1") {
+            ParseColorHex(v, &g_settings.grad1A, &g_settings.grad1R, &g_settings.grad1G, &g_settings.grad1B);
+        } else if (k == L"grad2") {
+            ParseColorHex(v, &g_settings.grad2A, &g_settings.grad2R, &g_settings.grad2G, &g_settings.grad2B);
         }
     }
 }
@@ -14315,7 +17420,7 @@ static std::wstring CurrentValue(const std::wstring& key) {
     auto pick = [](const VizMenuOption* opts, size_t n, int index) -> std::wstring {
         return (index >= 0 && (size_t)index < n) ? opts[index].value : L"";
     };
-    if (key == L"shape") return pick(kShapes, ARRAYSIZE(kShapes), (int)g_settings.shape);
+    if (key == L"shape") return pick(kShapes, ARRAYSIZE(kShapes), VizShapeMenuIndex());
     if (key == L"colorMode") return pick(kColorModes, ARRAYSIZE(kColorModes), (int)g_settings.colorMode);
     if (key == L"termStyle") return pick(kTermStyles, ARRAYSIZE(kTermStyles), (int)g_settings.termStyle);
     if (key == L"engine") return pick(kEngines, ARRAYSIZE(kEngines), (int)g_settings.engine);
@@ -14348,7 +17453,14 @@ enum : UINT {
     kMenuDefaultIn = 201,
     kMenuDeviceBase = 300,   // + endpoint index
     kMenuChoiceBase = 1000,  // + group * 100 + option
+    kMenuStyleEditor = 4999,
+    kMenuPresetBase = 5000,  // + saved style index
 };
+
+// Saved styles and the Style Editor (p3_editor.cpp).
+std::vector<std::wstring> VizStylePresetNames();
+bool VizApplyStylePreset(const std::wstring& name);
+void VizOpenStyleEditor();
 struct VizMenuGroup {
     const wchar_t* key;
     const wchar_t* label;
@@ -14467,6 +17579,16 @@ void VizShowContextMenu(POINT pt) {
     }
     AppendMenuW(menu, MF_POPUP, (UINT_PTR)dev, L"Audio Source");
 
+    // My Styles: saved looks, one click each, and the editor that makes them.
+    std::vector<std::wstring> presets = VizStylePresetNames();
+    HMENU mine = CreatePopupMenu();
+    for (size_t i = 0; i < presets.size() && i < 200; i++)
+        AppendMenuW(mine, MF_STRING, kMenuPresetBase + (UINT)i, presets[i].c_str());
+    if (presets.empty()) AppendMenuW(mine, MF_STRING | MF_GRAYED, 0, L"(none saved yet)");
+    AppendMenuW(mine, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(mine, MF_STRING, kMenuStyleEditor, L"Style Editor...");
+    AppendMenuW(menu, MF_POPUP, (UINT_PTR)mine, L"My Styles");
+
     for (size_t gi = 0; gi < ARRAYSIZE(kGroups); gi++) {
         const VizMenuGroup& grp = kGroups[gi];
         if (wcscmp(grp.key, L"termStyle") == 0 && g_settings.shape != VizShape::Terminal) continue;
@@ -14500,15 +17622,20 @@ void VizShowContextMenu(POINT pt) {
 
     // While the menu is up the mouse hook passes every click through, so a
     // right-click elsewhere closes it instead of being swallowed.
-    g_menuOpen.store(true, std::memory_order_release);
+    VizMediaMenuBegin();
     UINT cmd = (UINT)TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, pt.x, pt.y, g_messageWnd,
                                       nullptr);
-    g_menuOpen.store(false, std::memory_order_release);
+    VizMediaMenuEnd();
     PostMessage(g_messageWnd, WM_NULL, 0, 0);
     DestroyMenu(menu);  // destroys the submenus with it
     if (!cmd) return;
 
-    if (cmd == kMenuCopy) {
+    if (cmd == kMenuStyleEditor) {
+        VizOpenStyleEditor();
+        return;
+    } else if (cmd >= kMenuPresetBase && cmd < kMenuPresetBase + presets.size()) {
+        if (!VizApplyStylePreset(presets[cmd - kMenuPresetBase])) return;
+    } else if (cmd == kMenuCopy) {
         VizCopyMenuOverrides(toggles, ARRAYSIZE(toggles), eps);
         return;
     } else if (cmd == kMenuReset) {
@@ -14536,6 +17663,384 @@ void VizShowContextMenu(POINT pt) {
         return;
     }
     ApplySettingsChanged();
+}
+
+// ---- Style Editor and saved styles (2.1) -------------------------------------------------
+// A small window, opened from the right-click menu (My Styles > Style
+// Editor...), that builds a look out of the pieces every style is made of:
+// the base style, colours, bar size and spacing, corner radius, peak caps,
+// Reflection, Glow and Bloom. Every change goes through the same quick
+// settings the menu uses and applies at once, so the visualizer itself is the
+// live preview. A look can be saved under a name and comes back in one click
+// from My Styles.
+//
+// Saved styles are mod-owned values like the quick settings: "stylePresets"
+// lists the names, "stylePreset:<name>" holds one look as key=value lines.
+
+HWND g_styleEditorWnd = nullptr;
+static bool g_styleEditorClassRegistered = false;
+static const wchar_t kStyleEditorClass[] = L"TourneTableStyleEditor";
+
+// The keys that make up a look, and their current effective values.
+static const wchar_t* const kLookKeys[] = {L"shape",      L"colorMode", L"color",       L"grad1",    L"grad2",
+                                           L"peakHold",   L"beatFlash", L"barWidth",    L"barGap",   L"barMaxSize",
+                                           L"barRadius",  L"reflection", L"fxGlow",     L"fxGlowRadius",
+                                           L"fxBloom",    L"fxBloomRadius"};
+
+static std::wstring VizHexColor(BYTE a, BYTE r, BYTE g, BYTE b) {
+    wchar_t buf[16];
+    swprintf(buf, 16, L"#%02X%02X%02X%02X", a, r, g, b);
+    return buf;
+}
+
+static // A size as text: '6', '1.25', never '6.000000'.
+std::wstring VizNumText(float v) {
+    WCHAR b[32];
+    swprintf_s(b, L"%g", std::round(v * 1000.f) / 1000.f);
+    return b;
+}
+
+std::wstring VizLookValue(const std::wstring& key) {
+    const Settings& s = g_settings;
+    if (key == L"shape" || key == L"colorMode") return CurrentValue(key);
+    if (key == L"color") return VizHexColor(s.colorA, s.colorR, s.colorG, s.colorB);
+    if (key == L"grad1") return VizHexColor(s.grad1A, s.grad1R, s.grad1G, s.grad1B);
+    if (key == L"grad2") return VizHexColor(s.grad2A, s.grad2R, s.grad2G, s.grad2B);
+    if (key == L"peakHold") return s.peakHoldEnabled ? L"1" : L"0";
+    if (key == L"beatFlash") return s.beatFlashEnabled ? L"1" : L"0";
+    if (key == L"barWidth") return VizNumText(s.barWidth);
+    if (key == L"barGap") return VizNumText(s.barGap);
+    if (key == L"barMaxSize") return VizNumText(s.barMaxSize);
+    if (key == L"barRadius") return VizNumText(s.barRadiusTL);
+    if (key == L"reflection") return std::to_wstring(s.reflection);
+    if (key == L"fxGlow") return std::to_wstring(s.fxGlow);
+    if (key == L"fxGlowRadius") return VizNumText(s.fxGlowRadius);
+    if (key == L"fxBloom") return std::to_wstring(s.fxBloom);
+    if (key == L"fxBloomRadius") return VizNumText(s.fxBloomRadius);
+    return L"";
+}
+
+// ---- Saved styles ----
+static std::wstring VizReadValue(const std::wstring& name) {
+    WCHAR buf[4096] = {};
+    if (!Wh_GetStringValue(name.c_str(), buf, ARRAYSIZE(buf))) return L"";
+    return buf;
+}
+
+std::vector<std::wstring> VizStylePresetNames() {
+    std::vector<std::wstring> out;
+    std::wstring s = VizReadValue(L"stylePresets");
+    size_t pos = 0;
+    while (pos < s.size()) {
+        size_t nl = s.find(L'\n', pos);
+        if (nl == std::wstring::npos) nl = s.size();
+        if (nl > pos) out.push_back(s.substr(pos, nl - pos));
+        pos = nl + 1;
+    }
+    return out;
+}
+
+static void VizWritePresetNames(const std::vector<std::wstring>& names) {
+    std::wstring s;
+    for (const auto& n : names) s += n + L"\n";
+    Wh_SetStringValue(L"stylePresets", s.c_str());
+}
+
+// Letters, digits, spaces, - and _, at most 40: safe as part of a value name.
+static std::wstring VizCleanPresetName(const std::wstring& in) {
+    std::wstring out;
+    for (wchar_t c : in) {
+        if (out.size() >= 40) break;
+        if (iswalnum(c) || c == L' ' || c == L'-' || c == L'_') out += c;
+    }
+    while (!out.empty() && out.back() == L' ') out.pop_back();
+    while (!out.empty() && out.front() == L' ') out.erase(out.begin());
+    return out;
+}
+
+static bool VizSaveStylePreset(const std::wstring& rawName) {
+    std::wstring name = VizCleanPresetName(rawName);
+    if (name.empty()) return false;
+    std::wstring body;
+    for (const wchar_t* k : kLookKeys) body += std::wstring(k) + L"=" + VizLookValue(k) + L"\n";
+    Wh_SetStringValue((L"stylePreset:" + name).c_str(), body.c_str());
+    std::vector<std::wstring> names = VizStylePresetNames();
+    if (std::find(names.begin(), names.end(), name) == names.end()) {
+        names.push_back(name);
+        VizWritePresetNames(names);
+    }
+    return true;
+}
+
+static void VizDeleteStylePreset(const std::wstring& name) {
+    std::vector<std::wstring> names = VizStylePresetNames();
+    names.erase(std::remove(names.begin(), names.end(), name), names.end());
+    VizWritePresetNames(names);
+    Wh_SetStringValue((L"stylePreset:" + name).c_str(), L"");
+}
+
+// Lays a saved look over the current settings, as quick settings.
+bool VizApplyStylePreset(const std::wstring& name) {
+    std::wstring body = VizReadValue(L"stylePreset:" + name);
+    if (body.empty()) return false;
+    size_t pos = 0;
+    while (pos < body.size()) {
+        size_t nl = body.find(L'\n', pos);
+        if (nl == std::wstring::npos) nl = body.size();
+        std::wstring line = body.substr(pos, nl - pos);
+        size_t eq = line.find(L'=');
+        if (eq != std::wstring::npos && eq > 0) {
+            std::wstring k = line.substr(0, eq);
+            for (const wchar_t* lk : kLookKeys)
+                if (k == lk) VizSetMenuOverride(k, line.substr(eq + 1));
+        }
+        pos = nl + 1;
+    }
+    return true;
+}
+
+// ---- The editor window ----
+namespace {
+enum : int {
+    kIdPreset = 100, kIdLoad, kIdSave, kIdDelete, kIdShape, kIdColorMode, kIdColor, kIdGrad1, kIdGrad2,
+    kIdPeak, kIdBeat, kIdSliderBase = 200,  // + slider index; value labels at + 100
+};
+constexpr UINT_PTR kApplyTimer = 1;
+
+struct EditorSlider {
+    const wchar_t* key;
+    const wchar_t* label;
+    int lo, hi;
+    int scale;  // slider steps per unit: 10 moves in tenths of a pixel
+};
+const EditorSlider kSliders[] = {
+    {L"barWidth", L"Bar width", 1, 40, 10},       {L"barGap", L"Bar gap", 0, 30, 10},
+    {L"barMaxSize", L"Height", 10, 400, 1},       {L"barRadius", L"Corner radius", 0, 20, 10},
+    {L"reflection", L"Reflection", 0, 100, 1},    {L"fxGlow", L"Glow", 0, 100, 1},
+    {L"fxGlowRadius", L"Glow radius", 1, 32, 10}, {L"fxBloom", L"Bloom", 0, 100, 1},
+    {L"fxBloomRadius", L"Bloom radius", 4, 64, 1},
+};
+HFONT s_editorFont = nullptr;
+COLORREF s_customColors[16] = {};
+
+// Settings changed from the editor: stored at once, applied at most every
+// 80 ms while a slider is dragged (a full settings apply per mouse move
+// would be wasted work), and at once on release.
+void EditorApplySoon(HWND hWnd) { SetTimer(hWnd, kApplyTimer, 80, nullptr); }
+void EditorApplyNow(HWND hWnd) {
+    KillTimer(hWnd, kApplyTimer);
+    ApplySettingsChanged();
+}
+
+void EditorFillPresets(HWND hWnd, const std::wstring& select) {
+    HWND cb = GetDlgItem(hWnd, kIdPreset);
+    SendMessageW(cb, CB_RESETCONTENT, 0, 0);
+    for (const auto& n : VizStylePresetNames()) SendMessageW(cb, CB_ADDSTRING, 0, (LPARAM)n.c_str());
+    SetWindowTextW(cb, select.c_str());
+}
+
+// Puts the current effective values into every control.
+void EditorSync(HWND hWnd) {
+    auto selectValue = [&](int id, const VizMenuOption* opts, size_t n, const std::wstring& v) {
+        for (size_t i = 0; i < n; i++)
+            if (v == opts[i].value) SendDlgItemMessageW(hWnd, id, CB_SETCURSEL, i, 0);
+    };
+    selectValue(kIdShape, kShapes, ARRAYSIZE(kShapes), VizLookValue(L"shape"));
+    selectValue(kIdColorMode, kColorModes, ARRAYSIZE(kColorModes), VizLookValue(L"colorMode"));
+    CheckDlgButton(hWnd, kIdPeak, g_settings.peakHoldEnabled ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hWnd, kIdBeat, g_settings.beatFlashEnabled ? BST_CHECKED : BST_UNCHECKED);
+    for (int i = 0; i < (int)ARRAYSIZE(kSliders); i++) {
+        std::wstring v = VizLookValue(kSliders[i].key);
+        SendDlgItemMessageW(hWnd, kIdSliderBase + i, TBM_SETPOS, TRUE, lroundf((float)_wtof(v.c_str()) * kSliders[i].scale));
+        SetDlgItemTextW(hWnd, kIdSliderBase + 100 + i, v.c_str());
+    }
+}
+
+void EditorPickColor(HWND hWnd, const wchar_t* key) {
+    BYTE a = 255, r = 255, g = 255, b = 255;
+    ParseColorHex(VizLookValue(key).c_str(), &a, &r, &g, &b);
+    CHOOSECOLORW cc = {sizeof(cc)};
+    cc.hwndOwner = hWnd;
+    cc.rgbResult = RGB(r, g, b);
+    cc.lpCustColors = s_customColors;
+    cc.Flags = CC_RGBINIT | CC_FULLOPEN;
+    if (!ChooseColorW(&cc)) return;
+    VizSetMenuOverride(key, VizHexColor(a, GetRValue(cc.rgbResult), GetGValue(cc.rgbResult), GetBValue(cc.rgbResult)));
+    EditorApplyNow(hWnd);
+}
+
+void EditorBuild(HWND hWnd) {
+    const UINT dpi = GetDpiForWindow(hWnd);
+    auto px = [&](int v) { return MulDiv(v, dpi ? dpi : 96, 96); };
+    NONCLIENTMETRICSW ncm = {sizeof(ncm)};
+    if (!s_editorFont && SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0)) {
+        ncm.lfMessageFont.lfHeight = -px(12);
+        s_editorFont = CreateFontIndirectW(&ncm.lfMessageFont);
+    }
+    HINSTANCE inst = GetCurrentModuleHandle();
+    int y = px(12);
+    const int L = px(12), labelW = px(96), ctlX = L + labelW, ctlW = px(260), rowH = px(30);
+    auto add = [&](const wchar_t* cls, const wchar_t* text, DWORD style, int x, int yy, int w, int h, int id) {
+        HWND c = CreateWindowExW(0, cls, text, WS_CHILD | WS_VISIBLE | style, x, yy, w, h, hWnd,
+                                 (HMENU)(INT_PTR)id, inst, nullptr);
+        if (c && s_editorFont) SendMessageW(c, WM_SETFONT, (WPARAM)s_editorFont, FALSE);
+        return c;
+    };
+    auto label = [&](const wchar_t* text) { add(L"STATIC", text, SS_LEFT, L, y + px(5), labelW, px(20), -1); };
+
+    label(L"Saved style");
+    add(L"COMBOBOX", L"", CBS_DROPDOWN | CBS_AUTOHSCROLL | WS_VSCROLL | WS_TABSTOP, ctlX, y, px(118), px(200), kIdPreset);
+    add(L"BUTTON", L"Load", BS_PUSHBUTTON | WS_TABSTOP, ctlX + px(122), y, px(44), px(24), kIdLoad);
+    add(L"BUTTON", L"Save", BS_PUSHBUTTON | WS_TABSTOP, ctlX + px(170), y, px(44), px(24), kIdSave);
+    add(L"BUTTON", L"Delete", BS_PUSHBUTTON | WS_TABSTOP, ctlX + px(218), y, px(50), px(24), kIdDelete);
+    y += rowH + px(6);
+    label(L"Base style");
+    HWND shape = add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, ctlX, y, ctlW, px(320), kIdShape);
+    for (const auto& o : kShapes) SendMessageW(shape, CB_ADDSTRING, 0, (LPARAM)o.label);
+    y += rowH;
+    label(L"Color mode");
+    HWND cm = add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, ctlX, y, ctlW, px(320), kIdColorMode);
+    for (const auto& o : kColorModes) SendMessageW(cm, CB_ADDSTRING, 0, (LPARAM)o.label);
+    y += rowH;
+    label(L"Colors");
+    add(L"BUTTON", L"Color", BS_PUSHBUTTON | WS_TABSTOP, ctlX, y, px(80), px(24), kIdColor);
+    add(L"BUTTON", L"Gradient start", BS_PUSHBUTTON | WS_TABSTOP, ctlX + px(86), y, px(90), px(24), kIdGrad1);
+    add(L"BUTTON", L"Gradient end", BS_PUSHBUTTON | WS_TABSTOP, ctlX + px(182), y, px(78), px(24), kIdGrad2);
+    y += rowH;
+    add(L"BUTTON", L"Peak caps", BS_AUTOCHECKBOX | WS_TABSTOP, ctlX, y, px(110), px(22), kIdPeak);
+    add(L"BUTTON", L"Beat flash", BS_AUTOCHECKBOX | WS_TABSTOP, ctlX + px(120), y, px(110), px(22), kIdBeat);
+    y += rowH;
+    for (int i = 0; i < (int)ARRAYSIZE(kSliders); i++) {
+        label(kSliders[i].label);
+        HWND tb = add(TRACKBAR_CLASSW, L"", TBS_HORZ | TBS_NOTICKS | WS_TABSTOP, ctlX - px(4), y, ctlW - px(36), px(26),
+                      kIdSliderBase + i);
+        SendMessageW(tb, TBM_SETRANGE, FALSE, MAKELPARAM(kSliders[i].lo * kSliders[i].scale, kSliders[i].hi * kSliders[i].scale));
+        add(L"STATIC", L"", SS_RIGHT, ctlX + ctlW - px(36), y + px(5), px(36), px(20), kIdSliderBase + 100 + i);
+        y += px(28);
+    }
+    y += px(4);
+    add(L"STATIC",
+        L"Changes apply at once. Reset Quick Settings in the right-click menu returns to the settings page. "
+        L"Reflection, Glow and Bloom need the Direct3D 11 renderer.",
+        SS_LEFT, L, y, labelW + ctlW, px(48), -1);
+    y += px(56);
+    RECT rc = {0, 0, labelW + ctlW + L * 2, y};
+    AdjustWindowRectExForDpi(&rc, GetWindowLongW(hWnd, GWL_STYLE), FALSE, GetWindowLongW(hWnd, GWL_EXSTYLE), dpi);
+    SetWindowPos(hWnd, nullptr, 0, 0, rc.right - rc.left, rc.bottom - rc.top, SWP_NOMOVE | SWP_NOZORDER);
+    EditorFillPresets(hWnd, L"");
+    EditorSync(hWnd);
+}
+
+LRESULT CALLBACK StyleEditorProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+        case WM_CREATE:
+            EditorBuild(hWnd);
+            return 0;
+        case WM_HSCROLL: {
+            HWND tb = (HWND)lParam;
+            int i = GetDlgCtrlID(tb) - kIdSliderBase;
+            if (i < 0 || i >= (int)ARRAYSIZE(kSliders)) break;
+            int v = (int)SendMessageW(tb, TBM_GETPOS, 0, 0);
+            std::wstring text = VizNumText((float)v / kSliders[i].scale);
+            SetDlgItemTextW(hWnd, kIdSliderBase + 100 + i, text.c_str());
+            VizSetMenuOverride(kSliders[i].key, text);
+            if (LOWORD(wParam) == TB_THUMBTRACK) EditorApplySoon(hWnd);
+            else EditorApplyNow(hWnd);
+            return 0;
+        }
+        case WM_TIMER:
+            if (wParam == kApplyTimer) EditorApplyNow(hWnd);
+            return 0;
+        case WM_COMMAND: {
+            int id = LOWORD(wParam), code = HIWORD(wParam);
+            if ((id == kIdShape || id == kIdColorMode) && code == CBN_SELCHANGE) {
+                int sel = (int)SendDlgItemMessageW(hWnd, id, CB_GETCURSEL, 0, 0);
+                const VizMenuOption* opts = id == kIdShape ? kShapes : kColorModes;
+                size_t n = id == kIdShape ? ARRAYSIZE(kShapes) : ARRAYSIZE(kColorModes);
+                if (sel >= 0 && (size_t)sel < n) {
+                    VizSetMenuOverride(id == kIdShape ? L"shape" : L"colorMode", opts[sel].value);
+                    EditorApplyNow(hWnd);
+                }
+            } else if ((id == kIdPeak || id == kIdBeat) && code == BN_CLICKED) {
+                VizSetMenuOverride(id == kIdPeak ? L"peakHold" : L"beatFlash",
+                                   IsDlgButtonChecked(hWnd, id) == BST_CHECKED ? L"1" : L"0");
+                EditorApplyNow(hWnd);
+            } else if (id == kIdColor || id == kIdGrad1 || id == kIdGrad2) {
+                EditorPickColor(hWnd, id == kIdColor ? L"color" : id == kIdGrad1 ? L"grad1" : L"grad2");
+            } else if (id == kIdLoad || id == kIdSave || id == kIdDelete) {
+                WCHAR name[64] = {};
+                GetDlgItemTextW(hWnd, kIdPreset, name, ARRAYSIZE(name));
+                std::wstring n = VizCleanPresetName(name);
+                if (n.empty()) {
+                    MessageBeep(MB_ICONWARNING);
+                    return 0;
+                }
+                if (id == kIdSave) {
+                    VizSaveStylePreset(n);
+                    EditorFillPresets(hWnd, n);
+                } else if (id == kIdDelete) {
+                    VizDeleteStylePreset(n);
+                    EditorFillPresets(hWnd, L"");
+                } else if (VizApplyStylePreset(n)) {
+                    EditorApplyNow(hWnd);
+                    EditorSync(hWnd);
+                }
+            }
+            return 0;
+        }
+        case WM_CLOSE:
+            DestroyWindow(hWnd);
+            return 0;
+        case WM_DESTROY:
+            KillTimer(hWnd, kApplyTimer);
+            g_styleEditorWnd = nullptr;
+            return 0;
+    }
+    return DefWindowProcW(hWnd, msg, wParam, lParam);
+}
+}  // namespace
+
+// Opens the editor near the visualizer, or brings it forward if it is open.
+// Runs on the message window's thread, whose loop then serves it.
+void VizOpenStyleEditor() {
+    if (g_styleEditorWnd) {
+        SetForegroundWindow(g_styleEditorWnd);
+        return;
+    }
+    INITCOMMONCONTROLSEX icc = {sizeof(icc), ICC_BAR_CLASSES};
+    InitCommonControlsEx(&icc);
+    if (!g_styleEditorClassRegistered) {
+        WNDCLASSEXW wc = {sizeof(wc)};
+        wc.lpfnWndProc = StyleEditorProc;
+        wc.hInstance = GetCurrentModuleHandle();
+        wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+        wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+        wc.lpszClassName = kStyleEditorClass;
+        if (!RegisterClassExW(&wc)) return;
+        g_styleEditorClassRegistered = true;
+    }
+    POINT at = {CW_USEDEFAULT, CW_USEDEFAULT};
+    if (g_drawRectValid.load(std::memory_order_relaxed)) {
+        at.x = g_drawRectL.load(std::memory_order_relaxed);
+        at.y = std::max<LONG>(0, g_drawRectT.load(std::memory_order_relaxed) - 600);
+    }
+    g_styleEditorWnd = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, kStyleEditorClass, L"Tourne'Table Style Editor",
+                                       WS_CAPTION | WS_SYSMENU | WS_POPUP, at.x, at.y, 400, 600, nullptr, nullptr,
+                                       GetCurrentModuleHandle(), nullptr);
+    if (!g_styleEditorWnd) return;
+    ShowWindow(g_styleEditorWnd, SW_SHOW);
+    SetForegroundWindow(g_styleEditorWnd);
+}
+
+void UnregisterStyleEditorClass() {
+    if (s_editorFont) {
+        DeleteObject(s_editorFont);
+        s_editorFont = nullptr;
+    }
+    if (g_styleEditorClassRegistered) {
+        UnregisterClassW(kStyleEditorClass, GetCurrentModuleHandle());
+        g_styleEditorClassRegistered = false;
+    }
 }
 
 LRESULT CALLBACK MessageWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
@@ -14695,14 +18200,17 @@ LRESULT CALLBACK MessageWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                         // Still worth re-asserting even with Hide When Covered
                         // on -- that only accounts for the times we hid it
                         // ourselves, not for another app taking topmost.
-                        if (!g_mediaHiddenByCover &&
+                        if (!g_mediaHiddenByCover && !g_menuOpen.load(std::memory_order_acquire) &&
                             (!IsWindowVisible(g_mediaWnd) ||
-                             !(GetWindowLongPtr(g_mediaWnd, GWL_EXSTYLE) & WS_EX_TOPMOST))) {
+                             (g_settings.mediaOnTop &&
+                              !(GetWindowLongPtr(g_mediaWnd, GWL_EXSTYLE) & WS_EX_TOPMOST)))) {
                             Wh_Log(L"[Media] window not visible/topmost, re-asserting");
                             RepositionAndRepaintMediaControls();
                         }
                     }
                 }
+
+                VizDockRefresh();
 
                 bool shouldPause = g_userPaused.load(std::memory_order_relaxed);
 
@@ -14732,6 +18240,7 @@ LRESULT CALLBACK MessageWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             return 0;
 
         case WM_DESTROY:
+            VizDockStop();
             g_messageWnd = nullptr;
             return 0;
 
@@ -14869,17 +18378,33 @@ void LoadSettings() {
     g_settings.showSettingsErrors = Wh_GetIntSetting(L"validation.showErrors") != 0;
 
     PCWSTR shape = Wh_GetStringSetting(L"appearance.shape");
-    g_settings.shape = (wcscmp(shape, L"goniometer") == 0)   ? VizShape::Goniometer
-                       : (wcscmp(shape, L"mountain") == 0)   ? VizShape::Mountain
-                       : (wcscmp(shape, L"mirror") == 0)     ? VizShape::Mirror
-                       : (wcscmp(shape, L"wave") == 0)       ? VizShape::Wave
-                       : (wcscmp(shape, L"breathe") == 0)    ? VizShape::Breathe
-                       : (wcscmp(shape, L"dots") == 0)       ? VizShape::Dots
-                       : (wcscmp(shape, L"radial") == 0)     ? VizShape::Radial
-                       : (wcscmp(shape, L"oscilloscope") == 0) ? VizShape::Oscilloscope
-                       : (wcscmp(shape, L"terminal") == 0)   ? VizShape::Terminal
-                                                               : VizShape::Stereo;
+    VizParseShape(shape, &g_settings.shape, &g_settings.style);
     Wh_FreeStringSetting(shape);
+    g_settings.reflection = std::clamp(Wh_GetIntSetting(L"appearance.reflection"), 0, 100);
+    g_settings.fxGlow = std::clamp(Wh_GetIntSetting(L"appearance.fxGlow"), 0, 100);
+    g_settings.fxGlowRadius = ReadSizeSetting(L"appearance.fxGlowRadius", 0.5f, 32.f, 6.f);
+    g_settings.fxBloom = std::clamp(Wh_GetIntSetting(L"appearance.fxBloom"), 0, 100);
+    g_settings.fxBloomRadius = ReadSizeSetting(L"appearance.fxBloomRadius", 4.f, 64.f, 16.f);
+    g_settings.fxOutlineWidth = ReadNumberSetting(L"appearance.fxOutlineWidth", L"Appearance", L"Outline Width", 0.f, 0.f, 16.f);
+    {
+        BYTE dummy = 0;
+        ReadColorSetting(L"appearance.fxOutlineColor", L"Appearance", L"Outline Color", 0xB0, 255, 255, 255,
+                         &g_settings.fxOutlineA, &g_settings.fxOutlineR, &g_settings.fxOutlineG, &g_settings.fxOutlineB);
+        ReadColorSetting(L"appearance.fxShadowColor", L"Appearance", L"Shadow Color", 255, 0, 0, 0,
+                         &dummy, &g_settings.fxShadowR, &g_settings.fxShadowG, &g_settings.fxShadowB);
+    }
+    g_settings.fxShadow = std::clamp(Wh_GetIntSetting(L"appearance.fxShadow"), 0, 100);
+    g_settings.fxShadowX = ReadNumberSetting(L"appearance.fxShadowX", L"Appearance", L"Shadow Offset X", 2.f, -32.f, 32.f);
+    g_settings.fxShadowY = ReadNumberSetting(L"appearance.fxShadowY", L"Appearance", L"Shadow Offset Y", 3.f, -32.f, 32.f);
+    g_settings.fxShadowSoft = ReadNumberSetting(L"appearance.fxShadowSoftness", L"Appearance", L"Shadow Softness", 4.f, 0.f, 32.f);
+    g_settings.barHollow = Wh_GetIntSetting(L"appearance.barHollow") != 0;
+    g_settings.barHollowWidth = ReadSizeSetting(L"appearance.barHollowWidth", 0.25f, 16.f, 1.5f);
+    g_settings.barDash = ReadSizeSetting(L"appearance.barDash", 0.f, 200.f, 0.f);
+    g_settings.barDashGap = ReadSizeSetting(L"appearance.barDashGap", 0.f, 200.f, 2.f);
+    g_settings.barTilt = ReadSizeSetting(L"appearance.barTilt", -60.f, 60.f, 0.f);
+    g_settings.barMirrorGap = ReadSizeSetting(L"appearance.barMirrorGap", 0.f, 400.f, 0.f);
+    g_settings.afterimage = std::clamp(Wh_GetIntSetting(L"appearance.afterimage"), 0, 100);
+    g_settings.afterimageSeconds = ReadSizeSetting(L"appearance.afterimageLength", 0.1f, 10.f, 1.2f);
 
     PCWSTR orientation = Wh_GetStringSetting(L"appearance.orientation");
     g_settings.orientation =
@@ -14887,10 +18412,10 @@ void LoadSettings() {
     Wh_FreeStringSetting(orientation);
 
     g_settings.barCount = std::clamp(Wh_GetIntSetting(L"appearance.barCount"), 1, VIZ_BARS_MAX);
-    g_settings.barWidth = std::max(1, Wh_GetIntSetting(L"appearance.barWidth"));
-    g_settings.barGap = std::max(0, Wh_GetIntSetting(L"appearance.barGap"));
-    g_settings.barMaxSize = std::max(2, Wh_GetIntSetting(L"appearance.barMaxSize"));
-    g_settings.barIdleSize = std::max(0, Wh_GetIntSetting(L"appearance.barIdleSize"));
+    g_settings.barWidth = ReadSizeSetting(L"appearance.barWidth", 0.1f, 400.f, 6.f);
+    g_settings.barGap = ReadSizeSetting(L"appearance.barGap", 0.f, 400.f, 4.f);
+    g_settings.barMaxSize = ReadSizeSetting(L"appearance.barMaxSize", 2.f, 4000.f, 140.f);
+    g_settings.barIdleSize = ReadSizeSetting(L"appearance.barIdleSize", 0.f, 400.f, 4.f);
 
     {
         float v[4];
@@ -14975,8 +18500,8 @@ void LoadSettings() {
                                                                    : VizKeyMoveKeys::Both;
     Wh_FreeStringSetting(keyMoveKeys);
 
-    g_settings.keyMoveStep = std::clamp(Wh_GetIntSetting(L"interaction.keyMoveStep"), 1, 500);
-    g_settings.keyMoveFastStep = std::clamp(Wh_GetIntSetting(L"interaction.keyMoveFastStep"), 1, 500);
+    g_settings.keyMoveStep = ReadSizeSetting(L"interaction.keyMoveStep", 0.01f, 500.f, 1.f);
+    g_settings.keyMoveFastStep = ReadSizeSetting(L"interaction.keyMoveFastStep", 0.01f, 500.f, 10.f);
 
     PCWSTR keyMoveFastKey = Wh_GetStringSetting(L"interaction.keyMoveFastKey");
     g_settings.keyMoveFastKey = (wcscmp(keyMoveFastKey, L"ctrl") == 0)  ? (unsigned)VIZ_MOD_CTRL
@@ -15048,6 +18573,32 @@ void LoadSettings() {
     }
 
     g_settings.dragEnabled = Wh_GetIntSetting(L"interaction.dragEnabled") != 0;
+    g_settings.splitEnabled = Wh_GetIntSetting(L"position.split") != 0;
+    g_settings.splitAt = std::clamp((float)Wh_GetIntSetting(L"position.splitAt"), 1.f, 99.f);
+    g_settings.splitGap = std::clamp((float)Wh_GetIntSetting(L"position.splitGap"), -8000.f, 8000.f);
+    g_settings.splitShift = std::clamp((float)Wh_GetIntSetting(L"position.splitShift"), -8000.f, 8000.f);
+    {
+        PCWSTR app = Wh_GetStringSetting(L"position.dockApp");
+        std::wstring a = app ? app : L"";
+        Wh_FreeStringSetting(app);
+        while (!a.empty() && iswspace(a.back())) a.pop_back();
+        size_t b = 0;
+        while (b < a.size() && iswspace(a[b])) b++;
+        a = a.substr(b);
+        for (auto& ch : a) ch = (WCHAR)towlower(ch);
+        if (a.size() > 4 && a.compare(a.size() - 4, 4, L".exe") == 0) a.resize(a.size() - 4);
+        g_settings.dockApp = a;
+        PCWSTR side = Wh_GetStringSetting(L"position.dockSide");
+        g_settings.dockSide = !wcscmp(side, L"above") ? 1 : !wcscmp(side, L"left") ? 2 : !wcscmp(side, L"right") ? 3 : 0;
+        Wh_FreeStringSetting(side);
+        PCWSTR align = Wh_GetStringSetting(L"position.dockAlign");
+        g_settings.dockAlign = !wcscmp(align, L"start") ? 0 : !wcscmp(align, L"end") ? 2 : 1;
+        Wh_FreeStringSetting(align);
+        g_settings.dockGap = std::clamp((float)Wh_GetIntSetting(L"position.dockGap"), -400.f, 400.f);
+        g_settings.dockShift = std::clamp((float)Wh_GetIntSetting(L"position.dockShift"), -4000.f, 4000.f);
+    }
+    g_settings.dragSnap = Wh_GetIntSetting(L"interaction.dragSnap") != 0;
+    g_settings.dragSnapDistance = std::clamp((float)Wh_GetIntSetting(L"interaction.dragSnapDistance"), 1.f, 64.f);
 
     PCWSTR dragModifier = Wh_GetStringSetting(L"interaction.dragModifier");
     g_settings.dragModifier = (wcscmp(dragModifier, L"none") == 0)  ? VizDragModifier::None
@@ -15082,10 +18633,10 @@ void LoadSettings() {
         float v[4];
         ReadQuadSetting(L"background.padding", L"Background", L"Padding",
                         L"left, right, top, bottom", 24.0f, true, v);
-        g_settings.bgPaddingL = (int)v[0];
-        g_settings.bgPaddingR = (int)v[1];
-        g_settings.bgPaddingT = (int)v[2];
-        g_settings.bgPaddingB = (int)v[3];
+        g_settings.bgPaddingL = v[0];
+        g_settings.bgPaddingR = v[1];
+        g_settings.bgPaddingT = v[2];
+        g_settings.bgPaddingB = v[3];
     }
 
     {
@@ -15098,7 +18649,7 @@ void LoadSettings() {
         g_settings.bgRadiusBL = v[3];
     }
     g_settings.bgBlur = std::max(0, Wh_GetIntSetting(L"background.blur"));
-    g_settings.bgBorderSize = std::max(0, Wh_GetIntSetting(L"background.borderSize"));
+    g_settings.bgBorderSize = ReadSizeSetting(L"background.borderSize", 0.f, 100.f, 0.f);
 
     ReadColorSetting(L"background.borderColor", L"Background", L"Border Color", 0x40, 255, 255, 255,
                      &g_settings.borderA, &g_settings.borderR, &g_settings.borderG,
@@ -15149,31 +18700,24 @@ void LoadSettings() {
         if (g_messageWnd) KillTimer(g_messageWnd, TIMER_ID_MSG_FONT_RECHECK);
     }
     Wh_FreeStringSetting(nowPlayingFont);
-    g_settings.nowPlayingFontSize = std::max(6, Wh_GetIntSetting(L"appearance.nowPlayingFontSize"));
+    g_settings.nowPlayingFontSize = ReadSizeSetting(L"appearance.nowPlayingFontSize", 6.f, 400.f, 16.f);
     g_settings.nowPlayingDisplaySeconds =
         std::max(0, Wh_GetIntSetting(L"appearance.nowPlayingDisplaySeconds"));
 
     // Clamped rather than free: each pixel of offset widens the render surface
     // by the same amount, so a stray extra zero shouldn't silently cost memory
     // and fill rate for a surface mostly full of nothing.
-    g_settings.nowPlayingOffsetX =
-        std::clamp(Wh_GetIntSetting(L"appearance.nowPlayingOffsetX"), -4000, 4000);
-    g_settings.nowPlayingOffsetY =
-        std::clamp(Wh_GetIntSetting(L"appearance.nowPlayingOffsetY"), -4000, 4000);
-    g_settings.peakFreqOffsetX =
-        std::clamp(Wh_GetIntSetting(L"appearance.peakFreqOffsetX"), -4000, 4000);
-    g_settings.peakFreqOffsetY =
-        std::clamp(Wh_GetIntSetting(L"appearance.peakFreqOffsetY"), -4000, 4000);
+    g_settings.nowPlayingOffsetX = ReadSizeSetting(L"appearance.nowPlayingOffsetX", -4000.f, 4000.f, 0.f);
+    g_settings.nowPlayingOffsetY = ReadSizeSetting(L"appearance.nowPlayingOffsetY", -4000.f, 4000.f, 0.f);
+    g_settings.peakFreqOffsetX = ReadSizeSetting(L"appearance.peakFreqOffsetX", -4000.f, 4000.f, 0.f);
+    g_settings.peakFreqOffsetY = ReadSizeSetting(L"appearance.peakFreqOffsetY", -4000.f, 4000.f, 0.f);
 
     ReadColorSetting(L"appearance.nowPlayingBgColor", L"Appearance", L"Now Playing Background",
                      0, 0, 0, 0,
                      &g_settings.npBgA, &g_settings.npBgR, &g_settings.npBgG, &g_settings.npBgB);
-    g_settings.npBgPadding =
-        std::clamp(Wh_GetIntSetting(L"appearance.nowPlayingBgPadding"), 0, 200);
-    g_settings.npBgCornerRadius =
-        std::clamp(Wh_GetIntSetting(L"appearance.nowPlayingBgCornerRadius"), 0, 200);
-    g_settings.npBgBorderSize =
-        std::clamp(Wh_GetIntSetting(L"appearance.nowPlayingBgBorderSize"), 0, 100);
+    g_settings.npBgPadding = ReadSizeSetting(L"appearance.nowPlayingBgPadding", 0.f, 200.f, 6.f);
+    g_settings.npBgCornerRadius = ReadSizeSetting(L"appearance.nowPlayingBgCornerRadius", 0.f, 200.f, 6.f);
+    g_settings.npBgBorderSize = ReadSizeSetting(L"appearance.nowPlayingBgBorderSize", 0.f, 100.f, 0.f);
     ReadColorSetting(L"appearance.nowPlayingBgBorderColor", L"Appearance",
                      L"Now Playing Background Border Color", 0x40, 255, 255, 255,
                      &g_settings.npBgBorderA, &g_settings.npBgBorderR,
@@ -15182,12 +18726,9 @@ void LoadSettings() {
     ReadColorSetting(L"appearance.peakFreqBgColor", L"Appearance", L"Peak Readout Background",
                      0, 0, 0, 0,
                      &g_settings.pfBgA, &g_settings.pfBgR, &g_settings.pfBgG, &g_settings.pfBgB);
-    g_settings.pfBgPadding =
-        std::clamp(Wh_GetIntSetting(L"appearance.peakFreqBgPadding"), 0, 200);
-    g_settings.pfBgCornerRadius =
-        std::clamp(Wh_GetIntSetting(L"appearance.peakFreqBgCornerRadius"), 0, 200);
-    g_settings.pfBgBorderSize =
-        std::clamp(Wh_GetIntSetting(L"appearance.peakFreqBgBorderSize"), 0, 100);
+    g_settings.pfBgPadding = ReadSizeSetting(L"appearance.peakFreqBgPadding", 0.f, 200.f, 6.f);
+    g_settings.pfBgCornerRadius = ReadSizeSetting(L"appearance.peakFreqBgCornerRadius", 0.f, 200.f, 6.f);
+    g_settings.pfBgBorderSize = ReadSizeSetting(L"appearance.peakFreqBgBorderSize", 0.f, 100.f, 0.f);
     ReadColorSetting(L"appearance.peakFreqBgBorderColor", L"Appearance",
                      L"Peak Readout Background Border Color", 0x40, 255, 255, 255,
                      &g_settings.pfBgBorderA, &g_settings.pfBgBorderR,
@@ -15252,24 +18793,46 @@ void LoadSettings() {
     g_settings.mediaIconNextPath =
         ReadIconPathSetting(L"media_controls.iconNextPath", L"Media Controls", L"Next Icon Path");
 
-    g_settings.mediaIconSize = std::clamp(Wh_GetIntSetting(L"media_controls.iconSize"), 8, 256);
-    g_settings.mediaIconSpacing = std::clamp(Wh_GetIntSetting(L"media_controls.iconSpacing"), 0, 200);
+    g_settings.mediaIconSize = ReadSizeSetting(L"media_controls.iconSize", 8.f, 256.f, 32.f);
+    {
+        PCWSTR layout = Wh_GetStringSetting(L"media_controls.layout");
+        g_settings.mediaCard = layout && wcscmp(layout, L"card") == 0;
+        Wh_FreeStringSetting(layout);
+    }
+    ReadColorSetting(L"media_controls.cardBackground", L"Media Controls", L"Card Background", 158, 10, 10, 13,
+                     &g_settings.cardBgA, &g_settings.cardBgR, &g_settings.cardBgG, &g_settings.cardBgB);
+    ReadColorSetting(L"media_controls.cardBorderColor", L"Media Controls", L"Card Border Color", 0, 255, 255, 255,
+                     &g_settings.cardBorderA, &g_settings.cardBorderR, &g_settings.cardBorderG, &g_settings.cardBorderB);
+    g_settings.cardBorderSize = ReadSizeSetting(L"media_controls.cardBorderSize", 0.f, 20.f, 0.f);
+    g_settings.cardRadius = ReadSizeSetting(L"media_controls.cardCornerRadius", 0.f, 64.f, 12.f);
+    g_settings.cardArtSize = ReadSizeSetting(L"media_controls.cardArtSize", 0.f, 600.f, 0.f);
+    {
+        PCWSTR acc = Wh_GetStringSetting(L"media_controls.cardAccent");
+        g_settings.cardAccentSource = !acc ? 0 : wcscmp(acc, L"custom") == 0 ? 1 : wcscmp(acc, L"album") == 0 ? 2
+                                    : wcscmp(acc, L"windows") == 0 ? 3 : 0;
+        Wh_FreeStringSetting(acc);
+    }
+    ReadColorSetting(L"media_controls.cardAccentColor", L"Media Controls", L"Card Accent Color", 255, 255, 255, 255,
+                     &g_settings.cardAccentA, &g_settings.cardAccentR, &g_settings.cardAccentG, &g_settings.cardAccentB);
+    g_settings.mediaIconSpacing = ReadSizeSetting(L"media_controls.iconSpacing", 0.f, 200.f, 14.f);
 
     ReadColorSetting(L"media_controls.plateColor", L"Media Controls", L"Backing Plate Color",
                      0, 0, 0, 0,
                      &g_settings.mediaPlateA, &g_settings.mediaPlateR,
                      &g_settings.mediaPlateG, &g_settings.mediaPlateB);
-    g_settings.mediaPlateCornerRadius =
-        std::clamp(Wh_GetIntSetting(L"media_controls.plateCornerRadius"), 0, 256);
-    g_settings.mediaPlatePadding =
-        std::clamp(Wh_GetIntSetting(L"media_controls.platePadding"), 0, 200);
-    g_settings.mediaPlateBorderSize =
-        std::clamp(Wh_GetIntSetting(L"media_controls.plateBorderSize"), 0, 100);
+    g_settings.mediaPlateCornerRadius = ReadSizeSetting(L"media_controls.plateCornerRadius", 0.f, 200.f, 8.f);
+    g_settings.mediaPlatePadding = ReadSizeSetting(L"media_controls.platePadding", 0.f, 200.f, 0.f);
+    g_settings.mediaPlateBorderSize = ReadSizeSetting(L"media_controls.plateBorderSize", 0.f, 100.f, 0.f);
     ReadColorSetting(L"media_controls.plateBorderColor", L"Media Controls",
                      L"Backing Plate Border Color", 0x40, 255, 255, 255,
                      &g_settings.mediaPlateBorderA, &g_settings.mediaPlateBorderR,
                      &g_settings.mediaPlateBorderG, &g_settings.mediaPlateBorderB);
     g_settings.mediaHideWhenCovered = Wh_GetIntSetting(L"media_controls.hideWhenCovered") != 0;
+    {
+        PCWSTR z = Wh_GetStringSetting(L"media_controls.stacking");
+        g_settings.mediaOnTop = wcscmp(z, L"normal") != 0;
+        Wh_FreeStringSetting(z);
+    }
     g_settings.mediaCoveredThresholdPercent =
         ReadThresholdPercentSetting(L"media_controls.coveredThresholdPercent", L"Media Controls",
                                     L"Hide When Covered - Threshold", 50);
@@ -15432,13 +18995,34 @@ void LoadSettings() {
         str(L"appearance.textRendering", [](PCWSTR v) { g_settings.textPixel = wcscmp(v, L"pixel") == 0; });
 
         g_settings.progressEnabled = Wh_GetIntSetting(L"progress.enabled") != 0;
+        g_settings.progressSeek = Wh_GetIntSetting(L"progress.clickToSeek") != 0;
+        str(L"progress.seekAppsMode", [](PCWSTR v) { g_settings.progressSeekOnlyListed = wcscmp(v, L"only") == 0; });
+        str(L"progress.seekApps", [](PCWSTR v) {
+            g_settings.progressSeekApps.clear();
+            std::wstring cur;
+            for (const WCHAR* c = v;; c++) {
+                if (!*c || *c == L',' || *c == L';' || *c == L'\n') {
+                    while (!cur.empty() && iswspace(cur.back())) cur.pop_back();
+                    size_t b = 0;
+                    while (b < cur.size() && iswspace(cur[b])) b++;
+                    cur = cur.substr(b);
+                    for (auto& ch : cur) ch = (WCHAR)towlower(ch);
+                    if (cur.size() > 4 && cur.compare(cur.size() - 4, 4, L".exe") == 0) cur.resize(cur.size() - 4);
+                    if (!cur.empty()) g_settings.progressSeekApps.push_back(cur);
+                    cur.clear();
+                    if (!*c) break;
+                } else {
+                    cur += *c;
+                }
+            }
+        });
         str(L"progress.placement", [](PCWSTR v) {
             g_settings.progressPlacement = (wcscmp(v, L"above") == 0)          ? VizProgressPlacement::Above
                                          : (wcscmp(v, L"panel_bottom") == 0)   ? VizProgressPlacement::PanelBottom
                                                                                : VizProgressPlacement::Below;
         });
-        g_settings.progressHeight = std::clamp(Wh_GetIntSetting(L"progress.height"), 1, 40);
-        g_settings.progressGap = std::clamp(Wh_GetIntSetting(L"progress.gap"), 0, 200);
+        g_settings.progressHeight = ReadSizeSetting(L"progress.height", 0.25f, 40.f, 2.f);
+        g_settings.progressGap = ReadSizeSetting(L"progress.gap", 0.f, 200.f, 6.f);
         ReadColorSetting(L"progress.color", L"Track Progress", L"Color", 255, 255, 255, 255, &g_settings.progressA,
                          &g_settings.progressR, &g_settings.progressG, &g_settings.progressB);
         ReadColorSetting(L"progress.trackColor", L"Track Progress", L"Track Color", 0x40, 255, 255, 255,
@@ -15452,8 +19036,8 @@ void LoadSettings() {
                                    : (wcscmp(v, L"panel_bottom_right") == 0)   ? VizMediaAnchor::PanelBottomRight
                                                                                : VizMediaAnchor::Screen;
         });
-        g_settings.mediaAnchorOffsetX = std::clamp(Wh_GetIntSetting(L"media_controls.anchorOffsetX"), -2000, 2000);
-        g_settings.mediaAnchorOffsetY = std::clamp(Wh_GetIntSetting(L"media_controls.anchorOffsetY"), -2000, 2000);
+        g_settings.mediaAnchorOffsetX = ReadSizeSetting(L"media_controls.anchorOffsetX", -2000.f, 2000.f, 8.f);
+        g_settings.mediaAnchorOffsetY = ReadSizeSetting(L"media_controls.anchorOffsetY", -2000.f, 2000.f, 8.f);
         str(L"interaction.contextMenu", [](PCWSTR v) {
             g_settings.contextMenu = (wcscmp(v, L"ctrl_right_click") == 0) ? VizContextMenu::CtrlRightClick
                                    : (wcscmp(v, L"off") == 0)              ? VizContextMenu::Off
@@ -15466,18 +19050,22 @@ void LoadSettings() {
                                                                   : VizTermStyle::Columns;
         });
         str(L"terminal.font", [](PCWSTR v) { g_settings.termFont = *v ? v : L"Consolas"; });
-        g_settings.termFontSize = std::clamp(Wh_GetIntSetting(L"terminal.fontSize"), 6, 96);
+        g_settings.termFontSize = ReadSizeSetting(L"terminal.fontSize", 6.f, 96.f, 14.f);
         g_settings.termRows = std::clamp(Wh_GetIntSetting(L"terminal.rows"), 2, 128);
         g_settings.termMeterColumns = std::clamp(Wh_GetIntSetting(L"terminal.meterColumns"), 20, 200);
         g_settings.termHotThreshold = std::clamp(Wh_GetIntSetting(L"terminal.hotThreshold"), 1, 100);
         g_settings.termScrollRate = std::clamp(Wh_GetIntSetting(L"terminal.scrollRate"), 1, 120);
-        // One printable ASCII character each; the atlas holds 32-126.
+        // Any one character each (2.1): ASCII as itself, anything else as a
+        // custom glyph code. The font has to have it.
+        g_termCustomGlyphs.clear();
         auto glyph = [](PCWSTR key, PCWSTR name, wchar_t def) {
             PCWSTR v = Wh_GetStringSetting(key);
-            wchar_t c = (v && v[0]) ? v[0] : def;
-            if (c < 33 || c > 126) {
+            std::vector<std::wstring> gs = VizTermSplitGlyphs(v ? v : L"");
+            wchar_t c = 0;
+            if (!gs.empty() && gs[0] != L" ") c = VizTermCodeFor(gs[0]);
+            if (!c) {
                 WCHAR d[2] = {def, 0};
-                ReportSettingIssue(L"Terminal", name, v ? v : L"", L"one printable ASCII character", d);
+                ReportSettingIssue(L"Terminal", name, v ? v : L"", L"one character", d);
                 c = def;
             }
             Wh_FreeStringSetting(v);
@@ -15487,8 +19075,8 @@ void LoadSettings() {
         g_settings.termPeakGlyph = glyph(L"terminal.peakGlyph", L"Peak Glyph", L'-');
         str(L"terminal.ramp", [](PCWSTR v) {
             std::wstring r;
-            for (const wchar_t* p = v; *p; p++)
-                if (*p >= 32 && *p < 127) r.push_back(*p);
+            for (const auto& gl : VizTermSplitGlyphs(v))
+                if (wchar_t c = VizTermCodeFor(gl)) r.push_back(c);
             g_settings.termRamp = r.size() >= 2 ? r : L" .:-=+*#%@";
         });
         ReadColorSetting(L"terminal.dimColor", L"Terminal", L"Dim Color", 255, 0x1E, 0x6B, 0x34, &g_settings.termDimA,
@@ -15504,6 +19092,11 @@ void LoadSettings() {
         // Quick settings from the right-click menu sit on top of all of the
         // above (and are cleared from the same menu).
         VizApplyMenuOverrides();
+        if (g_settings.workload == VizWorkload::Gpu && VizStyleNeedsCpuBars()) {
+            ReportSettingWarning(L"Hardware", L"Workload",
+                                 L"Spectrogram, Stereo Field and Particles work from the bar levels on the CPU, "
+                                 L"so with them the analysis runs on the CPU (Hybrid).");
+        }
         if (g_settings.workload == VizWorkload::Gpu && g_settings.shape == VizShape::Terminal) {
             ReportSettingWarning(L"Hardware", L"Workload",
                                  L"The Terminal shape is built on the CPU from the bar levels, so with it the "
@@ -15646,12 +19239,14 @@ void WhTool_ModUninit() {
     StopRenderThread();
 
     if (g_overlayWnd) SendMessage(g_overlayWnd, WM_APP_CLEANUP, 0, 0);
+    if (g_styleEditorWnd) SendMessage(g_styleEditorWnd, WM_CLOSE, 0, 0);
     if (g_messageWnd) SendMessage(g_messageWnd, WM_APP_CLEANUP, 0, 0);
     if (g_mediaWnd) SendMessage(g_mediaWnd, WM_APP_CLEANUP, 0, 0);
 
     UnregisterOverlayWindowClass();
     UnregisterMessageWindowClass();
     UnregisterMediaWindowClass();
+    UnregisterStyleEditorClass();
 
     StopVizCaptureThread();
     // After the engine thread, which hands its NPU engine back on the way out.
@@ -15746,7 +19341,7 @@ void ApplySettingsChanged() {
         ((oldColorMode != VizColorMode::AlbumArt &&
           oldColorMode != VizColorMode::DynamicAlbum) || !g_albumArtColorReady.load()))
         FetchAlbumArtColorAsync();
-    else if (g_settings.nowPlayingEnabled)
+    else if (g_settings.nowPlayingEnabled || VizCardWantsArt())
         FetchAlbumArtColorAsync();
 
     if (!g_lazyInitialized || !g_initSucceeded) return;
