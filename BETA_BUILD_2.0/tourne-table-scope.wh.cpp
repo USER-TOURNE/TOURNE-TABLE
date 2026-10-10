@@ -1256,6 +1256,18 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
     - dockShift: 0
       $name: Dock Shift
       $description: Pixels to slide it along the side from the alignment above
+    - split: false
+      $name: Split Into Two Pieces
+      $description: Cuts the visualizer in two and moves the second piece by the gap and shift below, e.g. to sit either side of the taskbar's centred icons or a monitor bezel. Works with every shape and both renderers and costs next to nothing (Windows moves the piece; nothing is drawn twice). The background panel is cut at the same place. Drag, the right-click menu and Click to Seek answer on the first piece only
+    - splitAt: 50
+      $name: Split Point
+      $description: Percent of the way along where the cut goes. With bars it lands in the gap between two bars
+    - splitGap: 200
+      $name: Split Gap
+      $description: Pixels the second piece moves along the visualizer (right, or down when vertical). Negative moves it back
+    - splitShift: 0
+      $name: Split Shift
+      $description: Pixels the second piece moves across it (down, or right when vertical)
   $name: Position
 - interaction:
     - keyMoveEnabled: true
@@ -1755,6 +1767,9 @@ struct Settings {
     bool pixelSnap = true;
 
     bool dragEnabled = false;
+    bool splitEnabled = false;        // show the visualizer as two pieces
+    float splitAt = 50.f;             // % of the bars in the first piece
+    float splitGap = 0.f, splitShift = 0.f;  // logical px: along, and across
     std::wstring dockApp;             // lower case, without .exe; empty = not docked
     int dockSide = 0;                 // 0 below, 1 above, 2 left, 3 right
     int dockAlign = 1;                // 0 start, 1 centre, 2 end
@@ -1990,6 +2005,19 @@ ComPtr<IDCompositionVisual> g_compositionVisual;
 // (g_compositionVisual) as a child, so the Direct3D 11 renderer can slide its
 // panel surface in underneath it.
 ComPtr<IDCompositionVisual> g_rootVisual;
+// Split into two pieces (2.1): the composition target's real root. It holds
+// g_rootVisual (the first piece, clipped at the cut) and, while splitting, a
+// second container showing the same swap chains again, clipped to the other
+// side and offset. DWM does the moving; nothing is drawn twice.
+ComPtr<IDCompositionVisual> g_splitTop;
+struct VizSplitState {
+    ComPtr<IDCompositionVisual> p2, text2, gfx2;
+    ComPtr<IDCompositionRectangleClip> c1, c2;
+    bool built = false, on = false, gfxIn = false, gClip = false, vert = false;
+    float line = 0.f, dx = 0.f, dy = 0.f, tx = 0.f, ty = 0.f, gx = 0.f, gy = 0.f;
+    IUnknown* textC = nullptr;
+    IUnknown* gfxC = nullptr;
+} g_split;
 ComPtr<ID2D1SolidColorBrush> g_barBrush;
 ComPtr<ID2D1SolidColorBrush> g_barBrush2;
 ComPtr<ID2D1SolidColorBrush> g_backgroundBrush;
@@ -8819,6 +8847,7 @@ void RenderVisualizer();
 namespace ttgfx {
 void ReleaseDevice();
 void ReleaseSurface();
+void SplitSync();
 void OnSettingsChanged();
 void PresentBlank();
 }  // namespace ttgfx
@@ -10462,7 +10491,13 @@ bool CreateSwapChainResources() {
     g_compositionVisual->SetOffsetX(layout.originX);
     g_compositionVisual->SetOffsetY(layout.originY);
 
-    hr = g_compositionTarget->SetRoot(g_rootVisual.Get());
+    hr = g_compositionDevice->CreateVisual(&g_splitTop);
+    if (FAILED(hr)) return false;
+    hr = g_splitTop->AddVisual(g_rootVisual.Get(), FALSE, nullptr);
+    if (FAILED(hr)) return false;
+    g_split = {};
+
+    hr = g_compositionTarget->SetRoot(g_splitTop.Get());
     if (FAILED(hr)) return false;
 
     hr = g_compositionDevice->Commit();
@@ -11459,6 +11494,8 @@ void ReleaseSwapChainResources() {
     g_spriteBatch.Reset();
     g_dc3.Reset();
     g_compositionVisual.Reset();
+    g_split = {};
+    g_splitTop.Reset();
     g_rootVisual.Reset();
     g_compositionTarget.Reset();
     g_compositionDevice.Reset();
@@ -13795,6 +13832,121 @@ void ShowTextSurface(bool show) {
     g.textDetached = !show;
 }
 
+// Split into two pieces: keeps the second piece's copies of the text and panel
+// surfaces in step with the originals, and the cut where the settings put it.
+// Runs every tick but commits only when something changed.
+void SplitSync() {
+    auto& s = g_split;
+    if (!g_compositionDevice || !g_splitTop || !g_rootVisual || !g_compositionVisual) return;
+    bool want = g_settings.splitEnabled && (g_settings.splitGap != 0.f || g_settings.splitShift != 0.f);
+    VizLayout L;
+    if (want && !ComputeVizLayout(&L)) want = false;
+    bool dirty = false;
+    if (!want) {
+        if (s.on) {
+            g_rootVisual->SetClip((IDCompositionClip*)nullptr);
+            g_splitTop->RemoveVisual(s.p2.Get());
+            s.on = false;
+            g_compositionDevice->Commit();
+            VizPerf(kPerfCommits);
+        }
+        return;
+    }
+    if (!s.built) {
+        if (FAILED(g_compositionDevice->CreateVisual(&s.p2)) || FAILED(g_compositionDevice->CreateVisual(&s.text2)) ||
+            FAILED(g_compositionDevice->CreateVisual(&s.gfx2)) ||
+            FAILED(g_compositionDevice->CreateRectangleClip(&s.c1)) ||
+            FAILED(g_compositionDevice->CreateRectangleClip(&s.c2)) ||
+            FAILED(s.p2->AddVisual(s.text2.Get(), FALSE, nullptr)))
+            return;
+        s.gfx2->SetBorderMode(DCOMPOSITION_BORDER_MODE_SOFT);
+        s.p2->SetClip(s.c2.Get());
+        s.built = true;
+        s.line = NAN;
+    }
+    if (!s.on) {
+        if (FAILED(g_splitTop->AddVisual(s.p2.Get(), TRUE, g_rootVisual.Get()))) return;
+        g_rootVisual->SetClip(s.c1.Get());
+        s.on = true;
+        dirty = true;
+    }
+
+    // Where the cut goes, in overlay pixels. Bar shapes cut in the middle of
+    // the gap between two bars; the rest at that fraction of the box.
+    const VizShape sh = g_settings.shape;
+    const bool vert = g_settings.orientation == VizOrientation::Vertical && sh != VizShape::Radial &&
+                      sh != VizShape::Goniometer && sh != VizShape::Terminal;
+    const bool barish = sh != VizShape::Radial && sh != VizShape::Goniometer && sh != VizShape::Terminal &&
+                        sh != VizShape::Oscilloscope;
+    float start = vert ? g_visualOffsetY + L.blockY : g_visualOffsetX + L.blockX;
+    float len = vert ? L.totalHeight : L.totalWidth;
+    float line = start + len * g_settings.splitAt / 100.f;
+    if (barish) {
+        int n = VizEffectiveBarCount();
+        float bw = std::max(1.f, VizPx(std::max(1.f, g_settings.barWidth)));
+        float gap = VizPx(std::max(0.f, g_settings.barGap));
+        if (n >= 2) {
+            int k = std::clamp((int)lroundf(n * g_settings.splitAt / 100.f), 1, n - 1);
+            line = start + k * (bw + gap) - gap * 0.5f;
+        }
+    }
+    float along = g_settings.splitGap * g_dpiScale, across = g_settings.splitShift * g_dpiScale;
+    float dx = vert ? across : along, dy = vert ? along : across;
+    if (line != s.line || dx != s.dx || dy != s.dy || vert != s.vert) {
+        const float big = 1e6f;
+        s.c1->SetLeft(-big); s.c1->SetTop(-big); s.c1->SetRight(big); s.c1->SetBottom(big);
+        s.c2->SetLeft(-big); s.c2->SetTop(-big); s.c2->SetRight(big); s.c2->SetBottom(big);
+        if (vert) { s.c1->SetBottom(line); s.c2->SetTop(line); }
+        else      { s.c1->SetRight(line);  s.c2->SetLeft(line); }
+        s.p2->SetOffsetX(dx);
+        s.p2->SetOffsetY(dy);
+        s.line = line; s.dx = dx; s.dy = dy; s.vert = vert;
+        dirty = true;
+    }
+
+    // The text surface again (the whole scene, on the Direct2D renderer).
+    IUnknown* tc = g.textDetached ? nullptr : (IUnknown*)g_swapChain.Get();
+    if (tc != s.textC) { s.text2->SetContent(tc); s.textC = tc; dirty = true; }
+    if (g_visualOffsetX != s.tx || g_visualOffsetY != s.ty) {
+        s.text2->SetOffsetX(g_visualOffsetX);
+        s.text2->SetOffsetY(g_visualOffsetY);
+        s.tx = g_visualOffsetX; s.ty = g_visualOffsetY;
+        dirty = true;
+    }
+
+    // The Direct3D 11 panel surface again, sharing its clip object.
+    bool gin = g.visualAttached && g.sc;
+    if (gin) {
+        if (!s.gfxIn) {
+            if (FAILED(s.p2->AddVisual(s.gfx2.Get(), FALSE, s.text2.Get()))) return;
+            s.gfxIn = true;
+            dirty = true;
+        }
+        if ((IUnknown*)g.sc.Get() != s.gfxC) { s.gfx2->SetContent(g.sc.Get()); s.gfxC = g.sc.Get(); dirty = true; }
+        if (g.dcOffX != s.gx || g.dcOffY != s.gy) {
+            s.gfx2->SetOffsetX(g.dcOffX);
+            s.gfx2->SetOffsetY(g.dcOffY);
+            s.gx = g.dcOffX; s.gy = g.dcOffY;
+            dirty = true;
+        }
+        if (g.dcClipOn != s.gClip) {
+            s.gfx2->SetClip(g.dcClipOn ? (IDCompositionClip*)g.clip.Get() : nullptr);
+            s.gClip = g.dcClipOn;
+            dirty = true;
+        }
+    } else if (s.gfxIn) {
+        s.p2->RemoveVisual(s.gfx2.Get());
+        s.gfx2->SetContent(nullptr);
+        s.gfxC = nullptr;
+        s.gfxIn = false;
+        dirty = true;
+    }
+    if (dirty) {
+        g_compositionDevice->Commit();
+        VizPerf(kPerfCommits);
+    }
+}
+
 // The panel surface and its visual. Called before the composition device goes.
 void ReleaseSurface() {
     ShowTextSurface(true);  // the Direct2D path draws everything on the text surface
@@ -15730,6 +15882,7 @@ void RenderVisualizer() {
     // the box and its background visibly fell out of sync until the next
     // tick caught up. Cheap to call defensively when nothing has moved.
     UpdateSwapChainForLayout();
+    ttgfx::SplitSync();
 
     // Smooth Mode: how late is this frame, relative to the Target FPS interval
     // the motion constants were tuned against? Measured against the user's
@@ -18336,6 +18489,10 @@ void LoadSettings() {
     }
 
     g_settings.dragEnabled = Wh_GetIntSetting(L"interaction.dragEnabled") != 0;
+    g_settings.splitEnabled = Wh_GetIntSetting(L"position.split") != 0;
+    g_settings.splitAt = std::clamp((float)Wh_GetIntSetting(L"position.splitAt"), 1.f, 99.f);
+    g_settings.splitGap = std::clamp((float)Wh_GetIntSetting(L"position.splitGap"), -8000.f, 8000.f);
+    g_settings.splitShift = std::clamp((float)Wh_GetIntSetting(L"position.splitShift"), -8000.f, 8000.f);
     {
         PCWSTR app = Wh_GetStringSetting(L"position.dockApp");
         std::wstring a = app ? app : L"";
