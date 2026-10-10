@@ -69,6 +69,93 @@ bool VizReflectionActive() {
 
 float VizReflectionDepth(float maxSize) { return maxSize * std::clamp(g_settings.reflection, 0, 100) / 100.f; }
 
+// ---- Scale numbers -----------------------------------------------------------------------
+// The Spectrogram legend's quarter ticks and the VU faces carry numbers. They
+// are Direct2D text: on the Direct3D renderer they go on the text surface,
+// which only redraws when something on it changes, so a still scale costs
+// nothing per frame.
+namespace {
+ComPtr<IDWriteTextFormat> s_scaleFmt;
+float s_scaleFmtPx = 0.f;
+
+IDWriteTextFormat* VizScaleFormat(float px) {
+    if (!g_dwriteFactory) return nullptr;
+    if (!s_scaleFmt || fabsf(s_scaleFmtPx - px) > 0.01f) {
+        s_scaleFmt.Reset();
+        if (FAILED(g_dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                                                     DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, px, L"",
+                                                     &s_scaleFmt)))
+            return nullptr;
+        s_scaleFmt->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+        s_scaleFmt->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        s_scaleFmtPx = px;
+    }
+    return s_scaleFmt.Get();
+}
+}  // namespace
+
+float VizScaleLabelPx(float maxSize) { return std::clamp(maxSize * 0.07f, 8.f * g_dpiScale, 13.f * g_dpiScale); }
+
+bool VizStyleHasScale() { return g_settings.style == VizStyle::Spectrogram || g_settings.style == VizStyle::Vu; }
+
+// `thick` is the bars' span across the time axis (Spectrogram only).
+void VizDrawStyleScale(float blockX, float blockY, float maxSize, float thick, bool horizontal) {
+    if (!g_dc || !g_barBrush || !VizStyleHasScale()) return;
+    ID2D1SolidColorBrush* b = g_barBrush.Get();
+    WCHAR s[24];
+    if (g_settings.style == VizStyle::Spectrogram) {
+        float px = VizScaleLabelPx(maxSize);
+        IDWriteTextFormat* fmt = VizScaleFormat(px);
+        if (!fmt) return;
+        fmt->SetTextAlignment(horizontal ? DWRITE_TEXT_ALIGNMENT_LEADING : DWRITE_TEXT_ALIGNMENT_CENTER);
+        b->SetColor(D2D1::ColorF(0.92f, 0.92f, 0.92f, 0.85f));
+        // Precision maps Display Floor..Ceiling straight onto the bar height,
+        // so the ticks are dB; Classic has no fixed dB scale, so percent.
+        bool db = g_settings.engine == VizEngineKind::Precision;
+        float side = 3.f * g_dpiScale + 6.f * g_dpiScale;
+        for (int k = 0; k <= 4; k++) {
+            float q = k / 4.f;
+            if (db)
+                swprintf_s(s, k == 4 ? L"%d dB" : L"%d",
+                           (int)lroundf(g_settings.dbFloor + q * (g_settings.dbCeiling - g_settings.dbFloor)));
+            else
+                swprintf_s(s, L"%d%%", k * 25);
+            D2D1_RECT_F r;
+            if (horizontal) {
+                float y = std::clamp(blockY + maxSize - q * maxSize, blockY + px * 0.6f, blockY + maxSize - px * 0.6f);
+                float x = blockX + thick + side + 3.f * g_dpiScale;
+                r = D2D1::RectF(x, y - px, x + px * 4.f, y + px);
+            } else {
+                float x = std::clamp(blockX + q * maxSize, blockX + px * 1.2f, blockX + maxSize - px * 1.2f);
+                float y = blockY + thick + side + 2.f * g_dpiScale;
+                r = D2D1::RectF(x - px * 2.5f, y, x + px * 2.5f, y + px * 1.3f);
+            }
+            g_dc->DrawText(s, (UINT32)wcslen(s), fmt, r, b, D2D1_DRAW_TEXT_OPTIONS_NONE);
+        }
+        return;
+    }
+    // VU: the classic face numbers, inside the tick arc, red above 0 VU.
+    float mh = maxSize, mw = maxSize * 1.5f, gap = 8.f * g_dpiScale;
+    float px = std::max(7.f * g_dpiScale, mh * 0.075f);
+    IDWriteTextFormat* fmt = VizScaleFormat(px);
+    if (!fmt) return;
+    fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+    const float marks[7] = {-20, -10, -7, -5, -3, 0, 3};
+    for (int m = 0; m < 2; m++) {
+        float ox = blockX + (horizontal ? m * (mw + gap) : 0.f), oy = blockY + (horizontal ? 0.f : m * (mh + gap));
+        float pvx = ox + mw * 0.5f, pvy = oy + mh * 0.9f, R = mh * 0.68f * 0.74f;
+        for (float dbm : marks) {
+            float p = (powf(10.f, dbm / 20.f) - 0.1f) / (1.41254f - 0.1f);
+            float an = (-48.f + 96.f * p) * VIZ_PI / 180.f;
+            float x = pvx + sinf(an) * R, y = pvy - cosf(an) * R;
+            swprintf_s(s, dbm > 0 ? L"+%d" : L"%d", (int)fabsf(dbm));
+            b->SetColor(dbm > 0 ? D2D1::ColorF(1.f, 0.27f, 0.23f, 0.95f) : D2D1::ColorF(0.92f, 0.92f, 0.9f, 0.85f));
+            g_dc->DrawText(s, (UINT32)wcslen(s), fmt, D2D1::RectF(x - px * 1.5f, y - px * 0.7f, x + px * 1.5f, y + px * 0.7f),
+                           b, D2D1_DRAW_TEXT_OPTIONS_NONE);
+        }
+    }
+}
+
 // The styles' extra room, applied after the shapes have sized the box.
 void VizStyleBox(float* w, float* h, float maxSize, bool horizontal) {
     switch (g_settings.style) {
@@ -79,9 +166,9 @@ void VizStyleBox(float* w, float* h, float maxSize, bool horizontal) {
             break;
         }
         case VizStyle::Spectrogram: {
-            float legend = 3.f * g_dpiScale + 6.f * g_dpiScale;
-            if (horizontal) *w += legend;
-            else *h += legend;
+            float legend = 3.f * g_dpiScale + 6.f * g_dpiScale, px = VizScaleLabelPx(maxSize);
+            if (horizontal) *w += legend + 3.f * g_dpiScale + px * 3.4f;  // plus the scale numbers
+            else *h += legend + 2.f * g_dpiScale + px * 1.3f;
             break;
         }
         default: break;
@@ -537,6 +624,7 @@ bool VizDrawStyleD2D(float blockX, float blockY, float totalWidth, float totalHe
                                        : D2D1::RectF(dst.left + a0 * maxSize, dst.bottom + gap, dst.left + a1 * maxSize, dst.bottom + gap + lw);
             g_dc->FillRectangle(r, g_barBrush.Get());
         }
+        VizDrawStyleScale(blockX, blockY, maxSize, thick, horizontal);
         return true;
     }
 
@@ -572,7 +660,78 @@ bool VizDrawStyleD2D(float blockX, float blockY, float totalWidth, float totalHe
             b->SetColor(D2D1::ColorF(1.f, 0.18f, 0.12f, 0.18f + 0.82f * std::clamp(g_vizVu[2 + m], 0.f, 1.f)));
             g_dc->FillEllipse(D2D1::Ellipse(D2D1::Point2F(ox + mw - mh * 0.12f, oy + mh * 0.12f), mh * 0.045f, mh * 0.045f), b);
         }
+        VizDrawStyleScale(blockX, blockY, maxSize, 0.f, horizontal);
         return true;
     }
     return false;
+}
+
+// ---- Reflection on the Direct2D renderer ------------------------------------------------
+// The bars go into an offscreen bitmap the size of the target, which is then
+// drawn twice: as is, and mirrored about the base line through a layer whose
+// opacity fades from 40 % to nothing over the reflection depth, as on
+// Direct3D 11. Skipped for the frames where the whole scene fades in or out,
+// since the target can't change under a pushed layer.
+namespace {
+ComPtr<ID2D1Bitmap1> s_reflBmp;
+ComPtr<ID2D1Image> s_reflOld;
+ComPtr<ID2D1LinearGradientBrush> s_reflFade;
+ID2D1DeviceContext* s_reflDc = nullptr;
+}  // namespace
+
+bool VizReflD2DBegin(bool fadeLayer) {
+    if (fadeLayer || !g_dc || !VizReflectionActive()) return false;
+    ComPtr<ID2D1Image> old;
+    g_dc->GetTarget(&old);
+    ComPtr<ID2D1Bitmap1> tb;
+    if (!old || FAILED(old.As(&tb))) return false;
+    D2D1_SIZE_U sz = tb->GetPixelSize();
+    if (!s_reflBmp || s_reflDc != g_dc.Get() || s_reflBmp->GetPixelSize().width != sz.width ||
+        s_reflBmp->GetPixelSize().height != sz.height) {
+        s_reflBmp.Reset();
+        s_reflFade.Reset();
+        float dx = 96.f, dy = 96.f;
+        tb->GetDpi(&dx, &dy);
+        D2D1_BITMAP_PROPERTIES1 bp = D2D1::BitmapProperties1(
+            D2D1_BITMAP_OPTIONS_TARGET, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), dx, dy);
+        if (FAILED(g_dc->CreateBitmap(sz, nullptr, 0, bp, &s_reflBmp))) return false;
+        D2D1_GRADIENT_STOP stops[2] = {{0.f, D2D1::ColorF(0, 0, 0, 0.4f)}, {1.f, D2D1::ColorF(0, 0, 0, 0.f)}};
+        ComPtr<ID2D1GradientStopCollection> sc;
+        if (FAILED(g_dc->CreateGradientStopCollection(stops, 2, &sc)) ||
+            FAILED(g_dc->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties(D2D1::Point2F(0, 0), D2D1::Point2F(0, 1)),
+                                                   sc.Get(), &s_reflFade))) {
+            s_reflBmp.Reset();
+            return false;
+        }
+        s_reflDc = g_dc.Get();
+    }
+    s_reflOld = old;
+    g_dc->SetTarget(s_reflBmp.Get());
+    g_dc->Clear(D2D1::ColorF(0, 0, 0, 0));
+    return true;
+}
+
+// `baseY` is the bars' base line in the drawing's own coordinates.
+void VizReflD2DEnd(float baseY, float depth) {
+    g_dc->SetTarget(s_reflOld.Get());
+    s_reflOld.Reset();
+    D2D1_MATRIX_3X2_F old;
+    g_dc->GetTransform(&old);
+    g_dc->SetTransform(D2D1::IdentityMatrix());  // the bitmap is already in target space
+    g_dc->DrawImage(s_reflBmp.Get());
+    float base = old._22 * baseY + old._32, d = depth * fabsf(old._22);
+    if (d >= 1.f) {
+        D2D1_SIZE_F ts = g_dc->GetSize();
+        s_reflFade->SetStartPoint(D2D1::Point2F(0, base));
+        s_reflFade->SetEndPoint(D2D1::Point2F(0, base + d));
+        g_dc->PushLayer(D2D1::LayerParameters1(D2D1::RectF(0, base, ts.width, base + d), nullptr,
+                                               D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::IdentityMatrix(), 1.f,
+                                               s_reflFade.Get()),
+                        nullptr);
+        g_dc->SetTransform(D2D1::Matrix3x2F::Scale(1.f, -1.f, D2D1::Point2F(0, base)));
+        g_dc->DrawImage(s_reflBmp.Get());
+        g_dc->SetTransform(D2D1::IdentityMatrix());
+        g_dc->PopLayer();
+    }
+    g_dc->SetTransform(old);
 }
