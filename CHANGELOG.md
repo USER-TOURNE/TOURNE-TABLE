@@ -22,6 +22,20 @@ Beta build, in `BETA_BUILD_2.0/`. Same `@id` as the 1.4 beta, so it upgrades tha
 - **Glow and Bloom** (Appearance, 0-100 each, with a radius): Glow is a soft halo worked out in the same shader pass that draws each bar, so it costs next to nothing. Bloom adds a blurred copy at a quarter of the size back on top, only on frames that change. Direct3D 11 renderer.
 - **My Styles and the Style Editor** (right-click > My Styles): save a look (base style, colours, peak caps, beat flash, bar sizes, corner radius, reflection, glow and bloom) under a name and pick it from the menu later. The editor is a small window where the visualizer itself is the live preview; slider changes apply about 12 times a second while dragging.
 
+### ✦ New: finer control, bar modifiers, placement
+
+- **Outline and Shadow** (Appearance): a stroke around each bar and a soft drop shadow, each with its own colour. Album colours now ease in over 0.6 s on a track change. Direct3D 11 renderer.
+- **Reflection on Direct2D** too (drawn on the CPU there, so it costs a little more).
+- **Decimal sizes** for bar width, gap, height, padding, borders, radii, font sizes, offsets and the card: turn Pixel Snap off to keep the fractions.
+- **Scale numbers** on Spectrogram (dB or %) and VU Needles.
+- **Click to Seek** on the progress bar (off by default), with an app list that turns it off, or only on, while those apps run.
+- **Terminal: any character**, including any Unicode glyph, for the bars and the ramp.
+- **Bar modifiers** (Appearance): Hollow, Dashed, Tilt, Afterimage (a trail that falls slowly) and Mirror Gap. Each is one shader branch, free when off.
+- **Snap while dragging**: edges and centre catch on the screen, the taskbar edge, the tray and the Start button. Hold Shift to place freely.
+- **Dock To App** (Position): sits beside a chosen app's window and follows it as it moves; back to its usual place while the app is closed or minimized.
+- **Split Into Two Pieces** (Position): cut at a chosen point, the second piece moved by a gap and shift. Windows composes the second piece from the same frame, so it costs next to nothing.
+- **Fix:** the drag and menu hooks no longer take clicks while another app (e.g. a full-screen game) covers the visualizer.
+
 ### ✦ Efficiency and fixes pass (review merge)
 
 - **Nothing changed, nothing sent**: the compositor is only committed when the panel actually moves (was every frame, 144/s), buffers are hashed first and only uploaded when the frame will be drawn and that buffer changed (432 to 144 uploads/s while playing, 0 when still), the background plate is drawn without blending and without a redundant clear.
