@@ -1802,6 +1802,206 @@ rep("""    g_dragOverrideH.store(std::clamp(g_dragStartH + dxPercent, 0.0f, 100.
     g_dragOverrideActive.store(true, std::memory_order_relaxed);
 """)
 
+# ================================================================ Dock to an app window (2.1)
+after("std::atomic<LONG> g_drawRectL{0}, g_drawRectT{0}, g_drawRectR{0}, g_drawRectB{0};\n",
+      "// Dock to an app window: the window's visible frame in screen pixels, written\n"
+      "// on the UI thread and read by layout on the render thread.\n"
+      "std::atomic<bool> g_dockActive{false};\n"
+      "std::atomic<LONG> g_dockL{0}, g_dockT{0}, g_dockR{0}, g_dockB{0};\n"
+      "void VizDockPlace(float boxW, float boxH, float* x, float* y);\n")
+after("    bool dragEnabled = false;\n",
+      "    std::wstring dockApp;             // lower case, without .exe; empty = not docked\n"
+      "    int dockSide = 0;                 // 0 below, 1 above, 2 left, 3 right\n"
+      "    int dockAlign = 1;                // 0 start, 1 centre, 2 end\n"
+      "    float dockGap = 0.f, dockShift = 0.f;  // logical px\n")
+after("""    g_settings.dragEnabled = Wh_GetIntSetting(L"interaction.dragEnabled") != 0;
+""", """    {
+        PCWSTR app = Wh_GetStringSetting(L"position.dockApp");
+        std::wstring a = app ? app : L"";
+        Wh_FreeStringSetting(app);
+        while (!a.empty() && iswspace(a.back())) a.pop_back();
+        size_t b = 0;
+        while (b < a.size() && iswspace(a[b])) b++;
+        a = a.substr(b);
+        for (auto& ch : a) ch = (WCHAR)towlower(ch);
+        if (a.size() > 4 && a.compare(a.size() - 4, 4, L".exe") == 0) a.resize(a.size() - 4);
+        g_settings.dockApp = a;
+        PCWSTR side = Wh_GetStringSetting(L"position.dockSide");
+        g_settings.dockSide = !wcscmp(side, L"above") ? 1 : !wcscmp(side, L"left") ? 2 : !wcscmp(side, L"right") ? 3 : 0;
+        Wh_FreeStringSetting(side);
+        PCWSTR align = Wh_GetStringSetting(L"position.dockAlign");
+        g_settings.dockAlign = !wcscmp(align, L"start") ? 0 : !wcscmp(align, L"end") ? 2 : 1;
+        Wh_FreeStringSetting(align);
+        g_settings.dockGap = std::clamp((float)Wh_GetIntSetting(L"position.dockGap"), -400.f, 400.f);
+        g_settings.dockShift = std::clamp((float)Wh_GetIntSetting(L"position.dockShift"), -4000.f, 4000.f);
+    }
+""")
+rep("""Bar heights move smoothly either way
+  $name: Position""", """Bar heights move smoothly either way
+    - dockApp: ''
+      $name: Dock To App
+      $description: 'Program name, e.g. "Spotify" or "obs64" (".exe" optional). The visualizer then sits beside that app''s main window and follows it as it moves; the Now Playing text and readout come along. While the app is closed or minimized it goes back to its usual place. It stays on the desktop layer, so it shows beside the window, not on top of it. Empty = not docked'
+    - dockSide: below
+      $name: Dock Side
+      $options:
+        - below: Below the window
+        - above: Above the window
+        - left: Left of the window
+        - right: Right of the window
+    - dockAlign: center
+      $name: Dock Alignment
+      $description: Where along that side it sits
+      $options:
+        - start: Start (left or top)
+        - center: Centre
+        - end: End (right or bottom)
+    - dockGap: 0
+      $name: Dock Gap
+      $description: Pixels between the window and the visualizer. Negative overlaps
+    - dockShift: 0
+      $name: Dock Shift
+      $description: Pixels to slide it along the side from the alignment above
+  $name: Position""")
+after("std::vector<float> g_snapLinesX, g_snapLinesY;\n", r"""
+// ---- Dock to an app window -------------------------------------------------
+HWND g_dockTarget = nullptr;
+HWINEVENTHOOK g_dockHook = nullptr;
+std::wstring g_dockFor;  // the app name the current target was found for
+
+void VizDockRedraw() {
+    if (g_overlayWnd) PostMessage(g_overlayWnd, WM_APP_FORCE_REDRAW, 0, 0);
+}
+
+// Reads the target's frame; false while it is minimized, hidden or gone.
+bool VizDockReadRect() {
+    HWND w = g_dockTarget;
+    RECT r{};
+    bool ok = w && IsWindow(w) && IsWindowVisible(w) && !IsIconic(w);
+    if (ok && FAILED(DwmGetWindowAttribute(w, DWMWA_EXTENDED_FRAME_BOUNDS, &r, sizeof(r))))
+        ok = GetWindowRect(w, &r) != 0;
+    ok = ok && r.right > r.left && r.bottom > r.top;
+    bool was = g_dockActive.load(std::memory_order_relaxed);
+    if (ok) {
+        bool moved = r.left != g_dockL.load(std::memory_order_relaxed) || r.top != g_dockT.load(std::memory_order_relaxed) ||
+                     r.right != g_dockR.load(std::memory_order_relaxed) || r.bottom != g_dockB.load(std::memory_order_relaxed);
+        g_dockL.store(r.left, std::memory_order_relaxed);
+        g_dockT.store(r.top, std::memory_order_relaxed);
+        g_dockR.store(r.right, std::memory_order_relaxed);
+        g_dockB.store(r.bottom, std::memory_order_relaxed);
+        g_dockActive.store(true, std::memory_order_relaxed);
+        if (moved || !was) VizDockRedraw();
+    } else if (was) {
+        g_dockActive.store(false, std::memory_order_relaxed);
+        VizDockRedraw();
+    }
+    return ok;
+}
+
+void CALLBACK VizDockEventProc(HWINEVENTHOOK, DWORD, HWND hwnd, LONG idObject, LONG idChild, DWORD, DWORD) {
+    if (hwnd == g_dockTarget && idObject == OBJID_WINDOW && idChild == CHILDID_SELF) VizDockReadRect();
+}
+
+void VizDockStop() {
+    if (g_dockHook) UnhookWinEvent(g_dockHook);
+    g_dockHook = nullptr;
+    g_dockTarget = nullptr;
+    if (g_dockActive.exchange(false)) VizDockRedraw();
+}
+
+static bool VizProcessNameIs(DWORD pid, const std::wstring& want) {
+    HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!p) return false;
+    WCHAR path[MAX_PATH];
+    DWORD n = MAX_PATH;
+    bool match = false;
+    if (QueryFullProcessImageNameW(p, 0, path, &n)) {
+        std::wstring name = path;
+        size_t slash = name.find_last_of(L"\\/");
+        if (slash != std::wstring::npos) name = name.substr(slash + 1);
+        for (auto& ch : name) ch = (WCHAR)towlower(ch);
+        if (name.size() > 4 && name.compare(name.size() - 4, 4, L".exe") == 0) name.resize(name.size() - 4);
+        match = name == want;
+    }
+    CloseHandle(p);
+    return match;
+}
+
+struct VizDockFind { const std::wstring* want; HWND found; DWORD lastPid; };
+
+BOOL CALLBACK VizDockEnumProc(HWND w, LPARAM lp) {
+    auto* f = (VizDockFind*)lp;
+    if (!IsWindowVisible(w) || GetWindow(w, GW_OWNER) || IsIconic(w)) return TRUE;
+    if (GetWindowLongPtr(w, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) return TRUE;
+    if (GetWindowTextLengthW(w) == 0) return TRUE;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(w, &pid);
+    if (!pid || pid == f->lastPid || pid == GetCurrentProcessId()) return TRUE;
+    f->lastPid = pid;
+    if (!VizProcessNameIs(pid, *f->want)) return TRUE;
+    f->found = w;
+    return FALSE;
+}
+
+// Called on the 1 s watch timer: finds the app's main window when there is none
+// yet (the app may start later), and watches it move through a WinEvent hook
+// scoped to that one process, so following it costs nothing while it sits still.
+void VizDockRefresh() {
+    const std::wstring& want = g_settings.dockApp;
+    if (want != g_dockFor) { VizDockStop(); g_dockFor = want; }
+    if (want.empty()) return;
+    if (g_dockTarget && IsWindow(g_dockTarget)) { VizDockReadRect(); return; }
+    VizDockStop();
+
+    VizDockFind f{&want, nullptr, 0};
+    EnumWindows(VizDockEnumProc, (LPARAM)&f);
+    if (!f.found) return;
+
+    g_dockTarget = f.found;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(f.found, &pid);
+    g_dockHook = SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE, nullptr,
+                                 VizDockEventProc, pid, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    Wh_Log(L"[Dock] following %s (hwnd=%p hook=%p)", want.c_str(), f.found, g_dockHook);
+    VizDockReadRect();
+}
+
+// Where the docked box goes, in screen pixels, for a box of the given size.
+void VizDockPlace(float boxW, float boxH, float* x, float* y) {
+    float l = (float)g_dockL.load(std::memory_order_relaxed), t = (float)g_dockT.load(std::memory_order_relaxed);
+    float r = (float)g_dockR.load(std::memory_order_relaxed), b = (float)g_dockB.load(std::memory_order_relaxed);
+    float gap = g_settings.dockGap * g_dpiScale, shift = g_settings.dockShift * g_dpiScale;
+    int side = g_settings.dockSide, align = g_settings.dockAlign;
+    if (side <= 1) {
+        *x = (align == 0 ? l : align == 2 ? r - boxW : (l + r - boxW) * 0.5f) + shift;
+        *y = side == 0 ? b + gap : t - boxH - gap;
+    } else {
+        *y = (align == 0 ? t : align == 2 ? b - boxH : (t + b - boxH) * 0.5f) + shift;
+        *x = side == 3 ? r + gap : l - boxW - gap;
+    }
+}
+""")
+rep("""    float blockX = waLeft + (workWidth  - totalWidth)  * (hPercent / 100.0f);
+    float blockY = waTop  + (workHeight - totalHeight) * (vPercent / 100.0f);
+""", """    float blockX = waLeft + (workWidth  - totalWidth)  * (hPercent / 100.0f);
+    float blockY = waTop  + (workHeight - totalHeight) * (vPercent / 100.0f);
+    if (!g_settings.dockApp.empty() && g_dockActive.load(std::memory_order_relaxed)) {
+        // Docked: beside the app's window, kept inside the work area like any
+        // other position.
+        float dx, dy;
+        VizDockPlace(totalWidth, totalHeight, &dx, &dy);
+        blockX = std::clamp(dx - vsx, waLeft, std::max(waLeft, waLeft + workWidth - totalWidth));
+        blockY = std::clamp(dy - vsy, waTop, std::max(waTop, waTop + workHeight - totalHeight));
+    }
+""")
+rep("""                bool shouldPause = g_userPaused.load(std::memory_order_relaxed);
+""", """                VizDockRefresh();
+
+                bool shouldPause = g_userPaused.load(std::memory_order_relaxed);
+""")
+rep("""        case WM_DESTROY:
+            g_messageWnd = nullptr;""", """        case WM_DESTROY:
+            VizDockStop();
+            g_messageWnd = nullptr;""")
 out = os.path.join(S, "v2b.cpp")
 open(out, "w", encoding="utf-8", newline="\n").write(src)
 print("wrote", out, src.count("\n"), "lines")
