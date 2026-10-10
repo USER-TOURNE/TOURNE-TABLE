@@ -378,5 +378,32 @@ check("outline: inside the bar keeps its own colour", body[1] > 0.8, f"body {bod
 check("shadow: dark and opaque beside the bar", shade[3] > 0.6 and shade[0] < 0.1, f"shade {shade}")
 check("shadow: nothing past the offset", far[3] < 0.01, f"far {far}")
 
+# Bar modifiers: one wide bar standing on y = 150 (anchor bottom).
+mod = dict(base, bars=1, barW=40, gap=0, vw=200, vh=180, bx=20, by=10, vertical=0, anchor=2, radii=[0, 0, 0, 0],
+           levels=[0.5], pivot=150)
+def solid(img, x):
+    ys = np.where(img[:, x, 3] > 0.5)[0]
+    return (int(ys.min()), int(ys.max())) if len(ys) else (0, 0)
+img = raster(dict({k: v for k, v in mod.items() if k != "col"}, passes=[1, 1], mods=1, hollowW=2))
+check("hollow: edge drawn, inside clear", img[100, 20, 3] > 0.9 and img[100, 40, 3] < 0.01, f"{img[100, 20]} {img[100, 40]}")
+img = raster(dict({k: v for k, v in mod.items() if k != "col"}, passes=[1, 1], mods=2, dash=4, dashGap=4))
+col = img[:, 40, 3]
+check("dashed: dash at the base, gap above it", col[147] > 0.9 and col[143] < 0.01, f"{col[140:150]}")
+img = raster(dict({k: v for k, v in mod.items() if k != "col"}, passes=[1, 1], mods=4, tilt=0.5))
+top, _ = solid(img, 40)
+row = np.where(img[top + 2, :, 3] > 0.5)[0]
+base_row = np.where(img[148, :, 3] > 0.5)[0]
+shift = (row.mean() - base_row.mean()) if len(row) and len(base_row) else 0
+check("tilt: the top leans right by tilt x height", abs(shift - 0.5 * (148 - (top + 2))) < 1.5, f"shift {shift}")
+img = raster(dict({k: v for k, v in mod.items() if k != "col"}, passes=[16, 1, 1, 1], levels=[0.2], peaks=[0.8], ghostA=0.4))
+bt, _ = solid(img, 40)
+gys = np.where(img[:, 40, 3] > 0.2)[0]
+check("afterimage: see-through trail above the bar", len(gys) and gys.min() < bt - 20 and abs(img[bt - 10, 40, 3] - 0.4) < 0.05,
+      f"bar top {bt}, trail top {gys.min() if len(gys) else None}, alpha {img[bt - 10, 40, 3]}")
+
+img = raster(dict({k: v for k, v in mod.items() if k != "col"}, passes=[1, 1], anchor=1, pivot=80, mods=8, mirrorGap=6))
+col = img[:, 40, 3]
+check("mirror gap: clear around the centre line, solid past it", col[79] < 0.01 and col[80] < 0.01 and col[74] > 0.9 and col[85] > 0.9, f"{col[72:88]}")
+
 print("FAILED: " + ", ".join(fails) if fails else "ALL PASSED")
 sys.exit(1 if fails else 0)

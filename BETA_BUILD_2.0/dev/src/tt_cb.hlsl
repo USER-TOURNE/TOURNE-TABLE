@@ -46,6 +46,13 @@ TT_CBUFFER(FrameCB, b0) {
     float4 fFxLineColor;
     float4 fFxShadowColor;
     float fFxLineW, fFxShadowX, fFxShadowY, fFxShadowSoft;
+    // Bar modifiers (2.1): dash and gap length px, tilt (shear per px of
+    // height), the base line it leans from; Afterimage opacity, Hollow line
+    // width px, Mirror gap px (Middle anchor), flags: 1 hollow, 2 dashed,
+    // 4 tilted, 8 mirror gap.
+    float fBarDash, fBarDashGap, fBarTiltK, fBarPivot;
+    float fGhostA, fHollowW, fMirrorGap;
+    uint fModFlags;
 }
 TT_CBUFFER_END
 

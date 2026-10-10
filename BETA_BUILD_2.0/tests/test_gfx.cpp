@@ -100,6 +100,14 @@ int main(int argc, char** argv) {
     c->fFxShadowX = (float)num("shadowX", 2);
     c->fFxShadowY = (float)num("shadowY", 3);
     c->fFxShadowSoft = (float)num("shadowSoft", 4);
+    c->fBarDash = (float)num("dash", 0);
+    c->fBarDashGap = (float)num("dashGap", 2);
+    c->fBarTiltK = (float)num("tilt", 0);
+    c->fBarPivot = (float)num("pivot", 0);
+    c->fGhostA = (float)num("ghostA", 0);
+    c->fHollowW = (float)num("hollowW", 1.5);
+    c->fModFlags = (uint)num("mods", 0);
+    c->fMirrorGap = (float)num("mirrorGap", 0);
     c->fSpecW = (uint)num("specW", 0);
     c->fSpecRows = (uint)num("specRows", 1);
     c->fSpecTex = (uint)num("specTex", 1);
@@ -170,6 +178,11 @@ int main(int argc, char** argv) {
                 Ctx::Prim pr = c->BuildPrim(c->pPass, id);
                 if ((c->fFxGlow > 0.0f || c->fFxLineW > 0.0f || c->fFxShadowColor.w > 0.0f) && (pr.kind == 0u || pr.kind == 1u))
                     pr.kind |= 32u;  // as VSMain
+                {
+                    bool barPass = c->pPass == 1u || c->pPass == 16u;
+                    if (barPass && (c->fModFlags & 11u) != 0u && (pr.kind & 15u) <= 1u) pr.kind |= 64u;
+                    if ((barPass || c->pPass == 2u) && (c->fModFlags & 4u) != 0u && (pr.kind & 15u) <= 1u) pr.kind |= 128u;
+                }
                 if (c->pPad0 != 0u) pr = c->ReflectPrim(pr);
                 Ctx::VsOut v0 = c->EmitVertex(pr, 0), v3 = c->EmitVertex(pr, 3);
                 if (pr.kind == 3u) continue;

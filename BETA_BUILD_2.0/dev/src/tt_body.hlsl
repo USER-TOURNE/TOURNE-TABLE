@@ -141,12 +141,11 @@ Prim CapsulePrim(float ax, float ay, float bx, float by, float radius, float4 co
 
 float BarRange() { return max(0.0f, fMaxSize - fIdleSize); }
 
-Prim BarPrim(uint i) {
-    if (i >= fBarCount) return NoPrim();
-    float fac = max(0.0f, gBars[i].x);
+Prim BarPrimAt(uint i, float fac, float alpha) {
     float size = fIdleSize + fac * BarRange();
     float lead = (float)i * (fBarW + fBarGap);
     float4 col = BarColor(i, fac, false);
+    col.w = col.w * alpha;
     if (fVertical == 0u) {
         float x = fBlock.x + lead;
         float y0, y1;
@@ -162,6 +161,19 @@ Prim BarPrim(uint i) {
     else { x0 = fBlock.x; x1 = fBlock.x + size; }
     return RectPrim(x0, y, x1, y + fBarW, fRadii, col);
 }
+
+Prim BarPrim(uint i) {
+    if (i >= fBarCount) return NoPrim();
+    return BarPrimAt(i, max(0.0f, gBars[i].x), 1.0f);
+}
+
+// Afterimage (2.1): the bar again at its slowly falling trail level (carried
+// where the peak hold usually is), see-through, drawn before the bar.
+Prim GhostPrim(uint i) {
+    if (i >= fBarCount || fGhostA <= 0.0f) return NoPrim();
+    return BarPrimAt(i, max(0.0f, gBars[i].y), fGhostA);
+}
+
 
 Prim CapPrim(uint i) {
     if (i >= fBarCount || (fFlags & 1u) == 0u) return NoPrim();
@@ -635,6 +647,7 @@ Prim BuildPrim(uint passId, uint id) {
     if (passId == 13u) return VuPrim(id);
     if (passId == 14u) return SplitPrim(id);
     if (passId == 15u) return SparkPrim(id);
+    if (passId == 16u) return GhostPrim(id);
     return NoPrim();
 }
 
@@ -644,7 +657,7 @@ struct VsOut {
     NOINTERP float4 shape SEM(TEXCOORD1);
     NOINTERP float4 radii SEM(TEXCOORD2);
     NOINTERP float4 color SEM(TEXCOORD3);
-    NOINTERP uint kind SEM(TEXCOORD4);  // low 4 bits: Prim kind; 16: reflected; 32: glows
+    NOINTERP uint kind SEM(TEXCOORD4);  // low 4 bits: Prim kind; 16: reflected; 32: FX; 64: dash/hollow; 128: tilt
 };
 
 // Quad corner `vid` (triangle strip 0..3) of the primitive's bounds. The
@@ -673,6 +686,17 @@ VsOut EmitVertex(Prim p, uint vid) {
         lo = float2(p.a.x - 1.0f, p.a.y - 1.0f);
         hi = float2(p.a.z + 1.0f, p.a.w + 1.0f);
     }
+    if ((p.kind & 128u) != 0u) {  // Tilt: the sheared shape's reach
+        if (fVertical == 0u) {
+            float d0 = fBarTiltK * (fBarPivot - lo.y), d1 = fBarTiltK * (fBarPivot - hi.y);
+            lo.x = lo.x + min(min(d0, d1), 0.0f) - 1.0f;
+            hi.x = hi.x + max(max(d0, d1), 0.0f) + 1.0f;
+        } else {
+            float d0 = fBarTiltK * (lo.x - fBarPivot), d1 = fBarTiltK * (hi.x - fBarPivot);
+            lo.y = lo.y + min(min(d0, d1), 0.0f) - 1.0f;
+            hi.y = hi.y + max(max(d0, d1), 0.0f) + 1.0f;
+        }
+    }
     if ((p.kind & 32u) != 0u) {  // room for the glow and the shadow
         float gr = max(fFxGlow > 0.0f ? fFxGlowR * 2.0f : 0.0f,
                        fFxShadowColor.w > 0.0f ? fFxShadowSoft + max(abs(fFxShadowX), abs(fFxShadowY)) + 1.0f : 0.0f);
@@ -697,6 +721,12 @@ VsOut VSMain(uint vid SEM(SV_VertexID), uint iid SEM(SV_InstanceID)) {
     // Glow: passes created with pPad1 = 1, rects and capsules only.
     if (pPad1 != 0u && (fFxGlow > 0.0f || fFxLineW > 0.0f || fFxShadowColor.w > 0.0f) && (p.kind == 0u || p.kind == 1u))
         p.kind = p.kind | 32u;
+    // Bar modifiers: the bars and their Afterimage; the caps tilt with them.
+    bool barPass = pPass == 1u || pPass == 16u;
+    if (barPass && (fModFlags & 11u) != 0u && (p.kind & 15u) <= 1u)
+        p.kind = p.kind | 64u;
+    if ((barPass || pPass == 2u) && (fModFlags & 4u) != 0u && (p.kind & 15u) <= 1u)
+        p.kind = p.kind | 128u;
     if (pPad0 != 0u) p = ReflectPrim(p);
     return EmitVertex(p, vid);
 }
@@ -795,11 +825,6 @@ float SdCapsule(float2 pix, float4 seg, float radius) {
     return length(float2(pa.x - ba.x * h, pa.y - ba.y * h)) - radius;
 }
 
-float Coverage(VsOut i, uint kb) {
-    if (kb == 1u) return saturate(0.5f - SdCapsule(i.pix, i.shape, i.radii.x));
-    return RectCoverage(i.pix, i.shape, i.radii);
-}
-
 // Glow (FX, 2.1): signed distance to a rounded rect (negative inside), so
 // the glow can fall off with the distance outside the shape.
 float SdRoundRect(float2 pix, float4 rect, float4 radii) {
@@ -811,6 +836,43 @@ float SdRoundRect(float2 pix, float4 rect, float4 radii) {
     float qx = abs(px) - hx + r, qy = abs(py) - hy + r;
     return length(float2(max(qx, 0.0f), max(qy, 0.0f))) + min(max(qx, qy), 0.0f) - r;
 }
+
+float ShapeCoverage(VsOut i, uint kb) {
+    if (kb == 1u) return saturate(0.5f - SdCapsule(i.pix, i.shape, i.radii.x));
+    return RectCoverage(i.pix, i.shape, i.radii);
+}
+
+// The bar's own pixels, with Hollow (only a band just inside the edge) and
+// Dashed (gaps along the growth direction, fixed to the base line so the
+// dashes stay still while the bar grows) applied.
+float Coverage(VsOut i, uint kb) {
+    float cov = ShapeCoverage(i, kb);
+    if ((i.kind & 64u) == 0u) return cov;
+    if ((fModFlags & 1u) != 0u) {
+        float d = (kb == 1u) ? SdCapsule(i.pix, i.shape, i.radii.x) : SdRoundRect(i.pix, i.shape, i.radii);
+        float w = max(fHollowW, 0.25f);
+        cov = min(cov, saturate(0.5f - (abs(d + w * 0.5f) - w * 0.5f)));
+    }
+    if ((fModFlags & 2u) != 0u) {
+        float period = max(fBarDash + fBarDashGap, 1.0f);
+        float t = (fVertical == 0u) ? abs(i.pix.y - fBarPivot) : abs(i.pix.x - fBarPivot);
+        float u = t - floor(t / period) * period;
+        float m = saturate(fBarDash - u + 0.5f) * saturate(u + 0.5f) + saturate(u - period + 0.5f);
+        cov = cov * saturate(m);
+    }
+    if ((fModFlags & 8u) != 0u) {  // Mirror: the two halves pulled apart from the centre line
+        float t = (fVertical == 0u) ? abs(i.pix.y - fBarPivot) : abs(i.pix.x - fBarPivot);
+        cov = cov * saturate(t - fMirrorGap * 0.5f + 0.5f);
+    }
+    return cov;
+}
+
+// Tilt: the pixel back in the unsheared bar's space.
+float2 Untilt(float2 pix) {
+    if (fVertical == 0u) return float2(pix.x - fBarTiltK * (fBarPivot - pix.y), pix.y);
+    return float2(pix.x, pix.y - fBarTiltK * (pix.x - fBarPivot));
+}
+
 
 // Glow, Outline and Shadow together, from one signed distance (and one more
 // for the shadow's offset copy). Outline is a band just inside the edge, so
@@ -836,7 +898,9 @@ float4 FxShade(VsOut i, uint kb) {
     return col;
 }
 
-float4 PSMain(VsOut i) SEM(SV_Target) {
+float4 PSMain(VsOut iIn) SEM(SV_Target) {
+    VsOut i = iIn;
+    if ((i.kind & 128u) != 0u) i.pix = Untilt(i.pix);
     uint kb = i.kind & 15u;
     float fade = 1.0f;
     if ((i.kind & 16u) != 0u) fade = saturate(1.0f - (i.pix.y - fReflBase) * fReflDir / max(fReflDepth, 1.0f));
