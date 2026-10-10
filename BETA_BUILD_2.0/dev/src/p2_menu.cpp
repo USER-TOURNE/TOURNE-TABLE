@@ -151,24 +151,24 @@ void VizApplyMenuOverrides() {
             g_settings.keyMoveFine = is(L"1");
         // The look, from the Style Editor and saved styles (2.1).
         } else if (k == L"barWidth") {
-            g_settings.barWidth = std::clamp(_wtoi(v), 1, 64);
+            g_settings.barWidth = std::clamp((float)_wtof(v), 0.1f, 400.f);
         } else if (k == L"barGap") {
-            g_settings.barGap = std::clamp(_wtoi(v), 0, 64);
+            g_settings.barGap = std::clamp((float)_wtof(v), 0.f, 400.f);
         } else if (k == L"barMaxSize") {
-            g_settings.barMaxSize = std::clamp(_wtoi(v), 2, 2000);
+            g_settings.barMaxSize = std::clamp((float)_wtof(v), 2.f, 4000.f);
         } else if (k == L"barRadius") {
-            int rad = std::clamp(_wtoi(v), 0, 100);
+            float rad = std::clamp((float)_wtof(v), 0.f, 100.f);
             g_settings.barRadiusTL = g_settings.barRadiusTR = g_settings.barRadiusBR = g_settings.barRadiusBL = rad;
         } else if (k == L"reflection") {
             g_settings.reflection = std::clamp(_wtoi(v), 0, 100);
         } else if (k == L"fxGlow") {
             g_settings.fxGlow = std::clamp(_wtoi(v), 0, 100);
         } else if (k == L"fxGlowRadius") {
-            g_settings.fxGlowRadius = std::clamp(_wtoi(v), 1, 32);
+            g_settings.fxGlowRadius = std::clamp((float)_wtof(v), 0.5f, 32.f);
         } else if (k == L"fxBloom") {
             g_settings.fxBloom = std::clamp(_wtoi(v), 0, 100);
         } else if (k == L"fxBloomRadius") {
-            g_settings.fxBloomRadius = std::clamp(_wtoi(v), 4, 64);
+            g_settings.fxBloomRadius = std::clamp((float)_wtof(v), 4.f, 64.f);
         } else if (k == L"color") {
             ParseColorHex(v, &g_settings.colorA, &g_settings.colorR, &g_settings.colorG, &g_settings.colorB);
         } else if (k == L"grad1") {

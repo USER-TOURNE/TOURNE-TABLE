@@ -1353,8 +1353,8 @@ bool Render(const FrameInputs& in) {
     Mix(hash, in.dragPause);
     Mix(hash, (uint64_t)style * 1009u + (uint64_t)g_settings.reflection);
     for (int k = 0; k < 4; k++) MixF(hash, f.vu[k], 2048.f);
-    Mix(hash, (uint64_t)g_settings.fxGlow * 1000003u + (uint64_t)g_settings.fxBloom * 1009u +
-                  (uint64_t)g_settings.fxGlowRadius * 31u + (uint64_t)g_settings.fxBloomRadius);
+    Mix(hash, (uint64_t)g_settings.fxGlow * 1000003u + (uint64_t)g_settings.fxBloom * 1009u);
+    MixF(hash, g_settings.fxGlowRadius + g_settings.fxBloomRadius * 257.f, 64.f);
     MixF(hash, f.fxLineW, 64.f);
     for (int k = 0; k < 4; k++) MixF(hash, f.fxLineColor[k] + f.fxShadowColor[k] * 7.f, 1024.f);
     MixF(hash, f.fxShadowX + f.fxShadowY * 1013.f + f.fxShadowSoft * 7919.f, 64.f);

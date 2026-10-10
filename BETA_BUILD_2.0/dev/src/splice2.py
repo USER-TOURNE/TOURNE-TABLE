@@ -1082,6 +1082,9 @@ after("std::atomic<int64_t> g_mediaSeekTicks{0};  // seek target for media comma
       "inline bool VizCardWantsArt() { return g_settings.mediaControlsEnabled && g_settings.mediaCard; }\n")
 # The card shows the cover, so it fetches it whatever the colour mode.
 import re as _re
+def _lit(x):
+    t = "%g" % x
+    return t + (".f" if "." not in t and "e" not in t else "f")
 _n = len(_re.findall(r"g_settings\.nowPlayingEnabled\)\n(\s*)FetchAlbumArtColorAsync\(\);", src))
 if _n != 4:
     sys.exit(f"album fetch anchors {_n} != 4")
@@ -1276,6 +1279,95 @@ assert _tail.count("g_albumArtColorSecondary.load(std::memory_order_relaxed)") =
 _tail = _tail.replace("g_albumArtColor.load(std::memory_order_relaxed)", "VizAlbumColorShown(0)")
 _tail = _tail.replace("g_albumArtColorSecondary.load(std::memory_order_relaxed)", "VizAlbumColorShown(1)")
 src = src[:_k] + _tail
+
+# ================================================================ Decimal sizes (2.1)
+# Sizes, gaps, paddings, borders and offsets take decimals ('1.05'), so things
+# can be lined up exactly; the renderers already place everything in
+# fractions of a pixel. The table is in size_keys.py.
+exec(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "size_keys.py")).read())
+import re as _re
+before("float ReadNumberSetting(PCWSTR key, PCWSTR group, PCWSTR name, float def, float lo, float hi) {", """// A size or offset: a number with decimals, given as text ('1.25'; a comma
+// works as the decimal point too). Up to 2.0 these were whole-number
+// settings, and a value saved then is still stored as a number, which reads
+// back here as empty text: that number is used until the setting is saved
+// again.
+float ReadSizeSetting(PCWSTR key, float lo, float hi, float def) {
+    PCWSTR str = Wh_GetStringSetting(key);
+    float v = def;
+    bool ok = false;
+    if (str && *str) {
+        WCHAR buf[64];
+        wcsncpy_s(buf, str, _TRUNCATE);
+        for (WCHAR* c = buf; *c; c++)
+            if (*c == L',') *c = L'.';
+        WCHAR* end = nullptr;
+        double d = wcstod(buf, &end);
+        if (end != buf && std::isfinite(d)) {
+            v = (float)d;
+            ok = true;
+        }
+    }
+    Wh_FreeStringSetting(str);
+    if (!ok) {
+        int n = Wh_GetIntSetting(key);
+        if (n != 0) v = (float)n;
+    }
+    return std::clamp(v, lo, hi);
+}
+
+""")
+_y = src.index("==/WindhawkModSettings==")
+_head, _rest = src[:_y], src[_y:]
+for _f, _k, _d, _lo, _hi in KEYS:
+    src, _n = _re.subn(r'g_settings\.%s\s*=\s*std::(?:clamp|max)\([^;]*?Wh_GetIntSetting\(L"%s"\)[^;]*;' % (_f, _re.escape(_k)),
+                       'g_settings.%s = ReadSizeSetting(L"%s", %s, %s, %s);' % (_f, _k, _lit(_lo), _lit(_hi), _lit(_d)), src)
+    assert _n == 1, _f
+    _last = _k.split(".")[1]
+    _y = src.index("==/WindhawkModSettings==")
+    _head, _rest = src[:_y], src[_y:]
+    _head, _n = _re.subn(r"(?m)^(\s+- %s: )(-?\d+)$" % _last, r"\1'\2'", _head)
+    assert _n == 1, _last
+    # say so in its description (the next $description after the entry)
+    _i = _head.index("- %s: '" % _last)
+    _j = _head.index("$description:", _i)
+    _e = _head.index("\n", _j)
+    _line = _head[_j:_e]
+    _note = (". Decimals allowed; the media controls round to whole pixels" if _k.startswith("media_controls.")
+             else ". Decimals allowed; turn Pixel Snap (Position) off to keep the fractions")
+    _line = _line[:-1] + _note + "'" if _line.endswith("'") else _line + _note
+    _line = _line.replace(".. Decimals", ". Decimals").replace(":. Decimals", ": Decimals")
+    _head = _head[:_j] + _line + _head[_e:]
+    src = _head + _rest
+# The fields themselves.
+for _f, _k, _d, _lo, _hi in KEYS:
+    src, _n = _re.subn(r"(?m)^(    )int (%s = -?\d+;)" % _f, r"\1float \2", src)
+    if _n == 0:  # in a shared declaration: split it out
+        _m = _re.search(r"(?m)^    int ([^;\n]*\b%s = (-?\d+)[^;\n]*);" % _f, src)
+        assert _m, _f
+        _rest_decl = _re.sub(r",?\s*\b%s = -?\d+" % _f, "", _m.group(1)).strip().lstrip(",").strip()
+        _new = ("    int %s;\n" % _rest_decl if _rest_decl else "") + "    float %s = %s;" % (_f, _m.group(2))
+        src = src[:_m.start()] + _new + src[_m.end():]
+# Integer literals next to them in std::max / min / clamp become float ones.
+_fields = "|".join([_f for _f, *_ in KEYS] + ["bgPadding[LRTB]"])
+_ref = r"(?:\(float\))?(?:g_settings|s)\.(?:%s)\b" % _fields
+src = _re.sub(r"std::(max|min)\((-?\d+), (%s)\)" % _ref, r"std::\1(\2.f, \3)", src)
+src = _re.sub(r"std::(max|min)\((%s), (-?\d+)\)" % _ref, r"std::\1(\2, \3.f)", src)
+src = _re.sub(r"std::clamp\((%s), (-?\d+), (-?\d+)\)" % _ref, r"std::clamp(\1, \2.f, \3.f)", src)
+rep("    int bgPaddingL = 24, bgPaddingR = 24, bgPaddingT = 24, bgPaddingB = 24;",
+    "    float bgPaddingL = 24, bgPaddingR = 24, bgPaddingT = 24, bgPaddingB = 24;")
+for _c in "LRTB":
+    rep("        g_settings.bgPadding%s = (int)v[" % _c, "        g_settings.bgPadding%s = v[" % _c)
+
+# Places that held these as whole numbers.
+rep("    int padding, cornerRadius, borderSize;\n};", "    float padding, cornerRadius, borderSize;\n};")
+rep("int g_borderCacheBorderSize = -1;", "float g_borderCacheBorderSize = -1.f;")
+rep("int g_dwriteTextFormatFontSize = -1;", "float g_dwriteTextFormatFontSize = -1.f;")
+rep("    g_dwriteTextFormatFontSize = -1;", "    g_dwriteTextFormatFontSize = -1.f;")
+rep("        int fontSize = std::max(6.f, g_settings.nowPlayingFontSize);", "        float fontSize = std::max(6.f, g_settings.nowPlayingFontSize);")
+rep("""                    int step = fast ? g_settings.keyMoveFastStep : g_settings.keyMoveStep;""",
+    """                    float fstep = fast ? g_settings.keyMoveFastStep : g_settings.keyMoveStep;
+                    int step = std::max(1, (int)lroundf(fstep));  // the strip and the text: whole pixels""")
+rep("float vstep = fine ? g_settings.keyMoveFineStep : (float)step;", "float vstep = fine ? g_settings.keyMoveFineStep : fstep;")
 
 out = os.path.join(S, "v2b.cpp")
 open(out, "w", encoding="utf-8", newline="\n").write(src)
