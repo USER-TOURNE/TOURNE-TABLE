@@ -1201,7 +1201,7 @@ rep("""        if ((isDown || isUp) && ModKeysHeld(g_settings.keyMoveModifier)) 
 # ================================================================ Reflection on Direct2D (2.1)
 rep("""        if (VizDrawStyleD2D(blockX, blockY, totalWidth, totalHeight, barCount, barW, barGap, maxSize, idleSize,
                             horizontal, c1, cGrad1, c2, rainbowBase)) {""",
-    """        const bool reflD2D = VizReflD2DBegin(useFadeLayer);
+    """        const bool reflD2D = VizFxD2DBegin(useFadeLayer);
         if (VizDrawStyleD2D(blockX, blockY, totalWidth, totalHeight, barCount, barW, barGap, maxSize, idleSize,
                             horizontal, c1, cGrad1, c2, rainbowBase)) {""")
 rep("""        }
@@ -1211,12 +1211,71 @@ rep("""        }
             VizBuildTextFrame(tf);
             VizDrawTextOverlays(tf, layout, smooth);""",
     """        }
-        if (reflD2D) VizReflD2DEnd(blockY + maxSize, VizReflectionDepth(maxSize));
+        if (reflD2D) VizFxD2DEnd(blockY + maxSize, VizReflectionDepth(maxSize));
 
         {
             VizTextFrame tf;
             VizBuildTextFrame(tf);
             VizDrawTextOverlays(tf, layout, smooth);""")
+
+# ================================================================ FX: Outline and Shadow (2.1)
+after("    int fxGlow = 0, fxGlowRadius = 6, fxBloom = 0, fxBloomRadius = 16;  // FX (2.1)\n",
+      "    float fxOutlineWidth = 0.f;  // px\n"
+      "    BYTE fxOutlineA = 0xB0, fxOutlineR = 255, fxOutlineG = 255, fxOutlineB = 255;\n"
+      "    int fxShadow = 0;  // %\n"
+      "    BYTE fxShadowR = 0, fxShadowG = 0, fxShadowB = 0;\n"
+      "    float fxShadowX = 2.f, fxShadowY = 3.f, fxShadowSoft = 4.f;  // px\n")
+rep("""    g_settings.fxBloomRadius = std::clamp(Wh_GetIntSetting(L"appearance.fxBloomRadius"), 4, 64);""",
+    """    g_settings.fxBloomRadius = std::clamp(Wh_GetIntSetting(L"appearance.fxBloomRadius"), 4, 64);
+    g_settings.fxOutlineWidth = ReadNumberSetting(L"appearance.fxOutlineWidth", L"Appearance", L"Outline Width", 0.f, 0.f, 16.f);
+    {
+        BYTE dummy = 0;
+        ReadColorSetting(L"appearance.fxOutlineColor", L"Appearance", L"Outline Color", 0xB0, 255, 255, 255,
+                         &g_settings.fxOutlineA, &g_settings.fxOutlineR, &g_settings.fxOutlineG, &g_settings.fxOutlineB);
+        ReadColorSetting(L"appearance.fxShadowColor", L"Appearance", L"Shadow Color", 255, 0, 0, 0,
+                         &dummy, &g_settings.fxShadowR, &g_settings.fxShadowG, &g_settings.fxShadowB);
+    }
+    g_settings.fxShadow = std::clamp(Wh_GetIntSetting(L"appearance.fxShadow"), 0, 100);
+    g_settings.fxShadowX = ReadNumberSetting(L"appearance.fxShadowX", L"Appearance", L"Shadow Offset X", 2.f, -32.f, 32.f);
+    g_settings.fxShadowY = ReadNumberSetting(L"appearance.fxShadowY", L"Appearance", L"Shadow Offset Y", 3.f, -32.f, 32.f);
+    g_settings.fxShadowSoft = ReadNumberSetting(L"appearance.fxShadowSoftness", L"Appearance", L"Shadow Softness", 4.f, 0.f, 32.f);""")
+rep("""    - fxBloomRadius: 16
+      $name: Bloom Radius
+      $description: 4-64 pixels. How far the light spreads
+""", """    - fxBloomRadius: 16
+      $name: Bloom Radius
+      $description: 4-64 pixels. How far the light spreads
+    - fxOutlineWidth: '0'
+      $name: Outline Width
+      $description: 0-16 pixels, decimals allowed (0.5, 1.25). A line just inside each bar's edge, so bars keep their size. 0 = off. Direct3D 11 renderer only
+    - fxOutlineColor: '#B0FFFFFF'
+      $name: Outline Color
+      $description: '#AARRGGBB or #RRGGBB. The outline fades with the bar it belongs to'
+    - fxShadow: 0
+      $name: Shadow
+      $description: 0-100. A drop shadow behind each bar, dot and line, worked out in the same shader pass as Glow, so it costs next to nothing. Both renderers
+    - fxShadowColor: '#000000'
+      $name: Shadow Color
+      $description: '#RRGGBB'
+    - fxShadowX: '2'
+      $name: Shadow Offset X
+      $description: -32 to 32 pixels, decimals allowed. Positive moves it right
+    - fxShadowY: '3'
+      $name: Shadow Offset Y
+      $description: -32 to 32 pixels, decimals allowed. Positive moves it down
+    - fxShadowSoftness: '4'
+      $name: Shadow Softness
+      $description: 0-32 pixels, decimals allowed. 0 = a hard edge
+""")
+
+# ================================================================ Album colours ease in (2.1)
+_k = src.index("bool ComputeVizLayout(VizLayout* out) {")
+_tail = src[_k:]
+assert _tail.count("g_albumArtColor.load(std::memory_order_relaxed)") == 3, _tail.count("g_albumArtColor.load(std::memory_order_relaxed)")
+assert _tail.count("g_albumArtColorSecondary.load(std::memory_order_relaxed)") == 2
+_tail = _tail.replace("g_albumArtColor.load(std::memory_order_relaxed)", "VizAlbumColorShown(0)")
+_tail = _tail.replace("g_albumArtColorSecondary.load(std::memory_order_relaxed)", "VizAlbumColorShown(1)")
+src = src[:_k] + _tail
 
 out = os.path.join(S, "v2b.cpp")
 open(out, "w", encoding="utf-8", newline="\n").write(src)

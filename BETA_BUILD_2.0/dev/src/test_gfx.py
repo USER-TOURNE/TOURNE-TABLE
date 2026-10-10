@@ -363,5 +363,20 @@ for n_, layout, frac, det in [(2048, 1, 6, 0), (4096, 1, 24, 0), (1024, 0, 0, 0)
     check(f"CsReduce dominant Hz == ttdsp (N={n_})", abs(g - c) < 0.5 and abs(g - 997) < 4, f"gpu {g:.2f} cpu {c:.2f}")
 
 print()
+# Outline and Shadow (FX): one wide bar, outline just inside its edge, the
+# shadow down and to the right, nothing further out.
+cfg = dict(base, bars=1, barW=40, gap=0, vw=120, vh=180, bx=20, by=10, vertical=0, anchor=2, radii=[0, 0, 0, 0],
+           levels=[0.5], lineW=2, lineColor=(1, 0, 0, 1), shadow=(0, 0, 0, 0.8), shadowX=4, shadowY=4, shadowSoft=0)
+img = raster(dict({k: v for k, v in cfg.items() if k != "col"}, passes=[1, 1]))
+ys = np.where(img[:, 40, 3] > 0.5)[0]
+top, bot = (int(ys.min()), int(ys.max())) if len(ys) else (0, 0)
+mid = (top + bot) // 2
+edge, body = img[mid, 20], img[mid, 40]   # leftmost pixel column of the bar, its middle
+shade, far = img[mid, 62], img[mid, 70]   # 2 px right of the bar (inside the 4 px shadow), well past it
+check("outline: edge pixel takes the outline colour", edge[0] > 0.8 and edge[1] < 0.2, f"edge {edge}")
+check("outline: inside the bar keeps its own colour", body[1] > 0.8, f"body {body}")
+check("shadow: dark and opaque beside the bar", shade[3] > 0.6 and shade[0] < 0.1, f"shade {shade}")
+check("shadow: nothing past the offset", far[3] < 0.01, f"far {far}")
+
 print("FAILED: " + ", ".join(fails) if fails else "ALL PASSED")
 sys.exit(1 if fails else 0)

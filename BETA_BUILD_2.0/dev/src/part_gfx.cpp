@@ -64,6 +64,9 @@ struct FrameCB {
     uint32_t specW, specHead, specTex, specPad;
     float fxGlow, fxGlowR, fxBloom, fxBloomR;
     float fxTexel[4];
+    float fxLineColor[4];
+    float fxShadowColor[4];
+    float fxLineW, fxShadowX, fxShadowY, fxShadowSoft;
 };
 struct PassCB {
     uint32_t pass, count, pad0, pad1;
@@ -80,7 +83,7 @@ struct CsCB {
     float fmin, fmax, breatheUp, breatheDown;
 };
 #pragma pack(pop)
-static_assert(sizeof(FrameCB) == 34 * 16, "FrameCB must match tt_cb.hlsl");
+static_assert(sizeof(FrameCB) == 37 * 16, "FrameCB must match tt_cb.hlsl");
 static_assert(sizeof(PassCB) == 16, "PassCB must match tt_cb.hlsl");
 static_assert(sizeof(CsCB) == 9 * 16, "CsCB must match tt_cb.hlsl");
 
@@ -1096,7 +1099,11 @@ bool Render(const FrameInputs& in) {
     if (g_settings.style == VizStyle::Line) margin += 6.f * g_dpiScale;  // the edge glow
     const float fxGlowR = g_settings.fxGlow > 0 ? g_settings.fxGlowRadius * g_dpiScale : 0.f;
     const float fxBloomR = g_settings.fxBloom > 0 ? g_settings.fxBloomRadius * g_dpiScale : 0.f;
-    margin += std::max(fxGlowR * 2.f, fxBloomR);  // room for the light to spread
+    const bool fxShadow = g_settings.fxShadow > 0;
+    const float fxShadowReach = fxShadow ? (g_settings.fxShadowSoft + std::max(fabsf(g_settings.fxShadowX), fabsf(g_settings.fxShadowY))) *
+                                               g_dpiScale + 1.f
+                                         : 0.f;
+    margin += std::max({fxGlowR * 2.f, fxBloomR, fxShadowReach});  // room for the light and shade to spread
     D2D1_RECT_F content = D2D1::RectF(L.blockX - margin, L.blockY - margin, L.blockX + L.totalWidth + margin,
                                       L.blockY + L.totalHeight + margin);
     D2D1_RECT_F want = content;
@@ -1290,6 +1297,22 @@ bool Render(const FrameInputs& in) {
     f.fxGlowR = fxGlowR;
     f.fxBloom = g_settings.fxBloom / 100.f;
     f.fxBloomR = fxBloomR;
+    if (g_settings.fxOutlineWidth > 0.f && g_settings.fxOutlineA > 0) {
+        f.fxLineW = g_settings.fxOutlineWidth * g_dpiScale;
+        f.fxLineColor[0] = g_settings.fxOutlineR / 255.f;
+        f.fxLineColor[1] = g_settings.fxOutlineG / 255.f;
+        f.fxLineColor[2] = g_settings.fxOutlineB / 255.f;
+        f.fxLineColor[3] = g_settings.fxOutlineA / 255.f;
+    }
+    if (fxShadow) {
+        f.fxShadowColor[0] = g_settings.fxShadowR / 255.f;
+        f.fxShadowColor[1] = g_settings.fxShadowG / 255.f;
+        f.fxShadowColor[2] = g_settings.fxShadowB / 255.f;
+        f.fxShadowColor[3] = g_settings.fxShadow / 100.f;
+        f.fxShadowX = g_settings.fxShadowX * g_dpiScale;
+        f.fxShadowY = g_settings.fxShadowY * g_dpiScale;
+        f.fxShadowSoft = g_settings.fxShadowSoft * g_dpiScale;
+    }
     if (f.fxBloom > 0.f) {
         UINT qw = std::max(1u, g.w / 4), qh = std::max(1u, g.h / 4);
         f.fxTexel[0] = 1.f / qw;
@@ -1332,6 +1355,9 @@ bool Render(const FrameInputs& in) {
     for (int k = 0; k < 4; k++) MixF(hash, f.vu[k], 2048.f);
     Mix(hash, (uint64_t)g_settings.fxGlow * 1000003u + (uint64_t)g_settings.fxBloom * 1009u +
                   (uint64_t)g_settings.fxGlowRadius * 31u + (uint64_t)g_settings.fxBloomRadius);
+    MixF(hash, f.fxLineW, 64.f);
+    for (int k = 0; k < 4; k++) MixF(hash, f.fxLineColor[k] + f.fxShadowColor[k] * 7.f, 1024.f);
+    MixF(hash, f.fxShadowX + f.fxShadowY * 1013.f + f.fxShadowSoft * 7919.f, 64.f);
 
     const bool drawBars = !in.dragPause;
     const bool cpuBars = !gpuOk && drawBars;

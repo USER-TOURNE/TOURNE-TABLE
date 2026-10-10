@@ -673,8 +673,9 @@ VsOut EmitVertex(Prim p, uint vid) {
         lo = float2(p.a.x - 1.0f, p.a.y - 1.0f);
         hi = float2(p.a.z + 1.0f, p.a.w + 1.0f);
     }
-    if ((p.kind & 32u) != 0u) {  // room for the glow
-        float gr = fFxGlowR * 2.0f;
+    if ((p.kind & 32u) != 0u) {  // room for the glow and the shadow
+        float gr = max(fFxGlow > 0.0f ? fFxGlowR * 2.0f : 0.0f,
+                       fFxShadowColor.w > 0.0f ? fFxShadowSoft + max(abs(fFxShadowX), abs(fFxShadowY)) + 1.0f : 0.0f);
         lo = float2(lo.x - gr, lo.y - gr);
         hi = float2(hi.x + gr, hi.y + gr);
     }
@@ -694,7 +695,8 @@ VsOut EmitVertex(Prim p, uint vid) {
 VsOut VSMain(uint vid SEM(SV_VertexID), uint iid SEM(SV_InstanceID)) {
     Prim p = BuildPrim(pPass, iid);
     // Glow: passes created with pPad1 = 1, rects and capsules only.
-    if (pPad1 != 0u && fFxGlow > 0.0f && (p.kind == 0u || p.kind == 1u)) p.kind = p.kind | 32u;
+    if (pPad1 != 0u && (fFxGlow > 0.0f || fFxLineW > 0.0f || fFxShadowColor.w > 0.0f) && (p.kind == 0u || p.kind == 1u))
+        p.kind = p.kind | 32u;
     if (pPad0 != 0u) p = ReflectPrim(p);
     return EmitVertex(p, vid);
 }
@@ -810,11 +812,28 @@ float SdRoundRect(float2 pix, float4 rect, float4 radii) {
     return length(float2(max(qx, 0.0f), max(qy, 0.0f))) + min(max(qx, qy), 0.0f) - r;
 }
 
-float GlowAt(VsOut i, uint kb, float cov) {
+// Glow, Outline and Shadow together, from one signed distance (and one more
+// for the shadow's offset copy). Outline is a band just inside the edge, so
+// it never changes a bar's size; the shadow sits behind the bar's own pixels.
+float4 FxShade(VsOut i, uint kb) {
     float d = (kb == 1u) ? SdCapsule(i.pix, i.shape, i.radii.x) : SdRoundRect(i.pix, i.shape, i.radii);
-    if (d <= 0.0f) return cov;
-    float g = exp(-(d * d) / max(fFxGlowR * fFxGlowR * 0.5f, 0.01f));
-    return cov + (1.0f - cov) * fFxGlow * 0.65f * g;
+    float cov = Coverage(i, kb);
+    float4 col = i.color * cov;
+    if (fFxLineW > 0.0f) {
+        float o = saturate(0.5f - (abs(d + fFxLineW * 0.5f) - fFxLineW * 0.5f)) * fFxLineColor.w * i.color.w;
+        col = col * (1.0f - o) + float4(fFxLineColor.x, fFxLineColor.y, fFxLineColor.z, 1.0f) * o;
+    }
+    if (fFxGlow > 0.0f && d > 0.0f) {
+        float g = exp(-(d * d) / max(fFxGlowR * fFxGlowR * 0.5f, 0.01f));
+        col = col + i.color * ((1.0f - cov) * fFxGlow * 0.65f * g);
+    }
+    if (fFxShadowColor.w > 0.0f) {
+        float2 sp = float2(i.pix.x - fFxShadowX, i.pix.y - fFxShadowY);
+        float ds = (kb == 1u) ? SdCapsule(sp, i.shape, i.radii.x) : SdRoundRect(sp, i.shape, i.radii);
+        float s = saturate((fFxShadowSoft * 0.5f + 0.5f - ds) / (fFxShadowSoft + 1.0f)) * fFxShadowColor.w * i.color.w;
+        col = col + float4(fFxShadowColor.x, fFxShadowColor.y, fFxShadowColor.z, 1.0f) * (s * (1.0f - col.w));
+    }
+    return col;
 }
 
 float4 PSMain(VsOut i) SEM(SV_Target) {
@@ -836,8 +855,8 @@ float4 PSMain(VsOut i) SEM(SV_Target) {
         float cov = gGlyphs.SampleLevel(gSamp, uv, 0.0f).w;
         return i.color * (cov * fSceneAlpha);
     }
+    if ((i.kind & 32u) != 0u) return FxShade(i, kb) * (fade * fSceneAlpha);
     float cov = Coverage(i, kb);
-    if ((i.kind & 32u) != 0u) cov = GlowAt(i, kb, cov);
     return i.color * (cov * fade * fSceneAlpha);
 }
 

@@ -40,6 +40,12 @@ TT_CBUFFER(FrameCB, b0) {
     // radius px; texel size of the quarter-res bloom target and of the scene.
     float fFxGlow, fFxGlowR, fFxBloom, fFxBloomR;
     float4 fFxTexel;
+    // Outline and Shadow (FX, 2.1): outline colour (straight alpha), shadow
+    // colour (alpha = strength), then outline width, shadow offset x, y and
+    // softness, all px.
+    float4 fFxLineColor;
+    float4 fFxShadowColor;
+    float fFxLineW, fFxShadowX, fFxShadowY, fFxShadowSoft;
 }
 TT_CBUFFER_END
 

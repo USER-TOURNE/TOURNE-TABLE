@@ -707,7 +707,7 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
         - particles: Particles (bars plus sparks on each beat)
     - reflection: 0
       $name: Reflection
-      $description: 0-100. Mirrors the bars onto a floor beneath them, fading out over this percentage of Bar Max Size. Horizontal bars anchored to the bottom only, with the bar shapes, LED Meter, Line Spectrum and Particles. Direct3D 11 renderer only
+      $description: 0-100. Mirrors the bars onto a floor beneath them, fading out over this percentage of Bar Max Size. Horizontal bars anchored to the bottom only, with the bar shapes, LED Meter, Line Spectrum and Particles. Both renderers (Direct2D draws it on the CPU, so it costs a little more there)
     - fxGlow: 0
       $name: Glow
       $description: 0-100. A soft halo around each bar, dot, line and spark, worked out in the same shader pass that draws them, so it costs next to nothing. Direct3D 11 renderer only
@@ -720,6 +720,27 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
     - fxBloomRadius: 16
       $name: Bloom Radius
       $description: 4-64 pixels. How far the light spreads
+    - fxOutlineWidth: '0'
+      $name: Outline Width
+      $description: 0-16 pixels, decimals allowed (0.5, 1.25). A line just inside each bar's edge, so bars keep their size. 0 = off. Direct3D 11 renderer only
+    - fxOutlineColor: '#B0FFFFFF'
+      $name: Outline Color
+      $description: '#AARRGGBB or #RRGGBB. The outline fades with the bar it belongs to'
+    - fxShadow: 0
+      $name: Shadow
+      $description: 0-100. A drop shadow behind each bar, dot and line, worked out in the same shader pass as Glow, so it costs next to nothing. Both renderers
+    - fxShadowColor: '#000000'
+      $name: Shadow Color
+      $description: '#RRGGBB'
+    - fxShadowX: '2'
+      $name: Shadow Offset X
+      $description: -32 to 32 pixels, decimals allowed. Positive moves it right
+    - fxShadowY: '3'
+      $name: Shadow Offset Y
+      $description: -32 to 32 pixels, decimals allowed. Positive moves it down
+    - fxShadowSoftness: '4'
+      $name: Shadow Softness
+      $description: 0-32 pixels, decimals allowed. 0 = a hard edge
     - orientation: horizontal
       $name: Orientation
       $description: Whether bars run left-to-right or bottom-to-top
@@ -1786,6 +1807,11 @@ struct Settings {
     VizStyle style = VizStyle::None;
     int reflection = 0;  // %, of Bar Max Size
     int fxGlow = 0, fxGlowRadius = 6, fxBloom = 0, fxBloomRadius = 16;  // FX (2.1)
+    float fxOutlineWidth = 0.f;  // px
+    BYTE fxOutlineA = 0xB0, fxOutlineR = 255, fxOutlineG = 255, fxOutlineB = 255;
+    int fxShadow = 0;  // %
+    BYTE fxShadowR = 0, fxShadowG = 0, fxShadowB = 0;
+    float fxShadowX = 2.f, fxShadowY = 3.f, fxShadowSoft = 4.f;  // px
 
     // Media widget (2.0).
     VizNpLayout npLayout = VizNpLayout::OneLine;
@@ -9271,6 +9297,93 @@ bool VizReflectionActive() {
 
 float VizReflectionDepth(float maxSize) { return maxSize * std::clamp(g_settings.reflection, 0, 100) / 100.f; }
 
+// ---- Scale numbers -----------------------------------------------------------------------
+// The Spectrogram legend's quarter ticks and the VU faces carry numbers. They
+// are Direct2D text: on the Direct3D renderer they go on the text surface,
+// which only redraws when something on it changes, so a still scale costs
+// nothing per frame.
+namespace {
+ComPtr<IDWriteTextFormat> s_scaleFmt;
+float s_scaleFmtPx = 0.f;
+
+IDWriteTextFormat* VizScaleFormat(float px) {
+    if (!g_dwriteFactory) return nullptr;
+    if (!s_scaleFmt || fabsf(s_scaleFmtPx - px) > 0.01f) {
+        s_scaleFmt.Reset();
+        if (FAILED(g_dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                                                     DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, px, L"",
+                                                     &s_scaleFmt)))
+            return nullptr;
+        s_scaleFmt->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+        s_scaleFmt->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        s_scaleFmtPx = px;
+    }
+    return s_scaleFmt.Get();
+}
+}  // namespace
+
+float VizScaleLabelPx(float maxSize) { return std::clamp(maxSize * 0.07f, 8.f * g_dpiScale, 13.f * g_dpiScale); }
+
+bool VizStyleHasScale() { return g_settings.style == VizStyle::Spectrogram || g_settings.style == VizStyle::Vu; }
+
+// `thick` is the bars' span across the time axis (Spectrogram only).
+void VizDrawStyleScale(float blockX, float blockY, float maxSize, float thick, bool horizontal) {
+    if (!g_dc || !g_barBrush || !VizStyleHasScale()) return;
+    ID2D1SolidColorBrush* b = g_barBrush.Get();
+    WCHAR s[24];
+    if (g_settings.style == VizStyle::Spectrogram) {
+        float px = VizScaleLabelPx(maxSize);
+        IDWriteTextFormat* fmt = VizScaleFormat(px);
+        if (!fmt) return;
+        fmt->SetTextAlignment(horizontal ? DWRITE_TEXT_ALIGNMENT_LEADING : DWRITE_TEXT_ALIGNMENT_CENTER);
+        b->SetColor(D2D1::ColorF(0.92f, 0.92f, 0.92f, 0.85f));
+        // Precision maps Display Floor..Ceiling straight onto the bar height,
+        // so the ticks are dB; Classic has no fixed dB scale, so percent.
+        bool db = g_settings.engine == VizEngineKind::Precision;
+        float side = 3.f * g_dpiScale + 6.f * g_dpiScale;
+        for (int k = 0; k <= 4; k++) {
+            float q = k / 4.f;
+            if (db)
+                swprintf_s(s, k == 4 ? L"%d dB" : L"%d",
+                           (int)lroundf(g_settings.dbFloor + q * (g_settings.dbCeiling - g_settings.dbFloor)));
+            else
+                swprintf_s(s, L"%d%%", k * 25);
+            D2D1_RECT_F r;
+            if (horizontal) {
+                float y = std::clamp(blockY + maxSize - q * maxSize, blockY + px * 0.6f, blockY + maxSize - px * 0.6f);
+                float x = blockX + thick + side + 3.f * g_dpiScale;
+                r = D2D1::RectF(x, y - px, x + px * 4.f, y + px);
+            } else {
+                float x = std::clamp(blockX + q * maxSize, blockX + px * 1.2f, blockX + maxSize - px * 1.2f);
+                float y = blockY + thick + side + 2.f * g_dpiScale;
+                r = D2D1::RectF(x - px * 2.5f, y, x + px * 2.5f, y + px * 1.3f);
+            }
+            g_dc->DrawText(s, (UINT32)wcslen(s), fmt, r, b, D2D1_DRAW_TEXT_OPTIONS_NONE);
+        }
+        return;
+    }
+    // VU: the classic face numbers, inside the tick arc, red above 0 VU.
+    float mh = maxSize, mw = maxSize * 1.5f, gap = 8.f * g_dpiScale;
+    float px = std::max(7.f * g_dpiScale, mh * 0.075f);
+    IDWriteTextFormat* fmt = VizScaleFormat(px);
+    if (!fmt) return;
+    fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+    const float marks[7] = {-20, -10, -7, -5, -3, 0, 3};
+    for (int m = 0; m < 2; m++) {
+        float ox = blockX + (horizontal ? m * (mw + gap) : 0.f), oy = blockY + (horizontal ? 0.f : m * (mh + gap));
+        float pvx = ox + mw * 0.5f, pvy = oy + mh * 0.9f, R = mh * 0.68f * 0.74f;
+        for (float dbm : marks) {
+            float p = (powf(10.f, dbm / 20.f) - 0.1f) / (1.41254f - 0.1f);
+            float an = (-48.f + 96.f * p) * VIZ_PI / 180.f;
+            float x = pvx + sinf(an) * R, y = pvy - cosf(an) * R;
+            swprintf_s(s, dbm > 0 ? L"+%d" : L"%d", (int)fabsf(dbm));
+            b->SetColor(dbm > 0 ? D2D1::ColorF(1.f, 0.27f, 0.23f, 0.95f) : D2D1::ColorF(0.92f, 0.92f, 0.9f, 0.85f));
+            g_dc->DrawText(s, (UINT32)wcslen(s), fmt, D2D1::RectF(x - px * 1.5f, y - px * 0.7f, x + px * 1.5f, y + px * 0.7f),
+                           b, D2D1_DRAW_TEXT_OPTIONS_NONE);
+        }
+    }
+}
+
 // The styles' extra room, applied after the shapes have sized the box.
 void VizStyleBox(float* w, float* h, float maxSize, bool horizontal) {
     switch (g_settings.style) {
@@ -9281,9 +9394,9 @@ void VizStyleBox(float* w, float* h, float maxSize, bool horizontal) {
             break;
         }
         case VizStyle::Spectrogram: {
-            float legend = 3.f * g_dpiScale + 6.f * g_dpiScale;
-            if (horizontal) *w += legend;
-            else *h += legend;
+            float legend = 3.f * g_dpiScale + 6.f * g_dpiScale, px = VizScaleLabelPx(maxSize);
+            if (horizontal) *w += legend + 3.f * g_dpiScale + px * 3.4f;  // plus the scale numbers
+            else *h += legend + 2.f * g_dpiScale + px * 1.3f;
             break;
         }
         default: break;
@@ -9739,6 +9852,7 @@ bool VizDrawStyleD2D(float blockX, float blockY, float totalWidth, float totalHe
                                        : D2D1::RectF(dst.left + a0 * maxSize, dst.bottom + gap, dst.left + a1 * maxSize, dst.bottom + gap + lw);
             g_dc->FillRectangle(r, g_barBrush.Get());
         }
+        VizDrawStyleScale(blockX, blockY, maxSize, thick, horizontal);
         return true;
     }
 
@@ -9774,9 +9888,125 @@ bool VizDrawStyleD2D(float blockX, float blockY, float totalWidth, float totalHe
             b->SetColor(D2D1::ColorF(1.f, 0.18f, 0.12f, 0.18f + 0.82f * std::clamp(g_vizVu[2 + m], 0.f, 1.f)));
             g_dc->FillEllipse(D2D1::Ellipse(D2D1::Point2F(ox + mw - mh * 0.12f, oy + mh * 0.12f), mh * 0.045f, mh * 0.045f), b);
         }
+        VizDrawStyleScale(blockX, blockY, maxSize, 0.f, horizontal);
         return true;
     }
     return false;
+}
+
+// ---- Reflection and Shadow on the Direct2D renderer -------------------------------------
+// The bars go into an offscreen bitmap the size of the target, which is then
+// drawn up to three times: a Shadow effect of it, offset; the bitmap as is;
+// and mirrored about the base line through a layer whose opacity fades from
+// 40 % to nothing over the reflection depth, as on Direct3D 11. Skipped for
+// the frames where the whole scene fades in or out, since the target can't
+// change under a pushed layer.
+namespace {
+ComPtr<ID2D1Bitmap1> s_reflBmp;
+ComPtr<ID2D1Image> s_reflOld;
+ComPtr<ID2D1LinearGradientBrush> s_reflFade;
+ComPtr<ID2D1Effect> s_shadowFx;
+ID2D1DeviceContext* s_reflDc = nullptr;
+float s_reflDpi = 96.f;
+const CLSID kVizClsidShadow = {0xC67EA361, 0x1863, 0x4E69, {0x89, 0xDB, 0x69, 0x5D, 0x3E, 0x9A, 0x5B, 0x6B}};
+}  // namespace
+
+bool VizFxD2DBegin(bool fadeLayer) {
+    if (fadeLayer || !g_dc || !(VizReflectionActive() || g_settings.fxShadow > 0)) return false;
+    ComPtr<ID2D1Image> old;
+    g_dc->GetTarget(&old);
+    ComPtr<ID2D1Bitmap1> tb;
+    if (!old || FAILED(old.As(&tb))) return false;
+    D2D1_SIZE_U sz = tb->GetPixelSize();
+    if (!s_reflBmp || s_reflDc != g_dc.Get() || s_reflBmp->GetPixelSize().width != sz.width ||
+        s_reflBmp->GetPixelSize().height != sz.height) {
+        s_reflBmp.Reset();
+        s_reflFade.Reset();
+        s_shadowFx.Reset();
+        float dx = 96.f, dy = 96.f;
+        tb->GetDpi(&dx, &dy);
+        s_reflDpi = dx > 0.f ? dx : 96.f;
+        D2D1_BITMAP_PROPERTIES1 bp = D2D1::BitmapProperties1(
+            D2D1_BITMAP_OPTIONS_TARGET, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), dx, dy);
+        if (FAILED(g_dc->CreateBitmap(sz, nullptr, 0, bp, &s_reflBmp))) return false;
+        D2D1_GRADIENT_STOP stops[2] = {{0.f, D2D1::ColorF(0, 0, 0, 0.4f)}, {1.f, D2D1::ColorF(0, 0, 0, 0.f)}};
+        ComPtr<ID2D1GradientStopCollection> sc;
+        if (FAILED(g_dc->CreateGradientStopCollection(stops, 2, &sc)) ||
+            FAILED(g_dc->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties(D2D1::Point2F(0, 0), D2D1::Point2F(0, 1)),
+                                                   sc.Get(), &s_reflFade))) {
+            s_reflBmp.Reset();
+            return false;
+        }
+        if (SUCCEEDED(g_dc->CreateEffect(kVizClsidShadow, &s_shadowFx))) s_shadowFx->SetInput(0, s_reflBmp.Get());
+        s_reflDc = g_dc.Get();
+    }
+    s_reflOld = old;
+    g_dc->SetTarget(s_reflBmp.Get());
+    g_dc->Clear(D2D1::ColorF(0, 0, 0, 0));
+    return true;
+}
+
+// `baseY` is the bars' base line in the drawing's own coordinates.
+void VizFxD2DEnd(float baseY, float depth) {
+    g_dc->SetTarget(s_reflOld.Get());
+    s_reflOld.Reset();
+    D2D1_MATRIX_3X2_F old;
+    g_dc->GetTransform(&old);
+    g_dc->SetTransform(D2D1::IdentityMatrix());  // the bitmap is already in target space
+    if (g_settings.fxShadow > 0 && s_shadowFx) {
+        const float toDip = 96.f / s_reflDpi * g_dpiScale;  // settings px -> target DIPs
+        s_shadowFx->SetValue(D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION, std::max(0.01f, g_settings.fxShadowSoft * 0.5f * toDip));
+        s_shadowFx->SetValue(D2D1_SHADOW_PROP_COLOR,
+                             D2D1::Vector4F(g_settings.fxShadowR / 255.f, g_settings.fxShadowG / 255.f,
+                                            g_settings.fxShadowB / 255.f, g_settings.fxShadow / 100.f));
+        g_dc->DrawImage(s_shadowFx.Get(), D2D1::Point2F(g_settings.fxShadowX * toDip, g_settings.fxShadowY * toDip));
+    }
+    g_dc->DrawImage(s_reflBmp.Get());
+    float base = old._22 * baseY + old._32, d = depth * fabsf(old._22);
+    if (VizReflectionActive() && d >= 1.f) {
+        D2D1_SIZE_F ts = g_dc->GetSize();
+        s_reflFade->SetStartPoint(D2D1::Point2F(0, base));
+        s_reflFade->SetEndPoint(D2D1::Point2F(0, base + d));
+        g_dc->PushLayer(D2D1::LayerParameters1(D2D1::RectF(0, base, ts.width, base + d), nullptr,
+                                               D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::IdentityMatrix(), 1.f,
+                                               s_reflFade.Get()),
+                        nullptr);
+        g_dc->SetTransform(D2D1::Matrix3x2F::Scale(1.f, -1.f, D2D1::Point2F(0, base)));
+        g_dc->DrawImage(s_reflBmp.Get());
+        g_dc->SetTransform(D2D1::IdentityMatrix());
+        g_dc->PopLayer();
+    }
+    g_dc->SetTransform(old);
+}
+
+// ---- Album colours ease in -------------------------------------------------------------
+// A new cover's colours fade in over 0.6 s instead of jumping (smoothstep).
+// Render thread only. It moves only while frames are drawing, which they are
+// while a track plays.
+DWORD VizAlbumColorShown(int which) {
+    static DWORD from[2], to[2], shown[2];
+    static ULONGLONG t0[2];
+    static bool init[2];
+    DWORD target = (which ? g_albumArtColorSecondary : g_albumArtColor).load(std::memory_order_relaxed);
+    ULONGLONG now = GetTickCount64();
+    if (!init[which]) {
+        init[which] = true;
+        from[which] = to[which] = shown[which] = target;
+    }
+    if (target != to[which]) {
+        from[which] = shown[which];
+        to[which] = target;
+        t0[which] = now;
+    }
+    float t = std::clamp((float)(now - t0[which]) / 600.f, 0.f, 1.f);
+    t = t * t * (3.f - 2.f * t);
+    DWORD out = 0;
+    for (int sh = 0; sh < 32; sh += 8) {
+        float a = (float)((from[which] >> sh) & 0xFF), b = (float)((to[which] >> sh) & 0xFF);
+        out |= (DWORD)lroundf(a + (b - a) * t) << sh;
+    }
+    shown[which] = out;
+    return out;
 }
 
 bool ComputeVizLayout(VizLayout* out) {
@@ -11432,6 +11662,12 @@ TT_CBUFFER(FrameCB, b0) {
     // radius px; texel size of the quarter-res bloom target and of the scene.
     float fFxGlow, fFxGlowR, fFxBloom, fFxBloomR;
     float4 fFxTexel;
+    // Outline and Shadow (FX, 2.1): outline colour (straight alpha), shadow
+    // colour (alpha = strength), then outline width, shadow offset x, y and
+    // softness, all px.
+    float4 fFxLineColor;
+    float4 fFxShadowColor;
+    float fFxLineW, fFxShadowX, fFxShadowY, fFxShadowSoft;
 }
 TT_CBUFFER_END
 
@@ -12128,8 +12364,9 @@ VsOut EmitVertex(Prim p, uint vid) {
         lo = float2(p.a.x - 1.0f, p.a.y - 1.0f);
         hi = float2(p.a.z + 1.0f, p.a.w + 1.0f);
     }
-    if ((p.kind & 32u) != 0u) {  // room for the glow
-        float gr = fFxGlowR * 2.0f;
+    if ((p.kind & 32u) != 0u) {  // room for the glow and the shadow
+        float gr = max(fFxGlow > 0.0f ? fFxGlowR * 2.0f : 0.0f,
+                       fFxShadowColor.w > 0.0f ? fFxShadowSoft + max(abs(fFxShadowX), abs(fFxShadowY)) + 1.0f : 0.0f);
         lo = float2(lo.x - gr, lo.y - gr);
         hi = float2(hi.x + gr, hi.y + gr);
     }
@@ -12149,7 +12386,8 @@ VsOut EmitVertex(Prim p, uint vid) {
 VsOut VSMain(uint vid SEM(SV_VertexID), uint iid SEM(SV_InstanceID)) {
     Prim p = BuildPrim(pPass, iid);
     // Glow: passes created with pPad1 = 1, rects and capsules only.
-    if (pPad1 != 0u && fFxGlow > 0.0f && (p.kind == 0u || p.kind == 1u)) p.kind = p.kind | 32u;
+    if (pPad1 != 0u && (fFxGlow > 0.0f || fFxLineW > 0.0f || fFxShadowColor.w > 0.0f) && (p.kind == 0u || p.kind == 1u))
+        p.kind = p.kind | 32u;
     if (pPad0 != 0u) p = ReflectPrim(p);
     return EmitVertex(p, vid);
 }
@@ -12265,11 +12503,28 @@ float SdRoundRect(float2 pix, float4 rect, float4 radii) {
     return length(float2(max(qx, 0.0f), max(qy, 0.0f))) + min(max(qx, qy), 0.0f) - r;
 }
 
-float GlowAt(VsOut i, uint kb, float cov) {
+// Glow, Outline and Shadow together, from one signed distance (and one more
+// for the shadow's offset copy). Outline is a band just inside the edge, so
+// it never changes a bar's size; the shadow sits behind the bar's own pixels.
+float4 FxShade(VsOut i, uint kb) {
     float d = (kb == 1u) ? SdCapsule(i.pix, i.shape, i.radii.x) : SdRoundRect(i.pix, i.shape, i.radii);
-    if (d <= 0.0f) return cov;
-    float g = exp(-(d * d) / max(fFxGlowR * fFxGlowR * 0.5f, 0.01f));
-    return cov + (1.0f - cov) * fFxGlow * 0.65f * g;
+    float cov = Coverage(i, kb);
+    float4 col = i.color * cov;
+    if (fFxLineW > 0.0f) {
+        float o = saturate(0.5f - (abs(d + fFxLineW * 0.5f) - fFxLineW * 0.5f)) * fFxLineColor.w * i.color.w;
+        col = col * (1.0f - o) + float4(fFxLineColor.x, fFxLineColor.y, fFxLineColor.z, 1.0f) * o;
+    }
+    if (fFxGlow > 0.0f && d > 0.0f) {
+        float g = exp(-(d * d) / max(fFxGlowR * fFxGlowR * 0.5f, 0.01f));
+        col = col + i.color * ((1.0f - cov) * fFxGlow * 0.65f * g);
+    }
+    if (fFxShadowColor.w > 0.0f) {
+        float2 sp = float2(i.pix.x - fFxShadowX, i.pix.y - fFxShadowY);
+        float ds = (kb == 1u) ? SdCapsule(sp, i.shape, i.radii.x) : SdRoundRect(sp, i.shape, i.radii);
+        float s = saturate((fFxShadowSoft * 0.5f + 0.5f - ds) / (fFxShadowSoft + 1.0f)) * fFxShadowColor.w * i.color.w;
+        col = col + float4(fFxShadowColor.x, fFxShadowColor.y, fFxShadowColor.z, 1.0f) * (s * (1.0f - col.w));
+    }
+    return col;
 }
 
 float4 PSMain(VsOut i) SEM(SV_Target) {
@@ -12291,8 +12546,8 @@ float4 PSMain(VsOut i) SEM(SV_Target) {
         float cov = gGlyphs.SampleLevel(gSamp, uv, 0.0f).w;
         return i.color * (cov * fSceneAlpha);
     }
+    if ((i.kind & 32u) != 0u) return FxShade(i, kb) * (fade * fSceneAlpha);
     float cov = Coverage(i, kb);
-    if ((i.kind & 32u) != 0u) cov = GlowAt(i, kb, cov);
     return i.color * (cov * fade * fSceneAlpha);
 }
 
@@ -12670,6 +12925,9 @@ struct FrameCB {
     uint32_t specW, specHead, specTex, specPad;
     float fxGlow, fxGlowR, fxBloom, fxBloomR;
     float fxTexel[4];
+    float fxLineColor[4];
+    float fxShadowColor[4];
+    float fxLineW, fxShadowX, fxShadowY, fxShadowSoft;
 };
 struct PassCB {
     uint32_t pass, count, pad0, pad1;
@@ -12686,7 +12944,7 @@ struct CsCB {
     float fmin, fmax, breatheUp, breatheDown;
 };
 #pragma pack(pop)
-static_assert(sizeof(FrameCB) == 34 * 16, "FrameCB must match tt_cb.hlsl");
+static_assert(sizeof(FrameCB) == 37 * 16, "FrameCB must match tt_cb.hlsl");
 static_assert(sizeof(PassCB) == 16, "PassCB must match tt_cb.hlsl");
 static_assert(sizeof(CsCB) == 9 * 16, "CsCB must match tt_cb.hlsl");
 
@@ -13702,7 +13960,11 @@ bool Render(const FrameInputs& in) {
     if (g_settings.style == VizStyle::Line) margin += 6.f * g_dpiScale;  // the edge glow
     const float fxGlowR = g_settings.fxGlow > 0 ? g_settings.fxGlowRadius * g_dpiScale : 0.f;
     const float fxBloomR = g_settings.fxBloom > 0 ? g_settings.fxBloomRadius * g_dpiScale : 0.f;
-    margin += std::max(fxGlowR * 2.f, fxBloomR);  // room for the light to spread
+    const bool fxShadow = g_settings.fxShadow > 0;
+    const float fxShadowReach = fxShadow ? (g_settings.fxShadowSoft + std::max(fabsf(g_settings.fxShadowX), fabsf(g_settings.fxShadowY))) *
+                                               g_dpiScale + 1.f
+                                         : 0.f;
+    margin += std::max({fxGlowR * 2.f, fxBloomR, fxShadowReach});  // room for the light and shade to spread
     D2D1_RECT_F content = D2D1::RectF(L.blockX - margin, L.blockY - margin, L.blockX + L.totalWidth + margin,
                                       L.blockY + L.totalHeight + margin);
     D2D1_RECT_F want = content;
@@ -13896,6 +14158,22 @@ bool Render(const FrameInputs& in) {
     f.fxGlowR = fxGlowR;
     f.fxBloom = g_settings.fxBloom / 100.f;
     f.fxBloomR = fxBloomR;
+    if (g_settings.fxOutlineWidth > 0.f && g_settings.fxOutlineA > 0) {
+        f.fxLineW = g_settings.fxOutlineWidth * g_dpiScale;
+        f.fxLineColor[0] = g_settings.fxOutlineR / 255.f;
+        f.fxLineColor[1] = g_settings.fxOutlineG / 255.f;
+        f.fxLineColor[2] = g_settings.fxOutlineB / 255.f;
+        f.fxLineColor[3] = g_settings.fxOutlineA / 255.f;
+    }
+    if (fxShadow) {
+        f.fxShadowColor[0] = g_settings.fxShadowR / 255.f;
+        f.fxShadowColor[1] = g_settings.fxShadowG / 255.f;
+        f.fxShadowColor[2] = g_settings.fxShadowB / 255.f;
+        f.fxShadowColor[3] = g_settings.fxShadow / 100.f;
+        f.fxShadowX = g_settings.fxShadowX * g_dpiScale;
+        f.fxShadowY = g_settings.fxShadowY * g_dpiScale;
+        f.fxShadowSoft = g_settings.fxShadowSoft * g_dpiScale;
+    }
     if (f.fxBloom > 0.f) {
         UINT qw = std::max(1u, g.w / 4), qh = std::max(1u, g.h / 4);
         f.fxTexel[0] = 1.f / qw;
@@ -13938,6 +14216,9 @@ bool Render(const FrameInputs& in) {
     for (int k = 0; k < 4; k++) MixF(hash, f.vu[k], 2048.f);
     Mix(hash, (uint64_t)g_settings.fxGlow * 1000003u + (uint64_t)g_settings.fxBloom * 1009u +
                   (uint64_t)g_settings.fxGlowRadius * 31u + (uint64_t)g_settings.fxBloomRadius);
+    MixF(hash, f.fxLineW, 64.f);
+    for (int k = 0; k < 4; k++) MixF(hash, f.fxLineColor[k] + f.fxShadowColor[k] * 7.f, 1024.f);
+    MixF(hash, f.fxShadowX + f.fxShadowY * 1013.f + f.fxShadowSoft * 7919.f, 64.f);
 
     const bool drawBars = !in.dragPause;
     const bool cpuBars = !gpuOk && drawBars;
@@ -14386,7 +14667,7 @@ void VizResolveColors(RGBA* c1, RGBA* cGrad1, RGBA* c2) {
         DWORD dw = GetWindowsAccentColor();
         *c1 = {0xFF, (BYTE)((dw >> 16) & 0xFF), (BYTE)((dw >> 8) & 0xFF), (BYTE)(dw & 0xFF)};
     } else if (g_settings.colorMode == VizColorMode::AlbumArt || g_settings.colorMode == VizColorMode::DynamicAlbum) {
-        DWORD dw = g_albumArtColor.load(std::memory_order_relaxed);
+        DWORD dw = VizAlbumColorShown(0);
         *c1 = {0xFF, (BYTE)((dw >> 16) & 0xFF), (BYTE)((dw >> 8) & 0xFF), (BYTE)(dw & 0xFF)};
     }
     *c2 = {g_settings.grad2A, g_settings.grad2R, g_settings.grad2G, g_settings.grad2B};
@@ -14396,7 +14677,7 @@ void VizResolveColors(RGBA* c1, RGBA* cGrad1, RGBA* c2) {
         *c2 = {255, 200, 29, 51};
     }
     if (g_settings.colorMode == VizColorMode::DynamicAlbum) {
-        DWORD dw = g_albumArtColorSecondary.load(std::memory_order_relaxed);
+        DWORD dw = VizAlbumColorShown(1);
         *c2 = {0xFF, (BYTE)((dw >> 16) & 0xFF), (BYTE)((dw >> 8) & 0xFF), (BYTE)(dw & 0xFF)};
         *cGrad1 = *c1;
     }
@@ -14806,11 +15087,27 @@ bool RenderVisualizerD3D(float sceneAlpha) {
     ttgfx::MixF(key, layout.blockX, 64.f);
     ttgfx::MixF(key, layout.blockY, 64.f);
     ttgfx::Mix(key, (uint64_t)g_swapChainWidth * 65536u + g_swapChainHeight);
+    // Scale numbers (Spectrogram, VU): fixed by the settings and the size.
+    const bool scale = VizStyleHasScale();
+    const bool scaleHorizontal = g_settings.orientation == VizOrientation::Horizontal;
+    const float scaleMax = std::max(2.f, VizPx((float)std::max(2, g_settings.barMaxSize)));
+    const int scaleBars = VizEffectiveBarCount();
+    const float scaleBarW = std::max(1.f, VizPx((float)std::max(1, g_settings.barWidth)));
+    const float scaleGap = VizPx((float)std::max(0, g_settings.barGap));
+    const float scaleThick = scaleBars * (scaleBarW + scaleGap) - scaleGap;
+    if (scale) {
+        ttgfx::Mix(key, 7u + (uint64_t)g_settings.style * 131u + (uint64_t)(g_settings.dbFloor + 200) * 1009u +
+                            (uint64_t)(g_settings.dbCeiling + 200) * 65537u + (uint64_t)g_settings.engine);
+        ttgfx::MixF(key, scaleMax, 64.f);
+        ttgfx::MixF(key, scaleThick, 64.f);
+        ttgfx::Mix(key, scaleHorizontal ? 1u : 2u);
+    }
     if (!ttgfx::g.textForce && key == ttgfx::g.textKey) return true;
     ttgfx::g.textKey = key;
     ttgfx::g.textForce = false;
     // Nothing to show: take the surface off rather than present a clear one.
-    const bool textEmpty = tf.pf.empty() && tf.progress < 0.f && (tf.np.empty() || tf.npAlpha <= 0.01f);
+    const bool textEmpty = tf.pf.empty() && tf.progress < 0.f && (tf.np.empty() || tf.npAlpha <= 0.01f)
+                           && !(scale && sceneAlpha > 0.001f);
     if (textEmpty) {
         ttgfx::ShowTextSurface(false);
         return true;
@@ -14823,6 +15120,7 @@ bool RenderVisualizerD3D(float sceneAlpha) {
                                               D2D1::IdentityMatrix(), sceneAlpha),
                         nullptr);
     VizDrawTextOverlays(tf, layout, true);
+    if (scale && sceneAlpha > 0.001f) VizDrawStyleScale(layout.blockX, layout.blockY, scaleMax, scaleThick, scaleHorizontal);
     if (fade) g_dc->PopLayer();
     HRESULT hrEnd = g_dc->EndDraw();
     HRESULT hrPresent = g_swapChain->Present(0, 0);
@@ -15111,10 +15409,10 @@ void RenderVisualizer() {
                 DWORD dw = GetWindowsAccentColor();
                 c1 = {0xFF, (BYTE)((dw>>16)&0xFF), (BYTE)((dw>>8)&0xFF), (BYTE)(dw&0xFF)};
             } else if (g_settings.colorMode == VizColorMode::AlbumArt) {
-                DWORD dw = g_albumArtColor.load(std::memory_order_relaxed);
+                DWORD dw = VizAlbumColorShown(0);
                 c1 = {0xFF, (BYTE)((dw>>16)&0xFF), (BYTE)((dw>>8)&0xFF), (BYTE)(dw&0xFF)};
             } else if (g_settings.colorMode == VizColorMode::DynamicAlbum) {
-                DWORD dw = g_albumArtColor.load(std::memory_order_relaxed);
+                DWORD dw = VizAlbumColorShown(0);
                 c1 = {0xFF, (BYTE)((dw>>16)&0xFF), (BYTE)((dw>>8)&0xFF), (BYTE)(dw&0xFF)};
             }
         }
@@ -15125,11 +15423,12 @@ void RenderVisualizer() {
             c2     = {255, 200, 29, 51};
         }
         if (g_settings.colorMode == VizColorMode::DynamicAlbum) {
-            DWORD dw = g_albumArtColorSecondary.load(std::memory_order_relaxed);
+            DWORD dw = VizAlbumColorShown(1);
             c2    = {0xFF, (BYTE)((dw>>16)&0xFF), (BYTE)((dw>>8)&0xFF), (BYTE)(dw&0xFF)};
             cGrad1 = c1;
         }
 
+        const bool reflD2D = VizFxD2DBegin(useFadeLayer);
         if (VizDrawStyleD2D(blockX, blockY, totalWidth, totalHeight, barCount, barW, barGap, maxSize, idleSize,
                             horizontal, c1, cGrad1, c2, rainbowBase)) {
             // drawn by the style
@@ -15596,6 +15895,7 @@ void RenderVisualizer() {
                 for (const auto& cap : s_capRects) g_dc->FillRectangle(cap, g_barBrush2.Get());
             }
         }
+        if (reflD2D) VizFxD2DEnd(blockY + maxSize, VizReflectionDepth(maxSize));
 
         {
             VizTextFrame tf;
@@ -17247,6 +17547,18 @@ void LoadSettings() {
     g_settings.fxGlowRadius = std::clamp(Wh_GetIntSetting(L"appearance.fxGlowRadius"), 1, 32);
     g_settings.fxBloom = std::clamp(Wh_GetIntSetting(L"appearance.fxBloom"), 0, 100);
     g_settings.fxBloomRadius = std::clamp(Wh_GetIntSetting(L"appearance.fxBloomRadius"), 4, 64);
+    g_settings.fxOutlineWidth = ReadNumberSetting(L"appearance.fxOutlineWidth", L"Appearance", L"Outline Width", 0.f, 0.f, 16.f);
+    {
+        BYTE dummy = 0;
+        ReadColorSetting(L"appearance.fxOutlineColor", L"Appearance", L"Outline Color", 0xB0, 255, 255, 255,
+                         &g_settings.fxOutlineA, &g_settings.fxOutlineR, &g_settings.fxOutlineG, &g_settings.fxOutlineB);
+        ReadColorSetting(L"appearance.fxShadowColor", L"Appearance", L"Shadow Color", 255, 0, 0, 0,
+                         &dummy, &g_settings.fxShadowR, &g_settings.fxShadowG, &g_settings.fxShadowB);
+    }
+    g_settings.fxShadow = std::clamp(Wh_GetIntSetting(L"appearance.fxShadow"), 0, 100);
+    g_settings.fxShadowX = ReadNumberSetting(L"appearance.fxShadowX", L"Appearance", L"Shadow Offset X", 2.f, -32.f, 32.f);
+    g_settings.fxShadowY = ReadNumberSetting(L"appearance.fxShadowY", L"Appearance", L"Shadow Offset Y", 3.f, -32.f, 32.f);
+    g_settings.fxShadowSoft = ReadNumberSetting(L"appearance.fxShadowSoftness", L"Appearance", L"Shadow Softness", 4.f, 0.f, 32.f);
 
     PCWSTR orientation = Wh_GetStringSetting(L"appearance.orientation");
     g_settings.orientation =
