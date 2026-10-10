@@ -711,15 +711,15 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
     - fxGlow: 0
       $name: Glow
       $description: 0-100. A soft halo around each bar, dot, line and spark, worked out in the same shader pass that draws them, so it costs next to nothing. Direct3D 11 renderer only
-    - fxGlowRadius: 6
+    - fxGlowRadius: '6'
       $name: Glow Radius
-      $description: 1-32 pixels. How far the halo reaches
+      $description: 1-32 pixels. How far the halo reaches. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
     - fxBloom: 0
       $name: Bloom
       $description: 0-100. Light bleeding out of the whole picture, like a camera lens, from a blurred copy at a quarter of the size added back on top. A little GPU work, and only on frames that change. Direct3D 11 renderer only
-    - fxBloomRadius: 16
+    - fxBloomRadius: '16'
       $name: Bloom Radius
-      $description: 4-64 pixels. How far the light spreads
+      $description: 4-64 pixels. How far the light spreads. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
     - fxOutlineWidth: '0'
       $name: Outline Width
       $description: 0-16 pixels, decimals allowed (0.5, 1.25). A line just inside each bar's edge, so bars keep their size. 0 = off. Direct3D 11 renderer only
@@ -750,18 +750,18 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
     - barCount: 32
       $name: Bar Count
       $description: How many bars are drawn across the visualizer
-    - barWidth: 6
+    - barWidth: '6'
       $name: Bar Width
-      $description: Thickness of each bar, in pixels
-    - barGap: 4
+      $description: Thickness of each bar, in pixels. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
+    - barGap: '4'
       $name: Bar Gap
-      $description: Space between bars, in pixels
-    - barMaxSize: 140
+      $description: Space between bars, in pixels. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
+    - barMaxSize: '140'
       $name: Bar Max Size
-      $description: Maximum height (or length, if vertical) a bar can reach at full volume, in pixels
-    - barIdleSize: 4
+      $description: Maximum height (or length, if vertical) a bar can reach at full volume, in pixels. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
+    - barIdleSize: '4'
       $name: Bar Idle Size
-      $description: Minimum height bars keep when there's no audio, so the visualizer never looks completely flat
+      $description: Minimum height bars keep when there's no audio, so the visualizer never looks completely flat. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
     - barCornerRadius: '3'
       $name: Bar Corner Radius
       $description: One value for all corners, or four space-separated values for top-left, top-right, bottom-right, bottom-left
@@ -898,51 +898,51 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
     - nowPlayingFont: Segoe UI
       $name: Now Playing Font
       $description: Font family name, must be installed on your system (e.g. a Nerd Font for glyph support)
-    - nowPlayingFontSize: 16
+    - nowPlayingFontSize: '16'
       $name: Now Playing Font Size
-      $description: Text size, in points
+      $description: Text size, in points. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
     - nowPlayingDisplaySeconds: 6
       $name: Now Playing Display Seconds
       $description: How long the text stays visible after a track changes, before fading out. 0 keeps it on screen all the time, like a media widget
-    - nowPlayingOffsetX: 0
+    - nowPlayingOffsetX: '0'
       $name: Now Playing Offset X
-      $description: Shifts the artist/title text sideways from where it normally sits, in pixels. Negative moves it left, positive right. It still travels with the visualizer -- this only changes where it sits relative to it, which is how you move it clear of the background panel. Can also be nudged live with the keyboard (Interaction, move target 2). A keyboard nudge ADDS to this number rather than replacing it, so whatever you type here always counts
-    - nowPlayingOffsetY: 0
+      $description: Shifts the artist/title text sideways from where it normally sits, in pixels. Negative moves it left, positive right. It still travels with the visualizer -- this only changes where it sits relative to it, which is how you move it clear of the background panel. Can also be nudged live with the keyboard (Interaction, move target 2). A keyboard nudge ADDS to this number rather than replacing it, so whatever you type here always counts. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
+    - nowPlayingOffsetY: '0'
       $name: Now Playing Offset Y
-      $description: Shifts the artist/title text up or down from where it normally sits, in pixels. Negative moves it up, positive down. As with Offset X, a keyboard nudge adds to this rather than replacing it
+      $description: Shifts the artist/title text up or down from where it normally sits, in pixels. Negative moves it up, positive down. As with Offset X, a keyboard nudge adds to this rather than replacing it. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
     - nowPlayingBgColor: '#00000000'
       $name: Now Playing Background
       $description: 'A panel drawn behind the artist/title text, sized to the text itself rather than to the visualizer. Fully transparent by default, meaning no panel. Give it some alpha to make the text readable over a busy wallpaper without having to enlarge the main Background panel. It fades in and out with the text. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b)'
-    - nowPlayingBgPadding: 6
+    - nowPlayingBgPadding: '6'
       $name: Now Playing Background Padding
-      $description: Space between the text and the edge of its panel, in pixels
-    - nowPlayingBgCornerRadius: 6
+      $description: Space between the text and the edge of its panel, in pixels. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
+    - nowPlayingBgCornerRadius: '6'
       $name: Now Playing Background Corner Radius
-      $description: Roundness of the text panel's corners, in pixels
-    - nowPlayingBgBorderSize: 0
+      $description: Roundness of the text panel's corners, in pixels. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
+    - nowPlayingBgBorderSize: '0'
       $name: Now Playing Background Border Size
-      $description: Outline thickness around the text panel, in pixels. 0 disables it. Draws whether or not the panel itself has any fill, so an outline on its own is possible
+      $description: Outline thickness around the text panel, in pixels. 0 disables it. Draws whether or not the panel itself has any fill, so an outline on its own is possible. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
     - nowPlayingBgBorderColor: '#40FFFFFF'
       $name: Now Playing Background Border Color
       $description: 'Color of the text panel''s outline. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b)'
-    - peakFreqOffsetX: 0
+    - peakFreqOffsetX: '0'
       $name: Peak Readout Offset X
-      $description: Shifts the frequency readout sideways from its chosen alignment, in pixels. Negative moves it left, positive right. Use this for fine placement -- the alignment options above put it in the right general area, this puts it exactly where you want it. Can also be nudged live with the keyboard (Interaction, move target 3), which adds to this number rather than replacing it
-    - peakFreqOffsetY: 0
+      $description: Shifts the frequency readout sideways from its chosen alignment, in pixels. Negative moves it left, positive right. Use this for fine placement -- the alignment options above put it in the right general area, this puts it exactly where you want it. Can also be nudged live with the keyboard (Interaction, move target 3), which adds to this number rather than replacing it. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
+    - peakFreqOffsetY: '0'
       $name: Peak Readout Offset Y
-      $description: Shifts the frequency readout up or down from its chosen alignment, in pixels. Negative moves it up, positive down. As with Offset X, a keyboard nudge adds to this rather than replacing it
+      $description: Shifts the frequency readout up or down from its chosen alignment, in pixels. Negative moves it up, positive down. As with Offset X, a keyboard nudge adds to this rather than replacing it. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
     - peakFreqBgColor: '#00000000'
       $name: Peak Readout Background
       $description: 'A panel drawn behind the frequency readout, sized to the text itself. Fully transparent by default, meaning no panel. Particularly useful for this one, since the readout sits over the bars on the inside alignments and can be hard to read against them. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b)'
-    - peakFreqBgPadding: 6
+    - peakFreqBgPadding: '6'
       $name: Peak Readout Background Padding
-      $description: Space between the readout and the edge of its panel, in pixels
-    - peakFreqBgCornerRadius: 6
+      $description: Space between the readout and the edge of its panel, in pixels. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
+    - peakFreqBgCornerRadius: '6'
       $name: Peak Readout Background Corner Radius
-      $description: Roundness of the readout panel's corners, in pixels
-    - peakFreqBgBorderSize: 0
+      $description: Roundness of the readout panel's corners, in pixels. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
+    - peakFreqBgBorderSize: '0'
       $name: Peak Readout Background Border Size
-      $description: Outline thickness around the readout panel, in pixels. 0 disables it. Draws whether or not the panel itself has any fill
+      $description: Outline thickness around the readout panel, in pixels. 0 disables it. Draws whether or not the panel itself has any fill. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
     - peakFreqBgBorderColor: '#40FFFFFF'
       $name: Peak Readout Background Border Color
       $description: 'Color of the readout panel''s outline. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b)'
@@ -997,12 +997,12 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
         - below: Below the panel
         - above: Above the panel
         - panel_bottom: Inside the panel, under the bars
-    - height: 2
+    - height: '2'
       $name: Height
-      $description: In pixels
-    - gap: 6
+      $description: In pixels. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
+    - gap: '6'
       $name: Gap
-      $description: Distance from the panel (or, inside it, from the bars), in pixels
+      $description: Distance from the panel (or, inside it, from the bars), in pixels. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
     - color: '#FFFFFFFF'
       $name: Color
       $description: 'The played part. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b)'
@@ -1021,9 +1021,9 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
     - font: Consolas
       $name: Font
       $description: A monospace font installed in Windows (Consolas, Cascadia Mono, a Nerd Font, a pixel font)
-    - fontSize: 14
+    - fontSize: '14'
       $name: Font Size
-      $description: In points. Sets the cell size, and with it the size of the whole grid; Bar Width, Gap and Max Size don't apply to this shape
+      $description: In points. Sets the cell size, and with it the size of the whole grid; Bar Width, Gap and Max Size don't apply to this shape. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
     - rows: 16
       $name: Rows
       $description: Height of Columns and Waterfall, in lines. Columns are one per bar (Bar Count, or the band layout)
@@ -1221,12 +1221,12 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
         - both: Arrow Keys and WASD
         - arrows: Arrow Keys only
         - wasd: WASD only
-    - keyMoveStep: 1
+    - keyMoveStep: '1'
       $name: Keyboard Move Step
-      $description: How far one press moves the visualizer, in pixels. 1 gives true pixel-by-pixel placement
-    - keyMoveFastStep: 10
+      $description: How far one press moves the visualizer, in pixels. 1 gives true pixel-by-pixel placement. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
+    - keyMoveFastStep: '10'
       $name: Keyboard Move Fast Step
-      $description: How far one press moves it while the Fast Key below is also held, in pixels
+      $description: How far one press moves it while the Fast Key below is also held, in pixels. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
     - keyMoveFineStep: '0.25'
       $name: Keyboard Move Fine Step
       $description: A subpixel step for the visualizer, used while the Fine Key is held or with Subpixel Nudges ticked in the right-click menu. Only shows as movement with Pixel Snap off (Position); with it on, the position still accumulates and the picture moves a whole pixel at a time
@@ -1298,24 +1298,24 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
     - iconNextPath: ''
       $name: Next Icon Path
       $description: Full path to a local image file for the Next button. Leave blank to use the built-in icon
-    - iconSize: 32
+    - iconSize: '32'
       $name: Icon Size
-      $description: Size of each button, in pixels (square)
-    - iconSpacing: 14
+      $description: Size of each button, in pixels (square). Decimals allowed; the media controls round to whole pixels
+    - iconSpacing: '14'
       $name: Icon Spacing
-      $description: Gap between buttons, in pixels
+      $description: Gap between buttons, in pixels. Decimals allowed; the media controls round to whole pixels
     - plateColor: '#00000000'
       $name: Backing Plate Color
       $description: 'A panel drawn behind the whole icon strip. Fully transparent by default, so your icons sit directly on the wallpaper with nothing behind them. Raise the alpha if pale icons are hard to pick out against a light wallpaper -- e.g. #8C141414 for a soft dark plate. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b)'
-    - platePadding: 0
+    - platePadding: '0'
       $name: Backing Plate Padding
-      $description: Breathing room between the icons and the edge of the backing plate, in pixels. This grows the strip itself rather than shrinking the icons, so raising it never makes the buttons smaller or harder to click. Note that it grows the strip whether or not the plate is visible, which very slightly shifts where the Horizontal/Vertical Position percentages land
-    - plateCornerRadius: 8
+      $description: Breathing room between the icons and the edge of the backing plate, in pixels. This grows the strip itself rather than shrinking the icons, so raising it never makes the buttons smaller or harder to click. Note that it grows the strip whether or not the plate is visible, which very slightly shifts where the Horizontal/Vertical Position percentages land. Decimals allowed; the media controls round to whole pixels
+    - plateCornerRadius: '8'
       $name: Backing Plate Corner Radius
-      $description: Roundness of the backing plate corners, in pixels. Only used when the plate color above has some alpha
-    - plateBorderSize: 0
+      $description: Roundness of the backing plate corners, in pixels. Only used when the plate color above has some alpha. Decimals allowed; the media controls round to whole pixels
+    - plateBorderSize: '0'
       $name: Backing Plate Border Size
-      $description: Outline thickness around the backing plate, in pixels. 0 disables it. The border draws whether or not the plate itself has any fill, so you can have an outline on its own with nothing behind the icons
+      $description: Outline thickness around the backing plate, in pixels. 0 disables it. The border draws whether or not the plate itself has any fill, so you can have an outline on its own with nothing behind the icons. Decimals allowed; the media controls round to whole pixels
     - plateBorderColor: '#40FFFFFF'
       $name: Backing Plate Border Color
       $description: 'Color of the backing plate outline. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b)'
@@ -1361,12 +1361,12 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
         - panel_top_right: Panel, top right
         - panel_bottom_left: Panel, bottom left
         - panel_bottom_right: Panel, bottom right
-    - anchorOffsetX: 8
+    - anchorOffsetX: '8'
       $name: Anchor Inset X
-      $description: Distance in from the panel's left or right edge, in pixels. Only used with a panel anchor
-    - anchorOffsetY: 8
+      $description: Distance in from the panel's left or right edge, in pixels. Only used with a panel anchor. Decimals allowed; the media controls round to whole pixels
+    - anchorOffsetY: '8'
       $name: Anchor Inset Y
-      $description: Distance in from the panel's top or bottom edge, in pixels. Only used with a panel anchor
+      $description: Distance in from the panel's top or bottom edge, in pixels. Only used with a panel anchor. Decimals allowed; the media controls round to whole pixels
     - layout: strip
       $name: Layout
       $description: Strip is the three buttons. Card is a small media card in the same place, sized from Icon Size and Icon Spacing - the album art (hover it for previous / play / next), a seek bar (click or drag), a speaker button that switches the Windows default output in one click, and a volume slider (drag it, or scroll anywhere on the card)
@@ -1379,15 +1379,15 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
     - cardBorderColor: '#00FFFFFF'
       $name: Card Border Color
       $description: 'Card only. Same formats as Card Background'
-    - cardBorderSize: 0
+    - cardBorderSize: '0'
       $name: Card Border Size
-      $description: Card only. Pixels, drawn inward from the edge
-    - cardCornerRadius: 12
+      $description: Card only. Pixels, drawn inward from the edge. Decimals allowed; the media controls round to whole pixels
+    - cardCornerRadius: '12'
       $name: Card Corner Radius
-      $description: Card only. Pixels. The album art's corners follow it
-    - cardArtSize: 0
+      $description: Card only. Pixels. The album art's corners follow it. Decimals allowed; the media controls round to whole pixels
+    - cardArtSize: '0'
       $name: Card Art Size
-      $description: Card only. Width of the album art in pixels, which sets the card's width. 0 sizes it from Icon Size and Icon Spacing
+      $description: Card only. Width of the album art in pixels, which sets the card's width. 0 sizes it from Icon Size and Icon Spacing. Decimals allowed; the media controls round to whole pixels
     - cardAccent: icon
       $name: Card Accent
       $description: Card only. Colour of the seek and volume fills and their knobs
@@ -1416,9 +1416,9 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
     - blur: 0
       $name: Blur
       $description: Gaussian blur strength behind the panel, in pixels. 0 disables it. Computed once and cached, not redrawn every frame, so raising this has minimal ongoing CPU cost
-    - borderSize: 0
+    - borderSize: '0'
       $name: Border Size
-      $description: Panel border thickness, in pixels. 0 disables it
+      $description: Panel border thickness, in pixels. 0 disables it. Decimals allowed; turn Pixel Snap (Position) off to keep the fractions
     - borderColor: '#40FFFFFF'
       $name: Border Color
       $description: 'Panel border color. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b)'
@@ -1655,10 +1655,10 @@ struct Settings {
     VizShape shape = VizShape::Stereo;
     VizOrientation orientation = VizOrientation::Horizontal;
     int barCount = 32;
-    int barWidth = 6;
-    int barGap = 4;
-    int barMaxSize = 140;
-    int barIdleSize = 4;
+    float barWidth = 6;
+    float barGap = 4;
+    float barMaxSize = 140;
+    float barIdleSize = 4;
     float barRadiusTL = 3.0f, barRadiusTR = 3.0f, barRadiusBR = 3.0f, barRadiusBL = 3.0f;
     VizColorMode colorMode = VizColorMode::Solid;
     BYTE colorA = 255, colorR = 255, colorG = 255, colorB = 255;
@@ -1680,8 +1680,8 @@ struct Settings {
     bool keyMoveEnabled = true;
     unsigned keyMoveModifier = VIZ_MOD_CTRL | VIZ_MOD_ALT;
     VizKeyMoveKeys keyMoveKeys = VizKeyMoveKeys::Both;
-    int keyMoveStep = 1;
-    int keyMoveFastStep = 10;
+    float keyMoveStep = 1;
+    float keyMoveFastStep = 10;
     unsigned keyMoveFastKey = VIZ_MOD_SHIFT;
     float keyMoveFineStep = 0.25f;           // px, for subpixel nudges
     unsigned keyMoveFineKey = VIZ_MOD_NONE;  // held for a fine step
@@ -1696,10 +1696,10 @@ struct Settings {
 
     bool backgroundEnabled = true;
     BYTE bgA = 0x60, bgR = 0, bgG = 0, bgB = 0;
-    int bgPaddingL = 24, bgPaddingR = 24, bgPaddingT = 24, bgPaddingB = 24;
+    float bgPaddingL = 24, bgPaddingR = 24, bgPaddingT = 24, bgPaddingB = 24;
     float bgRadiusTL = 14.0f, bgRadiusTR = 14.0f, bgRadiusBR = 14.0f, bgRadiusBL = 14.0f;
     int bgBlur = 0;
-    int bgBorderSize = 0;
+    float bgBorderSize = 0;
     BYTE borderA = 0x40, borderR = 255, borderG = 255, borderB = 255;
 
     int targetFps = 60;
@@ -1716,19 +1716,25 @@ struct Settings {
     bool nowPlayingEnabled = false;
     BYTE nowPlayingA = 255, nowPlayingR = 255, nowPlayingG = 255, nowPlayingB = 255;
     std::wstring nowPlayingFont = L"Segoe UI";
-    int nowPlayingFontSize = 16;
+    float nowPlayingFontSize = 16;
     int nowPlayingDisplaySeconds = 6;
-    int nowPlayingOffsetX = 0, nowPlayingOffsetY = 0;
-    int peakFreqOffsetX = 0, peakFreqOffsetY = 0;
+    float nowPlayingOffsetY = 0;
+    float nowPlayingOffsetX = 0;
+    float peakFreqOffsetY = 0;
+    float peakFreqOffsetX = 0;
 
     // Per-overlay text panels. Alpha 0 on the fill means "no panel"; the border
     // is independent, so an outline with nothing behind it is a valid look.
     BYTE npBgA = 0, npBgR = 0, npBgG = 0, npBgB = 0;
-    int npBgPadding = 6, npBgCornerRadius = 6, npBgBorderSize = 0;
+    float npBgBorderSize = 0;
+    float npBgCornerRadius = 6;
+    float npBgPadding = 6;
     BYTE npBgBorderA = 0x40, npBgBorderR = 255, npBgBorderG = 255, npBgBorderB = 255;
 
     BYTE pfBgA = 0, pfBgR = 0, pfBgG = 0, pfBgB = 0;
-    int pfBgPadding = 6, pfBgCornerRadius = 6, pfBgBorderSize = 0;
+    float pfBgBorderSize = 0;
+    float pfBgCornerRadius = 6;
+    float pfBgPadding = 6;
     BYTE pfBgBorderA = 0x40, pfBgBorderR = 255, pfBgBorderG = 255, pfBgBorderB = 255;
 
     bool autoHideEnabled = false;
@@ -1751,18 +1757,20 @@ struct Settings {
     std::wstring mediaIconPlayPath;
     std::wstring mediaIconPausePath;
     std::wstring mediaIconNextPath;
-    int mediaIconSize = 32;
-    int mediaIconSpacing = 14;
+    float mediaIconSize = 32;
+    float mediaIconSpacing = 14;
     BYTE mediaPlateA = 0, mediaPlateR = 0, mediaPlateG = 0, mediaPlateB = 0;
-    int mediaPlatePadding = 0;
+    float mediaPlatePadding = 0;
     bool mediaCard = false;  // Media Controls > Layout = Card (2.1)
     BYTE cardBgA = 158, cardBgR = 10, cardBgG = 10, cardBgB = 13;
     BYTE cardBorderA = 0, cardBorderR = 255, cardBorderG = 255, cardBorderB = 255;
-    int cardBorderSize = 0, cardRadius = 12, cardArtSize = 0;
+    float cardArtSize = 0;
+    float cardRadius = 12;
+    float cardBorderSize = 0;
     int cardAccentSource = 0;  // 0 icon colour, 1 custom, 2 album art, 3 Windows accent
     BYTE cardAccentA = 255, cardAccentR = 255, cardAccentG = 255, cardAccentB = 255;
-    int mediaPlateCornerRadius = 8;
-    int mediaPlateBorderSize = 0;
+    float mediaPlateCornerRadius = 8;
+    float mediaPlateBorderSize = 0;
     BYTE mediaPlateBorderA = 0x40, mediaPlateBorderR = 255, mediaPlateBorderG = 255,
          mediaPlateBorderB = 255;
     bool mediaHideWhenCovered = false;
@@ -1806,7 +1814,9 @@ struct Settings {
     // Styles (2.1): picked from the Shape list on top of an internal shape.
     VizStyle style = VizStyle::None;
     int reflection = 0;  // %, of Bar Max Size
-    int fxGlow = 0, fxGlowRadius = 6, fxBloom = 0, fxBloomRadius = 16;  // FX (2.1)
+    int fxGlow = 0, fxBloom = 0;
+    float fxBloomRadius = 16;
+    float fxGlowRadius = 6;  // FX (2.1)
     float fxOutlineWidth = 0.f;  // px
     BYTE fxOutlineA = 0xB0, fxOutlineR = 255, fxOutlineG = 255, fxOutlineB = 255;
     int fxShadow = 0;  // %
@@ -1821,17 +1831,19 @@ struct Settings {
     bool textPixel = false;
     bool progressEnabled = false;
     VizProgressPlacement progressPlacement = VizProgressPlacement::Below;
-    int progressHeight = 2, progressGap = 6;
+    float progressGap = 6;
+    float progressHeight = 2;
     BYTE progressA = 255, progressR = 255, progressG = 255, progressB = 255;
     BYTE progressTrackA = 0x40, progressTrackR = 255, progressTrackG = 255, progressTrackB = 255;
     VizMediaAnchor mediaAnchor = VizMediaAnchor::Screen;
-    int mediaAnchorOffsetX = 8, mediaAnchorOffsetY = 8;
+    float mediaAnchorOffsetY = 8;
+    float mediaAnchorOffsetX = 8;
     VizContextMenu contextMenu = VizContextMenu::RightClick;
 
     // Terminal shape (2.0).
     VizTermStyle termStyle = VizTermStyle::Columns;
     std::wstring termFont = L"Consolas";
-    int termFontSize = 14;
+    float termFontSize = 14;
     int termRows = 16;
     int termMeterColumns = 40;
     int termHotThreshold = 75;
@@ -1914,7 +1926,7 @@ ComPtr<ID2D1PathGeometry> g_bgGeoCache;
 ComPtr<ID2D1GeometryGroup> g_borderRingCache;
 D2D1_RECT_F g_bgGeoCacheRect = {-1.f, -1.f, -1.f, -1.f};
 float g_bgGeoCacheRadii[4] = {-1.f, -1.f, -1.f, -1.f};
-int g_borderCacheBorderSize = -1;
+float g_borderCacheBorderSize = -1.f;
 
 ComPtr<ID2D1StrokeStyle> g_roundCapStrokeStyle;
 ComPtr<IDWriteFactory> g_dwriteFactory;
@@ -1923,7 +1935,7 @@ ComPtr<ID2D1SolidColorBrush> g_nowPlayingBrush;
 ComPtr<ID2D1SolidColorBrush> g_npArtistBrush;
 ComPtr<ID2D1SolidColorBrush> g_progressBrush;
 ComPtr<ID2D1SolidColorBrush> g_textPanelBrush;
-int g_dwriteTextFormatFontSize = -1;
+float g_dwriteTextFormatFontSize = -1.f;
 std::wstring g_dwriteTextFormatFontName;
 
 static const IID kCLSID_D2D1GaussianBlur = {
@@ -2628,6 +2640,35 @@ void ReportSettingWarning(PCWSTR group, PCWSTR name, const std::wstring& detail)
 // Reads a free-text setting that must be a single number in [lo, hi]. Rejects
 // trailing junk ("50px", "50 50") rather than silently taking the leading
 // number, since that's exactly the kind of near-miss that looks like it worked.
+// A size or offset: a number with decimals, given as text ('1.25'; a comma
+// works as the decimal point too). Up to 2.0 these were whole-number
+// settings, and a value saved then is still stored as a number, which reads
+// back here as empty text: that number is used until the setting is saved
+// again.
+float ReadSizeSetting(PCWSTR key, float lo, float hi, float def) {
+    PCWSTR str = Wh_GetStringSetting(key);
+    float v = def;
+    bool ok = false;
+    if (str && *str) {
+        WCHAR buf[64];
+        wcsncpy_s(buf, str, _TRUNCATE);
+        for (WCHAR* c = buf; *c; c++)
+            if (*c == L',') *c = L'.';
+        WCHAR* end = nullptr;
+        double d = wcstod(buf, &end);
+        if (end != buf && std::isfinite(d)) {
+            v = (float)d;
+            ok = true;
+        }
+    }
+    Wh_FreeStringSetting(str);
+    if (!ok) {
+        int n = Wh_GetIntSetting(key);
+        if (n != 0) v = (float)n;
+    }
+    return std::clamp(v, lo, hi);
+}
+
 float ReadNumberSetting(PCWSTR key, PCWSTR group, PCWSTR name, float def, float lo, float hi) {
     PCWSTR str = Wh_GetStringSetting(key);
     float result = def;
@@ -4077,11 +4118,11 @@ void PaintMediaControls(int x, int y, int width, int height) {
     if (g_settings.mediaPlateA > 0 ||
         (g_settings.mediaPlateBorderSize > 0 && g_settings.mediaPlateBorderA > 0)) {
         float dpiScale = GetMediaControlsDpiScale();
-        float radius = std::min({(float)std::max(0, g_settings.mediaPlateCornerRadius) * dpiScale,
+        float radius = std::min({(float)std::max(0.f, g_settings.mediaPlateCornerRadius) * dpiScale,
                                  width * 0.5f, height * 0.5f});
         // Border draws inward from the edge, so it can never be thicker than
         // half the strip without the two sides meeting in the middle.
-        float bw = std::min({(float)std::max(0, g_settings.mediaPlateBorderSize) * dpiScale,
+        float bw = std::min({(float)std::max(0.f, g_settings.mediaPlateBorderSize) * dpiScale,
                              width * 0.5f, height * 0.5f});
         bool wantBorder = bw > 0.f && g_settings.mediaPlateBorderA > 0;
 
@@ -8741,7 +8782,7 @@ void UninitDirectX() {
     g_dxgiFactory.Reset();
     g_dxgiDevice.Reset();
     g_d3dDevice.Reset();
-    g_dwriteTextFormatFontSize = -1;
+    g_dwriteTextFormatFontSize = -1.f;
     g_dwriteTextFormatFontName.clear();
 }
 
@@ -8954,7 +8995,7 @@ float g_termFormatPx = -1.f;
 int g_termCellW = 8, g_termCellH = 16;
 
 bool VizTermEnsureFormat() {
-    float px = (float)std::clamp(g_settings.termFontSize, 6, 96) * g_dpiScale;
+    float px = (float)std::clamp(g_settings.termFontSize, 6.f, 96.f) * g_dpiScale;
     if (g_termFormat && g_termFormatFont == g_settings.termFont && g_termFormatPx == px) return true;
     g_termFormat.Reset();
     if (!g_dwriteFactory) return false;
@@ -9559,10 +9600,10 @@ void StepSpectrogram(int bars, float dt) {
 void StepSparks(int bars, float dt) {
     const bool horizontal = g_settings.orientation == VizOrientation::Horizontal;
     const bool top = g_settings.verticalAnchor == VizAnchor::Top;
-    const float barW = std::max(1.f, VizPx((float)std::max(1, g_settings.barWidth)));
-    const float barGap = VizPx((float)std::max(0, g_settings.barGap));
-    const float maxSize = std::max(2.f, VizPx((float)std::max(2, g_settings.barMaxSize)));
-    const float idle = VizPx((float)std::max(0, g_settings.barIdleSize));
+    const float barW = std::max(1.f, VizPx((float)std::max(1.f, g_settings.barWidth)));
+    const float barGap = VizPx((float)std::max(0.f, g_settings.barGap));
+    const float maxSize = std::max(2.f, VizPx((float)std::max(2.f, g_settings.barMaxSize)));
+    const float idle = VizPx((float)std::max(0.f, g_settings.barIdleSize));
     const float G = 900.f * g_dpiScale;
     // Growth direction of the bars, in block coordinates.
     const float gx = horizontal ? 0.f : (top ? -1.f : 1.f);
@@ -10013,9 +10054,9 @@ bool ComputeVizLayout(VizLayout* out) {
     if (!out) return false;
 
     int barCount  = VizEffectiveBarCount();
-    float barW    = std::max(1.f, VizPx((float)std::max(1, g_settings.barWidth)));
-    float barGap  = VizPx((float)std::max(0, g_settings.barGap));
-    float maxSize = std::max(2.f, VizPx((float)std::max(2, g_settings.barMaxSize)));
+    float barW    = std::max(1.f, VizPx((float)std::max(1.f, g_settings.barWidth)));
+    float barGap  = VizPx((float)std::max(0.f, g_settings.barGap));
+    float maxSize = std::max(2.f, VizPx((float)std::max(2.f, g_settings.barMaxSize)));
 
     bool horizontal = (g_settings.orientation == VizOrientation::Horizontal);
     float barsThickness = barCount * barW + (barCount - 1) * barGap;
@@ -10073,7 +10114,7 @@ bool ComputeVizLayout(VizLayout* out) {
 
     // Text overlays can sit outside the bars, so the box reserves room for them.
     // Without this they fall outside the render surface and get clipped away.
-    float fontPx = (float)std::max(6, g_settings.nowPlayingFontSize) * g_dpiScale;
+    float fontPx = (float)std::max(6.f, g_settings.nowPlayingFontSize) * g_dpiScale;
     float textTop = 0.f, textBottom = 0.f, textSide = 0.f;
 
     // textAnchorSide is where the draw code hangs the text off the bar group and
@@ -10122,7 +10163,7 @@ bool ComputeVizLayout(VizLayout* out) {
         extraSide  = std::max(extraSide, npOffX);
     }
     if (g_settings.progressEnabled) {
-        float need = (float)(std::max(1, g_settings.progressHeight) + g_settings.progressGap) * g_dpiScale +
+        float need = (float)(std::max(1.f, g_settings.progressHeight) + g_settings.progressGap) * g_dpiScale +
                      2.0f * g_dpiScale;
         if (g_settings.progressPlacement == VizProgressPlacement::Above) textTop += need;
         else if (g_settings.progressPlacement == VizProgressPlacement::Below) textBottom = std::max(textBottom, need);
@@ -10379,9 +10420,9 @@ bool GetVizTravelRange(float* travelX, float* travelY) {
     if (!GetMonitorInfo(monitor, &mi)) return false;
 
     int barCount = VizEffectiveBarCount();
-    float barW = std::max(1.f, VizPx((float)std::max(1, g_settings.barWidth)));
-    float barGap = VizPx((float)std::max(0, g_settings.barGap));
-    float maxSize = std::max(2.f, VizPx((float)std::max(2, g_settings.barMaxSize)));
+    float barW = std::max(1.f, VizPx((float)std::max(1.f, g_settings.barWidth)));
+    float barGap = VizPx((float)std::max(0.f, g_settings.barGap));
+    float maxSize = std::max(2.f, VizPx((float)std::max(2.f, g_settings.barMaxSize)));
     bool horizontal = (g_settings.orientation == VizOrientation::Horizontal);
     float barsThickness = barCount * barW + (barCount - 1) * barGap;
     float totalWidth, totalHeight;
@@ -10650,13 +10691,14 @@ LRESULT CALLBACK MoveKeyboardHookProc(int nCode, WPARAM wParam, LPARAM lParam) {
                 if (isDown) {
                     bool fast = g_settings.keyMoveFastKey != VIZ_MOD_NONE &&
                                 ModKeysHeld(g_settings.keyMoveFastKey);
-                    int step = fast ? g_settings.keyMoveFastStep : g_settings.keyMoveStep;
+                    float fstep = fast ? g_settings.keyMoveFastStep : g_settings.keyMoveStep;
+                    int step = std::max(1, (int)lroundf(fstep));  // the strip and the text: whole pixels
                     // Fine: a fraction of a pixel. Only the visualizer can sit
                     // between pixels; the strip and the text move whole pixels.
                     bool fine = !fast && (g_settings.keyMoveFine ||
                                           (g_settings.keyMoveFineKey != VIZ_MOD_NONE &&
                                            ModKeysHeld(g_settings.keyMoveFineKey)));
-                    float vstep = fine ? g_settings.keyMoveFineStep : (float)step;
+                    float vstep = fine ? g_settings.keyMoveFineStep : fstep;
                     if (g_keyMoveTarget == VizMoveTarget::Visualizer) {
                         NudgeVisualizerPx(dx * vstep, dy * vstep);
                     } else if (g_keyMoveTarget == VizMoveTarget::MediaControls) {
@@ -11102,7 +11144,7 @@ bool RecreateVisualResources() {
         g_dc->CreateSolidColorBrush(npColor, &g_nowPlayingBrush);
         g_dc->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 1), &g_npArtistBrush);
 
-        int fontSize = std::max(6, g_settings.nowPlayingFontSize);
+        float fontSize = std::max(6.f, g_settings.nowPlayingFontSize);
         if (g_dwriteFactory && (!g_dwriteTextFormat || g_dwriteTextFormatFontSize != fontSize ||
                                  g_dwriteTextFormatFontName != g_settings.nowPlayingFont)) {
             g_dwriteTextFormat.Reset();
@@ -11228,7 +11270,7 @@ HRESULT CreateRoundedRectPath(ID2D1Factory1* factory, const D2D1_RECT_F& r,
 struct TextPanelStyle {
     BYTE fillA, fillR, fillG, fillB;
     BYTE borderA, borderR, borderG, borderB;
-    int padding, cornerRadius, borderSize;
+    float padding, cornerRadius, borderSize;
 };
 
 // Draws a text overlay, optionally on a panel fitted to the text.
@@ -13947,10 +13989,10 @@ bool Render(const FrameInputs& in) {
     const bool horizontal = g_settings.orientation == VizOrientation::Horizontal;
     const VizShape shape = g_settings.shape;
     const int bars = VizEffectiveBarCount();
-    const float barW = std::max(1.f, VizPx((float)std::max(1, g_settings.barWidth)));
-    const float barGap = VizPx((float)std::max(0, g_settings.barGap));
-    const float maxSize = std::max(2.f, VizPx((float)std::max(2, g_settings.barMaxSize)));
-    const float idleSize = VizPx((float)std::max(0, g_settings.barIdleSize));
+    const float barW = std::max(1.f, VizPx((float)std::max(1.f, g_settings.barWidth)));
+    const float barGap = VizPx((float)std::max(0.f, g_settings.barGap));
+    const float maxSize = std::max(2.f, VizPx((float)std::max(2.f, g_settings.barMaxSize)));
+    const float idleSize = VizPx((float)std::max(0.f, g_settings.barIdleSize));
     const bool roundShape = shape == VizShape::Radial || shape == VizShape::Goniometer;
     const bool term = shape == VizShape::Terminal;
 
@@ -14214,8 +14256,8 @@ bool Render(const FrameInputs& in) {
     Mix(hash, in.dragPause);
     Mix(hash, (uint64_t)style * 1009u + (uint64_t)g_settings.reflection);
     for (int k = 0; k < 4; k++) MixF(hash, f.vu[k], 2048.f);
-    Mix(hash, (uint64_t)g_settings.fxGlow * 1000003u + (uint64_t)g_settings.fxBloom * 1009u +
-                  (uint64_t)g_settings.fxGlowRadius * 31u + (uint64_t)g_settings.fxBloomRadius);
+    Mix(hash, (uint64_t)g_settings.fxGlow * 1000003u + (uint64_t)g_settings.fxBloom * 1009u);
+    MixF(hash, g_settings.fxGlowRadius + g_settings.fxBloomRadius * 257.f, 64.f);
     MixF(hash, f.fxLineW, 64.f);
     for (int k = 0; k < 4; k++) MixF(hash, f.fxLineColor[k] + f.fxShadowColor[k] * 7.f, 1024.f);
     MixF(hash, f.fxShadowX + f.fxShadowY * 1013.f + f.fxShadowSoft * 7919.f, 64.f);
@@ -14824,7 +14866,7 @@ void VizBuildTextFrame(VizTextFrame& t) {
 // Rough single-line width for the room a wide readout needs, used when sizing
 // the layout before any text has been measured.
 float VizReadoutWidthEstimate() {
-    float fontPx = (float)std::max(6, g_settings.nowPlayingFontSize) * g_dpiScale;
+    float fontPx = (float)std::max(6.f, g_settings.nowPlayingFontSize) * g_dpiScale;
     int chars = 0;
     switch (g_settings.readout) {
         case VizReadout::Loudness: chars = 32; break;
@@ -14837,7 +14879,7 @@ float VizReadoutWidthEstimate() {
 
 // Where the track progress bar goes, layout-local. False when it isn't shown.
 bool VizProgressRect(const VizLayout& layout, D2D1_RECT_F* out) {
-    float h = (float)std::max(1, g_settings.progressHeight) * g_dpiScale;
+    float h = (float)std::max(1.f, g_settings.progressHeight) * g_dpiScale;
     float gap = (float)g_settings.progressGap * g_dpiScale;
     D2D1_RECT_F panel;
     float radii[4];
@@ -14897,7 +14939,7 @@ void VizDrawTextOverlays(const VizTextFrame& t, const VizLayout& layout, bool sm
             g_npArtistBrush->SetColor(D2D1::ColorF(g_settings.npArtistR / 255.0f, g_settings.npArtistG / 255.0f,
                                                    g_settings.npArtistB / 255.0f,
                                                    (g_settings.npArtistA / 255.0f) * t.npAlpha));
-        const float fontPx = (float)std::max(6, g_settings.nowPlayingFontSize) * g_dpiScale;
+        const float fontPx = (float)std::max(6.f, g_settings.nowPlayingFontSize) * g_dpiScale;
         const bool two = g_settings.npLayout == VizNpLayout::TwoLines && !t.npTitle.empty() && !t.npArtist.empty();
         // Two lines: title, then artist. One line: "Artist - Title", the
         // artist part in the artist colour.
@@ -14982,7 +15024,7 @@ void VizDrawTextOverlays(const VizTextFrame& t, const VizLayout& layout, bool sm
         g_nowPlayingBrush->SetColor(D2D1::ColorF(g_settings.nowPlayingR / 255.0f, g_settings.nowPlayingG / 255.0f,
                                                  g_settings.nowPlayingB / 255.0f, g_settings.nowPlayingA / 255.0f));
         float pfMargin = 4.0f * g_dpiScale;
-        float pfHeight = (float)std::max(6, g_settings.nowPlayingFontSize) * g_dpiScale * 1.4f;
+        float pfHeight = (float)std::max(6.f, g_settings.nowPlayingFontSize) * g_dpiScale * 1.4f;
         float pfWidth = t.pfWide ? totalWidth + 2.0f * layout.textAnchorSide
                                  : std::min(120.0f * g_dpiScale, totalWidth + 2.0f * layout.textAnchorSide);
         float pfOffX = EffectivePeakFreqOffsetX();
@@ -15090,10 +15132,10 @@ bool RenderVisualizerD3D(float sceneAlpha) {
     // Scale numbers (Spectrogram, VU): fixed by the settings and the size.
     const bool scale = VizStyleHasScale();
     const bool scaleHorizontal = g_settings.orientation == VizOrientation::Horizontal;
-    const float scaleMax = std::max(2.f, VizPx((float)std::max(2, g_settings.barMaxSize)));
+    const float scaleMax = std::max(2.f, VizPx((float)std::max(2.f, g_settings.barMaxSize)));
     const int scaleBars = VizEffectiveBarCount();
-    const float scaleBarW = std::max(1.f, VizPx((float)std::max(1, g_settings.barWidth)));
-    const float scaleGap = VizPx((float)std::max(0, g_settings.barGap));
+    const float scaleBarW = std::max(1.f, VizPx((float)std::max(1.f, g_settings.barWidth)));
+    const float scaleGap = VizPx((float)std::max(0.f, g_settings.barGap));
     const float scaleThick = scaleBars * (scaleBarW + scaleGap) - scaleGap;
     if (scale) {
         ttgfx::Mix(key, 7u + (uint64_t)g_settings.style * 131u + (uint64_t)(g_settings.dbFloor + 200) * 1009u +
@@ -15217,10 +15259,10 @@ void RenderVisualizer() {
     }
 
     int barCount = VizEffectiveBarCount();
-    float barW = std::max(1.f, VizPx((float)std::max(1, g_settings.barWidth)));
-    float barGap = VizPx((float)std::max(0, g_settings.barGap));
-    float maxSize = std::max(2.f, VizPx((float)std::max(2, g_settings.barMaxSize)));
-    float idleSize = VizPx((float)std::max(0, g_settings.barIdleSize));
+    float barW = std::max(1.f, VizPx((float)std::max(1.f, g_settings.barWidth)));
+    float barGap = VizPx((float)std::max(0.f, g_settings.barGap));
+    float maxSize = std::max(2.f, VizPx((float)std::max(2.f, g_settings.barMaxSize)));
+    float idleSize = VizPx((float)std::max(0.f, g_settings.barIdleSize));
     float rTL = g_settings.barRadiusTL * g_dpiScale;
     float rTR = g_settings.barRadiusTR * g_dpiScale;
     float rBR = g_settings.barRadiusBR * g_dpiScale;
@@ -16562,24 +16604,24 @@ void VizApplyMenuOverrides() {
             g_settings.keyMoveFine = is(L"1");
         // The look, from the Style Editor and saved styles (2.1).
         } else if (k == L"barWidth") {
-            g_settings.barWidth = std::clamp(_wtoi(v), 1, 64);
+            g_settings.barWidth = std::clamp((float)_wtof(v), 0.1f, 400.f);
         } else if (k == L"barGap") {
-            g_settings.barGap = std::clamp(_wtoi(v), 0, 64);
+            g_settings.barGap = std::clamp((float)_wtof(v), 0.f, 400.f);
         } else if (k == L"barMaxSize") {
-            g_settings.barMaxSize = std::clamp(_wtoi(v), 2, 2000);
+            g_settings.barMaxSize = std::clamp((float)_wtof(v), 2.f, 4000.f);
         } else if (k == L"barRadius") {
-            int rad = std::clamp(_wtoi(v), 0, 100);
+            float rad = std::clamp((float)_wtof(v), 0.f, 100.f);
             g_settings.barRadiusTL = g_settings.barRadiusTR = g_settings.barRadiusBR = g_settings.barRadiusBL = rad;
         } else if (k == L"reflection") {
             g_settings.reflection = std::clamp(_wtoi(v), 0, 100);
         } else if (k == L"fxGlow") {
             g_settings.fxGlow = std::clamp(_wtoi(v), 0, 100);
         } else if (k == L"fxGlowRadius") {
-            g_settings.fxGlowRadius = std::clamp(_wtoi(v), 1, 32);
+            g_settings.fxGlowRadius = std::clamp((float)_wtof(v), 0.5f, 32.f);
         } else if (k == L"fxBloom") {
             g_settings.fxBloom = std::clamp(_wtoi(v), 0, 100);
         } else if (k == L"fxBloomRadius") {
-            g_settings.fxBloomRadius = std::clamp(_wtoi(v), 4, 64);
+            g_settings.fxBloomRadius = std::clamp((float)_wtof(v), 4.f, 64.f);
         } else if (k == L"color") {
             ParseColorHex(v, &g_settings.colorA, &g_settings.colorR, &g_settings.colorG, &g_settings.colorB);
         } else if (k == L"grad1") {
@@ -16868,7 +16910,14 @@ static std::wstring VizHexColor(BYTE a, BYTE r, BYTE g, BYTE b) {
     return buf;
 }
 
-static std::wstring VizLookValue(const std::wstring& key) {
+static // A size as text: '6', '1.25', never '6.000000'.
+std::wstring VizNumText(float v) {
+    WCHAR b[32];
+    swprintf_s(b, L"%g", std::round(v * 1000.f) / 1000.f);
+    return b;
+}
+
+std::wstring VizLookValue(const std::wstring& key) {
     const Settings& s = g_settings;
     if (key == L"shape" || key == L"colorMode") return CurrentValue(key);
     if (key == L"color") return VizHexColor(s.colorA, s.colorR, s.colorG, s.colorB);
@@ -16876,15 +16925,15 @@ static std::wstring VizLookValue(const std::wstring& key) {
     if (key == L"grad2") return VizHexColor(s.grad2A, s.grad2R, s.grad2G, s.grad2B);
     if (key == L"peakHold") return s.peakHoldEnabled ? L"1" : L"0";
     if (key == L"beatFlash") return s.beatFlashEnabled ? L"1" : L"0";
-    if (key == L"barWidth") return std::to_wstring(s.barWidth);
-    if (key == L"barGap") return std::to_wstring(s.barGap);
-    if (key == L"barMaxSize") return std::to_wstring(s.barMaxSize);
-    if (key == L"barRadius") return std::to_wstring(s.barRadiusTL);
+    if (key == L"barWidth") return VizNumText(s.barWidth);
+    if (key == L"barGap") return VizNumText(s.barGap);
+    if (key == L"barMaxSize") return VizNumText(s.barMaxSize);
+    if (key == L"barRadius") return VizNumText(s.barRadiusTL);
     if (key == L"reflection") return std::to_wstring(s.reflection);
     if (key == L"fxGlow") return std::to_wstring(s.fxGlow);
-    if (key == L"fxGlowRadius") return std::to_wstring(s.fxGlowRadius);
+    if (key == L"fxGlowRadius") return VizNumText(s.fxGlowRadius);
     if (key == L"fxBloom") return std::to_wstring(s.fxBloom);
-    if (key == L"fxBloomRadius") return std::to_wstring(s.fxBloomRadius);
+    if (key == L"fxBloomRadius") return VizNumText(s.fxBloomRadius);
     return L"";
 }
 
@@ -16979,13 +17028,14 @@ struct EditorSlider {
     const wchar_t* key;
     const wchar_t* label;
     int lo, hi;
+    int scale;  // slider steps per unit: 10 moves in tenths of a pixel
 };
 const EditorSlider kSliders[] = {
-    {L"barWidth", L"Bar width", 1, 40},       {L"barGap", L"Bar gap", 0, 30},
-    {L"barMaxSize", L"Height", 10, 400},      {L"barRadius", L"Corner radius", 0, 20},
-    {L"reflection", L"Reflection", 0, 100},   {L"fxGlow", L"Glow", 0, 100},
-    {L"fxGlowRadius", L"Glow radius", 1, 32}, {L"fxBloom", L"Bloom", 0, 100},
-    {L"fxBloomRadius", L"Bloom radius", 4, 64},
+    {L"barWidth", L"Bar width", 1, 40, 10},       {L"barGap", L"Bar gap", 0, 30, 10},
+    {L"barMaxSize", L"Height", 10, 400, 1},       {L"barRadius", L"Corner radius", 0, 20, 10},
+    {L"reflection", L"Reflection", 0, 100, 1},    {L"fxGlow", L"Glow", 0, 100, 1},
+    {L"fxGlowRadius", L"Glow radius", 1, 32, 10}, {L"fxBloom", L"Bloom", 0, 100, 1},
+    {L"fxBloomRadius", L"Bloom radius", 4, 64, 1},
 };
 HFONT s_editorFont = nullptr;
 COLORREF s_customColors[16] = {};
@@ -17017,9 +17067,9 @@ void EditorSync(HWND hWnd) {
     CheckDlgButton(hWnd, kIdPeak, g_settings.peakHoldEnabled ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hWnd, kIdBeat, g_settings.beatFlashEnabled ? BST_CHECKED : BST_UNCHECKED);
     for (int i = 0; i < (int)ARRAYSIZE(kSliders); i++) {
-        int v = _wtoi(VizLookValue(kSliders[i].key).c_str());
-        SendDlgItemMessageW(hWnd, kIdSliderBase + i, TBM_SETPOS, TRUE, v);
-        SetDlgItemInt(hWnd, kIdSliderBase + 100 + i, v, FALSE);
+        std::wstring v = VizLookValue(kSliders[i].key);
+        SendDlgItemMessageW(hWnd, kIdSliderBase + i, TBM_SETPOS, TRUE, lroundf((float)_wtof(v.c_str()) * kSliders[i].scale));
+        SetDlgItemTextW(hWnd, kIdSliderBase + 100 + i, v.c_str());
     }
 }
 
@@ -17081,7 +17131,7 @@ void EditorBuild(HWND hWnd) {
         label(kSliders[i].label);
         HWND tb = add(TRACKBAR_CLASSW, L"", TBS_HORZ | TBS_NOTICKS | WS_TABSTOP, ctlX - px(4), y, ctlW - px(36), px(26),
                       kIdSliderBase + i);
-        SendMessageW(tb, TBM_SETRANGE, FALSE, MAKELPARAM(kSliders[i].lo, kSliders[i].hi));
+        SendMessageW(tb, TBM_SETRANGE, FALSE, MAKELPARAM(kSliders[i].lo * kSliders[i].scale, kSliders[i].hi * kSliders[i].scale));
         add(L"STATIC", L"", SS_RIGHT, ctlX + ctlW - px(36), y + px(5), px(36), px(20), kIdSliderBase + 100 + i);
         y += px(28);
     }
@@ -17108,8 +17158,9 @@ LRESULT CALLBACK StyleEditorProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
             int i = GetDlgCtrlID(tb) - kIdSliderBase;
             if (i < 0 || i >= (int)ARRAYSIZE(kSliders)) break;
             int v = (int)SendMessageW(tb, TBM_GETPOS, 0, 0);
-            SetDlgItemInt(hWnd, kIdSliderBase + 100 + i, v, FALSE);
-            VizSetMenuOverride(kSliders[i].key, std::to_wstring(v));
+            std::wstring text = VizNumText((float)v / kSliders[i].scale);
+            SetDlgItemTextW(hWnd, kIdSliderBase + 100 + i, text.c_str());
+            VizSetMenuOverride(kSliders[i].key, text);
             if (LOWORD(wParam) == TB_THUMBTRACK) EditorApplySoon(hWnd);
             else EditorApplyNow(hWnd);
             return 0;
@@ -17544,9 +17595,9 @@ void LoadSettings() {
     Wh_FreeStringSetting(shape);
     g_settings.reflection = std::clamp(Wh_GetIntSetting(L"appearance.reflection"), 0, 100);
     g_settings.fxGlow = std::clamp(Wh_GetIntSetting(L"appearance.fxGlow"), 0, 100);
-    g_settings.fxGlowRadius = std::clamp(Wh_GetIntSetting(L"appearance.fxGlowRadius"), 1, 32);
+    g_settings.fxGlowRadius = ReadSizeSetting(L"appearance.fxGlowRadius", 0.5f, 32.f, 6.f);
     g_settings.fxBloom = std::clamp(Wh_GetIntSetting(L"appearance.fxBloom"), 0, 100);
-    g_settings.fxBloomRadius = std::clamp(Wh_GetIntSetting(L"appearance.fxBloomRadius"), 4, 64);
+    g_settings.fxBloomRadius = ReadSizeSetting(L"appearance.fxBloomRadius", 4.f, 64.f, 16.f);
     g_settings.fxOutlineWidth = ReadNumberSetting(L"appearance.fxOutlineWidth", L"Appearance", L"Outline Width", 0.f, 0.f, 16.f);
     {
         BYTE dummy = 0;
@@ -17566,10 +17617,10 @@ void LoadSettings() {
     Wh_FreeStringSetting(orientation);
 
     g_settings.barCount = std::clamp(Wh_GetIntSetting(L"appearance.barCount"), 1, VIZ_BARS_MAX);
-    g_settings.barWidth = std::max(1, Wh_GetIntSetting(L"appearance.barWidth"));
-    g_settings.barGap = std::max(0, Wh_GetIntSetting(L"appearance.barGap"));
-    g_settings.barMaxSize = std::max(2, Wh_GetIntSetting(L"appearance.barMaxSize"));
-    g_settings.barIdleSize = std::max(0, Wh_GetIntSetting(L"appearance.barIdleSize"));
+    g_settings.barWidth = ReadSizeSetting(L"appearance.barWidth", 0.1f, 400.f, 6.f);
+    g_settings.barGap = ReadSizeSetting(L"appearance.barGap", 0.f, 400.f, 4.f);
+    g_settings.barMaxSize = ReadSizeSetting(L"appearance.barMaxSize", 2.f, 4000.f, 140.f);
+    g_settings.barIdleSize = ReadSizeSetting(L"appearance.barIdleSize", 0.f, 400.f, 4.f);
 
     {
         float v[4];
@@ -17654,8 +17705,8 @@ void LoadSettings() {
                                                                    : VizKeyMoveKeys::Both;
     Wh_FreeStringSetting(keyMoveKeys);
 
-    g_settings.keyMoveStep = std::clamp(Wh_GetIntSetting(L"interaction.keyMoveStep"), 1, 500);
-    g_settings.keyMoveFastStep = std::clamp(Wh_GetIntSetting(L"interaction.keyMoveFastStep"), 1, 500);
+    g_settings.keyMoveStep = ReadSizeSetting(L"interaction.keyMoveStep", 0.01f, 500.f, 1.f);
+    g_settings.keyMoveFastStep = ReadSizeSetting(L"interaction.keyMoveFastStep", 0.01f, 500.f, 10.f);
 
     PCWSTR keyMoveFastKey = Wh_GetStringSetting(L"interaction.keyMoveFastKey");
     g_settings.keyMoveFastKey = (wcscmp(keyMoveFastKey, L"ctrl") == 0)  ? (unsigned)VIZ_MOD_CTRL
@@ -17761,10 +17812,10 @@ void LoadSettings() {
         float v[4];
         ReadQuadSetting(L"background.padding", L"Background", L"Padding",
                         L"left, right, top, bottom", 24.0f, true, v);
-        g_settings.bgPaddingL = (int)v[0];
-        g_settings.bgPaddingR = (int)v[1];
-        g_settings.bgPaddingT = (int)v[2];
-        g_settings.bgPaddingB = (int)v[3];
+        g_settings.bgPaddingL = v[0];
+        g_settings.bgPaddingR = v[1];
+        g_settings.bgPaddingT = v[2];
+        g_settings.bgPaddingB = v[3];
     }
 
     {
@@ -17777,7 +17828,7 @@ void LoadSettings() {
         g_settings.bgRadiusBL = v[3];
     }
     g_settings.bgBlur = std::max(0, Wh_GetIntSetting(L"background.blur"));
-    g_settings.bgBorderSize = std::max(0, Wh_GetIntSetting(L"background.borderSize"));
+    g_settings.bgBorderSize = ReadSizeSetting(L"background.borderSize", 0.f, 100.f, 0.f);
 
     ReadColorSetting(L"background.borderColor", L"Background", L"Border Color", 0x40, 255, 255, 255,
                      &g_settings.borderA, &g_settings.borderR, &g_settings.borderG,
@@ -17828,31 +17879,24 @@ void LoadSettings() {
         if (g_messageWnd) KillTimer(g_messageWnd, TIMER_ID_MSG_FONT_RECHECK);
     }
     Wh_FreeStringSetting(nowPlayingFont);
-    g_settings.nowPlayingFontSize = std::max(6, Wh_GetIntSetting(L"appearance.nowPlayingFontSize"));
+    g_settings.nowPlayingFontSize = ReadSizeSetting(L"appearance.nowPlayingFontSize", 6.f, 400.f, 16.f);
     g_settings.nowPlayingDisplaySeconds =
         std::max(0, Wh_GetIntSetting(L"appearance.nowPlayingDisplaySeconds"));
 
     // Clamped rather than free: each pixel of offset widens the render surface
     // by the same amount, so a stray extra zero shouldn't silently cost memory
     // and fill rate for a surface mostly full of nothing.
-    g_settings.nowPlayingOffsetX =
-        std::clamp(Wh_GetIntSetting(L"appearance.nowPlayingOffsetX"), -4000, 4000);
-    g_settings.nowPlayingOffsetY =
-        std::clamp(Wh_GetIntSetting(L"appearance.nowPlayingOffsetY"), -4000, 4000);
-    g_settings.peakFreqOffsetX =
-        std::clamp(Wh_GetIntSetting(L"appearance.peakFreqOffsetX"), -4000, 4000);
-    g_settings.peakFreqOffsetY =
-        std::clamp(Wh_GetIntSetting(L"appearance.peakFreqOffsetY"), -4000, 4000);
+    g_settings.nowPlayingOffsetX = ReadSizeSetting(L"appearance.nowPlayingOffsetX", -4000.f, 4000.f, 0.f);
+    g_settings.nowPlayingOffsetY = ReadSizeSetting(L"appearance.nowPlayingOffsetY", -4000.f, 4000.f, 0.f);
+    g_settings.peakFreqOffsetX = ReadSizeSetting(L"appearance.peakFreqOffsetX", -4000.f, 4000.f, 0.f);
+    g_settings.peakFreqOffsetY = ReadSizeSetting(L"appearance.peakFreqOffsetY", -4000.f, 4000.f, 0.f);
 
     ReadColorSetting(L"appearance.nowPlayingBgColor", L"Appearance", L"Now Playing Background",
                      0, 0, 0, 0,
                      &g_settings.npBgA, &g_settings.npBgR, &g_settings.npBgG, &g_settings.npBgB);
-    g_settings.npBgPadding =
-        std::clamp(Wh_GetIntSetting(L"appearance.nowPlayingBgPadding"), 0, 200);
-    g_settings.npBgCornerRadius =
-        std::clamp(Wh_GetIntSetting(L"appearance.nowPlayingBgCornerRadius"), 0, 200);
-    g_settings.npBgBorderSize =
-        std::clamp(Wh_GetIntSetting(L"appearance.nowPlayingBgBorderSize"), 0, 100);
+    g_settings.npBgPadding = ReadSizeSetting(L"appearance.nowPlayingBgPadding", 0.f, 200.f, 6.f);
+    g_settings.npBgCornerRadius = ReadSizeSetting(L"appearance.nowPlayingBgCornerRadius", 0.f, 200.f, 6.f);
+    g_settings.npBgBorderSize = ReadSizeSetting(L"appearance.nowPlayingBgBorderSize", 0.f, 100.f, 0.f);
     ReadColorSetting(L"appearance.nowPlayingBgBorderColor", L"Appearance",
                      L"Now Playing Background Border Color", 0x40, 255, 255, 255,
                      &g_settings.npBgBorderA, &g_settings.npBgBorderR,
@@ -17861,12 +17905,9 @@ void LoadSettings() {
     ReadColorSetting(L"appearance.peakFreqBgColor", L"Appearance", L"Peak Readout Background",
                      0, 0, 0, 0,
                      &g_settings.pfBgA, &g_settings.pfBgR, &g_settings.pfBgG, &g_settings.pfBgB);
-    g_settings.pfBgPadding =
-        std::clamp(Wh_GetIntSetting(L"appearance.peakFreqBgPadding"), 0, 200);
-    g_settings.pfBgCornerRadius =
-        std::clamp(Wh_GetIntSetting(L"appearance.peakFreqBgCornerRadius"), 0, 200);
-    g_settings.pfBgBorderSize =
-        std::clamp(Wh_GetIntSetting(L"appearance.peakFreqBgBorderSize"), 0, 100);
+    g_settings.pfBgPadding = ReadSizeSetting(L"appearance.peakFreqBgPadding", 0.f, 200.f, 6.f);
+    g_settings.pfBgCornerRadius = ReadSizeSetting(L"appearance.peakFreqBgCornerRadius", 0.f, 200.f, 6.f);
+    g_settings.pfBgBorderSize = ReadSizeSetting(L"appearance.peakFreqBgBorderSize", 0.f, 100.f, 0.f);
     ReadColorSetting(L"appearance.peakFreqBgBorderColor", L"Appearance",
                      L"Peak Readout Background Border Color", 0x40, 255, 255, 255,
                      &g_settings.pfBgBorderA, &g_settings.pfBgBorderR,
@@ -17931,7 +17972,7 @@ void LoadSettings() {
     g_settings.mediaIconNextPath =
         ReadIconPathSetting(L"media_controls.iconNextPath", L"Media Controls", L"Next Icon Path");
 
-    g_settings.mediaIconSize = std::clamp(Wh_GetIntSetting(L"media_controls.iconSize"), 8, 256);
+    g_settings.mediaIconSize = ReadSizeSetting(L"media_controls.iconSize", 8.f, 256.f, 32.f);
     {
         PCWSTR layout = Wh_GetStringSetting(L"media_controls.layout");
         g_settings.mediaCard = layout && wcscmp(layout, L"card") == 0;
@@ -17941,9 +17982,9 @@ void LoadSettings() {
                      &g_settings.cardBgA, &g_settings.cardBgR, &g_settings.cardBgG, &g_settings.cardBgB);
     ReadColorSetting(L"media_controls.cardBorderColor", L"Media Controls", L"Card Border Color", 0, 255, 255, 255,
                      &g_settings.cardBorderA, &g_settings.cardBorderR, &g_settings.cardBorderG, &g_settings.cardBorderB);
-    g_settings.cardBorderSize = std::clamp(Wh_GetIntSetting(L"media_controls.cardBorderSize"), 0, 20);
-    g_settings.cardRadius = std::clamp(Wh_GetIntSetting(L"media_controls.cardCornerRadius"), 0, 64);
-    g_settings.cardArtSize = std::clamp(Wh_GetIntSetting(L"media_controls.cardArtSize"), 0, 600);
+    g_settings.cardBorderSize = ReadSizeSetting(L"media_controls.cardBorderSize", 0.f, 20.f, 0.f);
+    g_settings.cardRadius = ReadSizeSetting(L"media_controls.cardCornerRadius", 0.f, 64.f, 12.f);
+    g_settings.cardArtSize = ReadSizeSetting(L"media_controls.cardArtSize", 0.f, 600.f, 0.f);
     {
         PCWSTR acc = Wh_GetStringSetting(L"media_controls.cardAccent");
         g_settings.cardAccentSource = !acc ? 0 : wcscmp(acc, L"custom") == 0 ? 1 : wcscmp(acc, L"album") == 0 ? 2
@@ -17952,18 +17993,15 @@ void LoadSettings() {
     }
     ReadColorSetting(L"media_controls.cardAccentColor", L"Media Controls", L"Card Accent Color", 255, 255, 255, 255,
                      &g_settings.cardAccentA, &g_settings.cardAccentR, &g_settings.cardAccentG, &g_settings.cardAccentB);
-    g_settings.mediaIconSpacing = std::clamp(Wh_GetIntSetting(L"media_controls.iconSpacing"), 0, 200);
+    g_settings.mediaIconSpacing = ReadSizeSetting(L"media_controls.iconSpacing", 0.f, 200.f, 14.f);
 
     ReadColorSetting(L"media_controls.plateColor", L"Media Controls", L"Backing Plate Color",
                      0, 0, 0, 0,
                      &g_settings.mediaPlateA, &g_settings.mediaPlateR,
                      &g_settings.mediaPlateG, &g_settings.mediaPlateB);
-    g_settings.mediaPlateCornerRadius =
-        std::clamp(Wh_GetIntSetting(L"media_controls.plateCornerRadius"), 0, 256);
-    g_settings.mediaPlatePadding =
-        std::clamp(Wh_GetIntSetting(L"media_controls.platePadding"), 0, 200);
-    g_settings.mediaPlateBorderSize =
-        std::clamp(Wh_GetIntSetting(L"media_controls.plateBorderSize"), 0, 100);
+    g_settings.mediaPlateCornerRadius = ReadSizeSetting(L"media_controls.plateCornerRadius", 0.f, 200.f, 8.f);
+    g_settings.mediaPlatePadding = ReadSizeSetting(L"media_controls.platePadding", 0.f, 200.f, 0.f);
+    g_settings.mediaPlateBorderSize = ReadSizeSetting(L"media_controls.plateBorderSize", 0.f, 100.f, 0.f);
     ReadColorSetting(L"media_controls.plateBorderColor", L"Media Controls",
                      L"Backing Plate Border Color", 0x40, 255, 255, 255,
                      &g_settings.mediaPlateBorderA, &g_settings.mediaPlateBorderR,
@@ -18136,8 +18174,8 @@ void LoadSettings() {
                                          : (wcscmp(v, L"panel_bottom") == 0)   ? VizProgressPlacement::PanelBottom
                                                                                : VizProgressPlacement::Below;
         });
-        g_settings.progressHeight = std::clamp(Wh_GetIntSetting(L"progress.height"), 1, 40);
-        g_settings.progressGap = std::clamp(Wh_GetIntSetting(L"progress.gap"), 0, 200);
+        g_settings.progressHeight = ReadSizeSetting(L"progress.height", 0.25f, 40.f, 2.f);
+        g_settings.progressGap = ReadSizeSetting(L"progress.gap", 0.f, 200.f, 6.f);
         ReadColorSetting(L"progress.color", L"Track Progress", L"Color", 255, 255, 255, 255, &g_settings.progressA,
                          &g_settings.progressR, &g_settings.progressG, &g_settings.progressB);
         ReadColorSetting(L"progress.trackColor", L"Track Progress", L"Track Color", 0x40, 255, 255, 255,
@@ -18151,8 +18189,8 @@ void LoadSettings() {
                                    : (wcscmp(v, L"panel_bottom_right") == 0)   ? VizMediaAnchor::PanelBottomRight
                                                                                : VizMediaAnchor::Screen;
         });
-        g_settings.mediaAnchorOffsetX = std::clamp(Wh_GetIntSetting(L"media_controls.anchorOffsetX"), -2000, 2000);
-        g_settings.mediaAnchorOffsetY = std::clamp(Wh_GetIntSetting(L"media_controls.anchorOffsetY"), -2000, 2000);
+        g_settings.mediaAnchorOffsetX = ReadSizeSetting(L"media_controls.anchorOffsetX", -2000.f, 2000.f, 8.f);
+        g_settings.mediaAnchorOffsetY = ReadSizeSetting(L"media_controls.anchorOffsetY", -2000.f, 2000.f, 8.f);
         str(L"interaction.contextMenu", [](PCWSTR v) {
             g_settings.contextMenu = (wcscmp(v, L"ctrl_right_click") == 0) ? VizContextMenu::CtrlRightClick
                                    : (wcscmp(v, L"off") == 0)              ? VizContextMenu::Off
@@ -18165,7 +18203,7 @@ void LoadSettings() {
                                                                   : VizTermStyle::Columns;
         });
         str(L"terminal.font", [](PCWSTR v) { g_settings.termFont = *v ? v : L"Consolas"; });
-        g_settings.termFontSize = std::clamp(Wh_GetIntSetting(L"terminal.fontSize"), 6, 96);
+        g_settings.termFontSize = ReadSizeSetting(L"terminal.fontSize", 6.f, 96.f, 14.f);
         g_settings.termRows = std::clamp(Wh_GetIntSetting(L"terminal.rows"), 2, 128);
         g_settings.termMeterColumns = std::clamp(Wh_GetIntSetting(L"terminal.meterColumns"), 20, 200);
         g_settings.termHotThreshold = std::clamp(Wh_GetIntSetting(L"terminal.hotThreshold"), 1, 100);

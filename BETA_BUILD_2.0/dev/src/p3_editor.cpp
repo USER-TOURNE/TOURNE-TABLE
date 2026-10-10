@@ -26,7 +26,14 @@ static std::wstring VizHexColor(BYTE a, BYTE r, BYTE g, BYTE b) {
     return buf;
 }
 
-static std::wstring VizLookValue(const std::wstring& key) {
+static // A size as text: '6', '1.25', never '6.000000'.
+std::wstring VizNumText(float v) {
+    WCHAR b[32];
+    swprintf_s(b, L"%g", std::round(v * 1000.f) / 1000.f);
+    return b;
+}
+
+std::wstring VizLookValue(const std::wstring& key) {
     const Settings& s = g_settings;
     if (key == L"shape" || key == L"colorMode") return CurrentValue(key);
     if (key == L"color") return VizHexColor(s.colorA, s.colorR, s.colorG, s.colorB);
@@ -34,15 +41,15 @@ static std::wstring VizLookValue(const std::wstring& key) {
     if (key == L"grad2") return VizHexColor(s.grad2A, s.grad2R, s.grad2G, s.grad2B);
     if (key == L"peakHold") return s.peakHoldEnabled ? L"1" : L"0";
     if (key == L"beatFlash") return s.beatFlashEnabled ? L"1" : L"0";
-    if (key == L"barWidth") return std::to_wstring(s.barWidth);
-    if (key == L"barGap") return std::to_wstring(s.barGap);
-    if (key == L"barMaxSize") return std::to_wstring(s.barMaxSize);
-    if (key == L"barRadius") return std::to_wstring(s.barRadiusTL);
+    if (key == L"barWidth") return VizNumText(s.barWidth);
+    if (key == L"barGap") return VizNumText(s.barGap);
+    if (key == L"barMaxSize") return VizNumText(s.barMaxSize);
+    if (key == L"barRadius") return VizNumText(s.barRadiusTL);
     if (key == L"reflection") return std::to_wstring(s.reflection);
     if (key == L"fxGlow") return std::to_wstring(s.fxGlow);
-    if (key == L"fxGlowRadius") return std::to_wstring(s.fxGlowRadius);
+    if (key == L"fxGlowRadius") return VizNumText(s.fxGlowRadius);
     if (key == L"fxBloom") return std::to_wstring(s.fxBloom);
-    if (key == L"fxBloomRadius") return std::to_wstring(s.fxBloomRadius);
+    if (key == L"fxBloomRadius") return VizNumText(s.fxBloomRadius);
     return L"";
 }
 
@@ -137,13 +144,14 @@ struct EditorSlider {
     const wchar_t* key;
     const wchar_t* label;
     int lo, hi;
+    int scale;  // slider steps per unit: 10 moves in tenths of a pixel
 };
 const EditorSlider kSliders[] = {
-    {L"barWidth", L"Bar width", 1, 40},       {L"barGap", L"Bar gap", 0, 30},
-    {L"barMaxSize", L"Height", 10, 400},      {L"barRadius", L"Corner radius", 0, 20},
-    {L"reflection", L"Reflection", 0, 100},   {L"fxGlow", L"Glow", 0, 100},
-    {L"fxGlowRadius", L"Glow radius", 1, 32}, {L"fxBloom", L"Bloom", 0, 100},
-    {L"fxBloomRadius", L"Bloom radius", 4, 64},
+    {L"barWidth", L"Bar width", 1, 40, 10},       {L"barGap", L"Bar gap", 0, 30, 10},
+    {L"barMaxSize", L"Height", 10, 400, 1},       {L"barRadius", L"Corner radius", 0, 20, 10},
+    {L"reflection", L"Reflection", 0, 100, 1},    {L"fxGlow", L"Glow", 0, 100, 1},
+    {L"fxGlowRadius", L"Glow radius", 1, 32, 10}, {L"fxBloom", L"Bloom", 0, 100, 1},
+    {L"fxBloomRadius", L"Bloom radius", 4, 64, 1},
 };
 HFONT s_editorFont = nullptr;
 COLORREF s_customColors[16] = {};
@@ -175,9 +183,9 @@ void EditorSync(HWND hWnd) {
     CheckDlgButton(hWnd, kIdPeak, g_settings.peakHoldEnabled ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hWnd, kIdBeat, g_settings.beatFlashEnabled ? BST_CHECKED : BST_UNCHECKED);
     for (int i = 0; i < (int)ARRAYSIZE(kSliders); i++) {
-        int v = _wtoi(VizLookValue(kSliders[i].key).c_str());
-        SendDlgItemMessageW(hWnd, kIdSliderBase + i, TBM_SETPOS, TRUE, v);
-        SetDlgItemInt(hWnd, kIdSliderBase + 100 + i, v, FALSE);
+        std::wstring v = VizLookValue(kSliders[i].key);
+        SendDlgItemMessageW(hWnd, kIdSliderBase + i, TBM_SETPOS, TRUE, lroundf((float)_wtof(v.c_str()) * kSliders[i].scale));
+        SetDlgItemTextW(hWnd, kIdSliderBase + 100 + i, v.c_str());
     }
 }
 
@@ -239,7 +247,7 @@ void EditorBuild(HWND hWnd) {
         label(kSliders[i].label);
         HWND tb = add(TRACKBAR_CLASSW, L"", TBS_HORZ | TBS_NOTICKS | WS_TABSTOP, ctlX - px(4), y, ctlW - px(36), px(26),
                       kIdSliderBase + i);
-        SendMessageW(tb, TBM_SETRANGE, FALSE, MAKELPARAM(kSliders[i].lo, kSliders[i].hi));
+        SendMessageW(tb, TBM_SETRANGE, FALSE, MAKELPARAM(kSliders[i].lo * kSliders[i].scale, kSliders[i].hi * kSliders[i].scale));
         add(L"STATIC", L"", SS_RIGHT, ctlX + ctlW - px(36), y + px(5), px(36), px(20), kIdSliderBase + 100 + i);
         y += px(28);
     }
@@ -266,8 +274,9 @@ LRESULT CALLBACK StyleEditorProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
             int i = GetDlgCtrlID(tb) - kIdSliderBase;
             if (i < 0 || i >= (int)ARRAYSIZE(kSliders)) break;
             int v = (int)SendMessageW(tb, TBM_GETPOS, 0, 0);
-            SetDlgItemInt(hWnd, kIdSliderBase + 100 + i, v, FALSE);
-            VizSetMenuOverride(kSliders[i].key, std::to_wstring(v));
+            std::wstring text = VizNumText((float)v / kSliders[i].scale);
+            SetDlgItemTextW(hWnd, kIdSliderBase + 100 + i, text.c_str());
+            VizSetMenuOverride(kSliders[i].key, text);
             if (LOWORD(wParam) == TB_THUMBTRACK) EditorApplySoon(hWnd);
             else EditorApplyNow(hWnd);
             return 0;
