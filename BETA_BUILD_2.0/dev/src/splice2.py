@@ -1369,6 +1369,146 @@ rep("""                    int step = fast ? g_settings.keyMoveFastStep : g_sett
                     int step = std::max(1, (int)lroundf(fstep));  // the strip and the text: whole pixels""")
 rep("float vstep = fine ? g_settings.keyMoveFineStep : (float)step;", "float vstep = fine ? g_settings.keyMoveFineStep : fstep;")
 
+# ================================================================ Click to Seek on the progress bar (2.1)
+after("    bool progressEnabled = false;\n",
+      "    bool progressSeek = false;        // Click to Seek\n"
+      "    bool progressSeekOnlyListed = false;  // the app list includes rather than excludes\n"
+      "    std::vector<std::wstring> progressSeekApps;  // lower case, without .exe\n")
+rep("""        g_settings.progressEnabled = Wh_GetIntSetting(L"progress.enabled") != 0;
+""", """        g_settings.progressEnabled = Wh_GetIntSetting(L"progress.enabled") != 0;
+        g_settings.progressSeek = Wh_GetIntSetting(L"progress.clickToSeek") != 0;
+        str(L"progress.seekAppsMode", [](PCWSTR v) { g_settings.progressSeekOnlyListed = wcscmp(v, L"only") == 0; });
+        str(L"progress.seekApps", [](PCWSTR v) {
+            g_settings.progressSeekApps.clear();
+            std::wstring cur;
+            for (const WCHAR* c = v;; c++) {
+                if (!*c || *c == L',' || *c == L';' || *c == L'\\n') {
+                    while (!cur.empty() && iswspace(cur.back())) cur.pop_back();
+                    size_t b = 0;
+                    while (b < cur.size() && iswspace(cur[b])) b++;
+                    cur = cur.substr(b);
+                    for (auto& ch : cur) ch = (WCHAR)towlower(ch);
+                    if (cur.size() > 4 && cur.compare(cur.size() - 4, 4, L".exe") == 0) cur.resize(cur.size() - 4);
+                    if (!cur.empty()) g_settings.progressSeekApps.push_back(cur);
+                    cur.clear();
+                    if (!*c) break;
+                } else {
+                    cur += *c;
+                }
+            }
+        });
+""")
+rep("""      $description: 'The rest of the bar. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b)'
+  $name: Track Progress""", """      $description: 'The rest of the bar. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b)'
+    - clickToSeek: false
+      $name: Click to Seek
+      $description: Click or drag along the bar to jump in the track. Only where the desktop itself is under the cursor, never through a window, and the drag key still moves the visualizer. Off by default so the bar never takes clicks meant for the desktop
+    - seekAppsMode: except
+      $name: Seek App List
+      $description: How the app list below applies. Apps count while they are running
+      $options:
+        - except: Seek, except while these apps run
+        - only: Seek only while these apps run
+    - seekApps: ''
+      $name: Seek Apps
+      $description: 'Program names, separated by commas, e.g. "League of Legends, obs64, Spotify". ".exe" is optional. Empty = the list does nothing'
+  $name: Track Progress""")
+after("std::atomic<LONG> g_drawRectL{0}, g_drawRectT{0}, g_drawRectR{0}, g_drawRectB{0};\n",
+      "// The progress bar's hit area for Click to Seek, in screen pixels (render thread\n"
+      "// writes, the input hook reads).\n"
+      "std::atomic<LONG> g_seekRectL{0}, g_seekRectT{0}, g_seekRectR{0}, g_seekRectB{0};\n"
+      "std::atomic<bool> g_seekRectValid{false};\n")
+rep("""void VizPublishDrawRect(const VizLayout& layout) {
+    int virtualScreenX = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    int virtualScreenY = GetSystemMetrics(SM_YVIRTUALSCREEN);""", """bool VizProgressRect(const VizLayout& layout, D2D1_RECT_F* out);
+
+void VizPublishDrawRect(const VizLayout& layout) {
+    int virtualScreenX = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    int virtualScreenY = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    {
+        // Click to Seek: the bar, made at least 10 px tall to hit.
+        D2D1_RECT_F pr;
+        bool ok = g_settings.progressEnabled && g_settings.progressSeek && VizProgressRect(layout, &pr);
+        if (ok) {
+            float cy = (pr.top + pr.bottom) * 0.5f, hh = std::max((pr.bottom - pr.top) * 0.5f, 5.f * g_dpiScale);
+            g_seekRectL.store((LONG)lroundf(layout.originX + pr.left) + virtualScreenX, std::memory_order_relaxed);
+            g_seekRectR.store((LONG)lroundf(layout.originX + pr.right) + virtualScreenX, std::memory_order_relaxed);
+            g_seekRectT.store((LONG)lroundf(layout.originY + cy - hh) + virtualScreenY, std::memory_order_relaxed);
+            g_seekRectB.store((LONG)lroundf(layout.originY + cy + hh) + virtualScreenY, std::memory_order_relaxed);
+        }
+        g_seekRectValid.store(ok, std::memory_order_relaxed);
+    }""")
+before("LRESULT CALLBACK DragMouseHookProc(int nCode, WPARAM wParam, LPARAM lParam) {", r"""// ---- Click to Seek (2.1) -----------------------------------------------------------------
+// A left press on the progress bar jumps there; dragging and releasing jumps
+// again where it's let go. The cursor moves freely meanwhile (moves are
+// never swallowed). The app list is checked against running processes at
+// most every 3 s, and only on a press that lands on the bar.
+bool VizSeekAppsAllow() {
+    const auto& apps = g_settings.progressSeekApps;
+    if (apps.empty()) return true;
+    static ULONGLONG s_tick = 0;
+    static bool s_anyRunning = false;
+    ULONGLONG now = GetTickCount64();
+    if (s_tick == 0 || now - s_tick > 3000) {
+        s_tick = now;
+        s_anyRunning = false;
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snap != INVALID_HANDLE_VALUE) {
+            PROCESSENTRY32W pe = {sizeof(pe)};
+            for (BOOL more = Process32FirstW(snap, &pe); more && !s_anyRunning; more = Process32NextW(snap, &pe)) {
+                std::wstring n = pe.szExeFile;
+                for (auto& ch : n) ch = (WCHAR)towlower(ch);
+                if (n.size() > 4 && n.compare(n.size() - 4, 4, L".exe") == 0) n.resize(n.size() - 4);
+                for (const auto& a : apps)
+                    if (n == a) s_anyRunning = true;
+            }
+            CloseHandle(snap);
+        }
+    }
+    return g_settings.progressSeekOnlyListed ? s_anyRunning : !s_anyRunning;
+}
+
+void VizSeekAtX(LONG x) {
+    LONG l = g_seekRectL.load(std::memory_order_relaxed), r = g_seekRectR.load(std::memory_order_relaxed);
+    if (r > l) CardSeek((float)(x - l) / (float)(r - l));
+}
+
+bool VizSeekHook(WPARAM wParam, const MSLLHOOKSTRUCT* info) {
+    static bool s_seeking = false;
+    if (s_seeking) {
+        if (wParam == WM_LBUTTONUP) {
+            s_seeking = false;
+            VizSeekAtX(info->pt.x);
+            return true;
+        }
+        return false;
+    }
+    if (wParam != WM_LBUTTONDOWN || !g_settings.progressSeek || !g_seekRectValid.load(std::memory_order_relaxed))
+        return false;
+    if (g_settings.dragEnabled && DragButtonDownMsg() == WM_LBUTTONDOWN && DragModifierHeld()) return false;
+    if (g_fullscreenPaused.load(std::memory_order_relaxed) || g_vizSceneHidden.load(std::memory_order_relaxed))
+        return false;
+    POINT pt = info->pt;
+    if (pt.x < g_seekRectL.load(std::memory_order_relaxed) || pt.x >= g_seekRectR.load(std::memory_order_relaxed) ||
+        pt.y < g_seekRectT.load(std::memory_order_relaxed) || pt.y >= g_seekRectB.load(std::memory_order_relaxed))
+        return false;
+    if (!g_tlValid.load(std::memory_order_relaxed) || !VizDesktopUnderPoint(pt) || !VizSeekAppsAllow()) return false;
+    s_seeking = true;
+    VizSeekAtX(pt.x);
+    return true;
+}
+
+""")
+rep("""    if (nCode == HC_ACTION && !g_unloading.load(std::memory_order_relaxed) &&
+        VizMenuHook(wParam, (const MSLLHOOKSTRUCT*)lParam))
+        return 1;""", """    if (nCode == HC_ACTION && !g_unloading.load(std::memory_order_relaxed) &&
+        VizMenuHook(wParam, (const MSLLHOOKSTRUCT*)lParam))
+        return 1;
+    if (nCode == HC_ACTION && !g_unloading.load(std::memory_order_relaxed) &&
+        VizSeekHook(wParam, (const MSLLHOOKSTRUCT*)lParam))
+        return 1;""")
+after("#include <commdlg.h>\n", "#include <tlhelp32.h>\n")
+
 out = os.path.join(S, "v2b.cpp")
 open(out, "w", encoding="utf-8", newline="\n").write(src)
 print("wrote", out, src.count("\n"), "lines")
