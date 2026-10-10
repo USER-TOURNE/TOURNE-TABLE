@@ -67,6 +67,14 @@ The 1.4 analysis is still there as **Analysis Engine = Classic**.
 
 **Right-click for quick settings.** Shape, colours, analysis, readout, overlays and **which audio device it listens to**, any output, input or virtual device (VB-Audio, Voicemeeter, an Ableton return), all live, without opening Windhawk. Plus a **Terminal** shape (text characters: columns, a waterfall or text meters) and a **media widget** layout: title and artist inside the panel, pixel-sharp text, a track progress bar and media controls pinned to the panel.
 
+**Seven new styles.** LED Meter, Line Spectrum, Polar Bloom, Spectrogram, VU Needles (real IEC VU ballistics), Stereo Field and Particles, all in the Shape list and the right-click menu, plus **Reflection**, a fading mirror under the bars.
+
+**Glow and Bloom.** A soft halo around every bar, worked out in the same shader pass that draws it, and a lens-style bloom from a quarter-size blur that only runs on frames that change. Direct3D 11 renderer.
+
+**A Media Card.** Media Controls > Layout = Card: album art with previous / play / next on hover, a seek bar, one-click output switching and a volume slider. Theme its background, border, corner radius, art size and accent (icon colour, custom, album art or your Windows accent).
+
+**My Styles.** Right-click > My Styles > Style Editor: mix a base style, colours, bar sizes, reflection, glow and bloom while the visualizer previews it live, save it under a name, and pick it from the menu any time.
+
 ---
 
 ## ◈ PERFORMANCE AT A GLANCE
