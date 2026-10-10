@@ -51,7 +51,21 @@ int VizShapeMenuIndex() {
 
 bool VizStyleNeedsCpuBars() {
     VizStyle s = g_settings.style;
-    return s == VizStyle::Spectrogram || s == VizStyle::SplitLR || s == VizStyle::Particles;
+    return s == VizStyle::Spectrogram || s == VizStyle::SplitLR || s == VizStyle::Particles ||
+           g_settings.afterimage > 0;  // its trail is worked out with the bars, on the CPU
+}
+
+// Afterimage (2.1): each bar's trail jumps up with it and falls back over
+// Afterimage Length.
+float g_vizGhost[VIZ_BARS_MAX] = {};
+
+void VizStepAfterimage(int barCount) {
+    if (g_settings.afterimage <= 0) return;
+    float fall = g_frameDt / std::max(0.1f, g_settings.afterimageSeconds);
+    for (int i = 0; i < barCount && i < VIZ_BARS_MAX; i++) {
+        float lv = std::max(0.f, g_vizPeak[i]);
+        g_vizGhost[i] = std::max(lv, g_vizGhost[i] - fall);
+    }
 }
 
 // Reflection: horizontal bars standing on the bottom edge only, where there

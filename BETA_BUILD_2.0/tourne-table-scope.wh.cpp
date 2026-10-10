@@ -741,6 +741,30 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
     - fxShadowSoftness: '4'
       $name: Shadow Softness
       $description: 0-32 pixels, decimals allowed. 0 = a hard edge
+    - barHollow: false
+      $name: Hollow Bars
+      $description: Bars as outlines only, the inside left clear. Bar shapes (Stereo, Mountain, Mirror, Wave, Breathe). Direct3D 11 renderer
+    - barHollowWidth: '1.5'
+      $name: Hollow Line Width
+      $description: Pixels, decimals allowed
+    - barDash: '0'
+      $name: Dash Length
+      $description: Pixels, decimals allowed. Cuts the bars into dashes along their length, fixed to the base line so they stay put as a bar grows. 0 = solid. Bar shapes, Direct3D 11 renderer
+    - barDashGap: '2'
+      $name: Dash Gap
+      $description: Pixels between dashes, decimals allowed
+    - barTilt: '0'
+      $name: Tilt
+      $description: -60 to 60 degrees, decimals allowed. Leans every bar from its base line, like italics; peak caps and the Afterimage lean with them. Bar shapes, Direct3D 11 renderer
+    - barMirrorGap: '0'
+      $name: Mirror Gap
+      $description: Pixels, decimals allowed. With Anchor = Middle the bars already grow both ways from a centre line; this pulls the two halves apart, like a waveform with a spine. Bar shapes, Direct3D 11 renderer
+    - afterimage: 0
+      $name: Afterimage
+      $description: 0-100. A see-through trail behind each bar that jumps up with it and sinks back slowly. With Peak Hold on, the caps sit on the trail. Bar shapes, Direct3D 11 renderer; keeps the analysis on the CPU (Hybrid)
+    - afterimageLength: '1.2'
+      $name: Afterimage Length
+      $description: Seconds for a full-height trail to sink away, decimals allowed
     - orientation: horizontal
       $name: Orientation
       $description: Whether bars run left-to-right or bottom-to-top
@@ -1835,6 +1859,11 @@ struct Settings {
     int fxShadow = 0;  // %
     BYTE fxShadowR = 0, fxShadowG = 0, fxShadowB = 0;
     float fxShadowX = 2.f, fxShadowY = 3.f, fxShadowSoft = 4.f;  // px
+    bool barHollow = false;
+    float barHollowWidth = 1.5f, barDash = 0.f, barDashGap = 2.f, barTilt = 0.f;  // px, px, px, degrees
+    float barMirrorGap = 0.f;  // px
+    int afterimage = 0;  // %
+    float afterimageSeconds = 1.2f;
 
     // Media widget (2.0).
     VizNpLayout npLayout = VizNpLayout::OneLine;
@@ -8318,6 +8347,8 @@ void UpdatePrecisionTargets(int vizBars) {
     }
 }
 
+void VizStepAfterimage(int barCount);  // Afterimage (2.1), with the styles
+
 void VizComputeBarFrame() {
     const int barCount = VizEffectiveBarCount();
     if (g_settings.engine == VizEngineKind::Precision) {
@@ -8337,6 +8368,7 @@ void VizComputeBarFrame() {
                 g_vizPeakHold[i] = 0.f;
             }
         }
+        VizStepAfterimage(barCount);
         return;
     }
 
@@ -8368,6 +8400,7 @@ void VizComputeBarFrame() {
             g_vizPeakHold[i] = 0.f;
         }
     }
+    VizStepAfterimage(barCount);
 }
 
 // Copies what the engine thread needs out of the settings, as one value, and
@@ -9372,7 +9405,21 @@ int VizShapeMenuIndex() {
 
 bool VizStyleNeedsCpuBars() {
     VizStyle s = g_settings.style;
-    return s == VizStyle::Spectrogram || s == VizStyle::SplitLR || s == VizStyle::Particles;
+    return s == VizStyle::Spectrogram || s == VizStyle::SplitLR || s == VizStyle::Particles ||
+           g_settings.afterimage > 0;  // its trail is worked out with the bars, on the CPU
+}
+
+// Afterimage (2.1): each bar's trail jumps up with it and falls back over
+// Afterimage Length.
+float g_vizGhost[VIZ_BARS_MAX] = {};
+
+void VizStepAfterimage(int barCount) {
+    if (g_settings.afterimage <= 0) return;
+    float fall = g_frameDt / std::max(0.1f, g_settings.afterimageSeconds);
+    for (int i = 0; i < barCount && i < VIZ_BARS_MAX; i++) {
+        float lv = std::max(0.f, g_vizPeak[i]);
+        g_vizGhost[i] = std::max(lv, g_vizGhost[i] - fall);
+    }
 }
 
 // Reflection: horizontal bars standing on the bottom edge only, where there
@@ -11825,6 +11872,13 @@ TT_CBUFFER(FrameCB, b0) {
     float4 fFxLineColor;
     float4 fFxShadowColor;
     float fFxLineW, fFxShadowX, fFxShadowY, fFxShadowSoft;
+    // Bar modifiers (2.1): dash and gap length px, tilt (shear per px of
+    // height), the base line it leans from; Afterimage opacity, Hollow line
+    // width px, Mirror gap px (Middle anchor), flags: 1 hollow, 2 dashed,
+    // 4 tilted, 8 mirror gap.
+    float fBarDash, fBarDashGap, fBarTiltK, fBarPivot;
+    float fGhostA, fHollowW, fMirrorGap;
+    uint fModFlags;
 }
 TT_CBUFFER_END
 
@@ -11989,12 +12043,11 @@ Prim CapsulePrim(float ax, float ay, float bx, float by, float radius, float4 co
 
 float BarRange() { return max(0.0f, fMaxSize - fIdleSize); }
 
-Prim BarPrim(uint i) {
-    if (i >= fBarCount) return NoPrim();
-    float fac = max(0.0f, gBars[i].x);
+Prim BarPrimAt(uint i, float fac, float alpha) {
     float size = fIdleSize + fac * BarRange();
     float lead = (float)i * (fBarW + fBarGap);
     float4 col = BarColor(i, fac, false);
+    col.w = col.w * alpha;
     if (fVertical == 0u) {
         float x = fBlock.x + lead;
         float y0, y1;
@@ -12010,6 +12063,19 @@ Prim BarPrim(uint i) {
     else { x0 = fBlock.x; x1 = fBlock.x + size; }
     return RectPrim(x0, y, x1, y + fBarW, fRadii, col);
 }
+
+Prim BarPrim(uint i) {
+    if (i >= fBarCount) return NoPrim();
+    return BarPrimAt(i, max(0.0f, gBars[i].x), 1.0f);
+}
+
+// Afterimage (2.1): the bar again at its slowly falling trail level (carried
+// where the peak hold usually is), see-through, drawn before the bar.
+Prim GhostPrim(uint i) {
+    if (i >= fBarCount || fGhostA <= 0.0f) return NoPrim();
+    return BarPrimAt(i, max(0.0f, gBars[i].y), fGhostA);
+}
+
 
 Prim CapPrim(uint i) {
     if (i >= fBarCount || (fFlags & 1u) == 0u) return NoPrim();
@@ -12483,6 +12549,7 @@ Prim BuildPrim(uint passId, uint id) {
     if (passId == 13u) return VuPrim(id);
     if (passId == 14u) return SplitPrim(id);
     if (passId == 15u) return SparkPrim(id);
+    if (passId == 16u) return GhostPrim(id);
     return NoPrim();
 }
 
@@ -12492,7 +12559,7 @@ struct VsOut {
     NOINTERP float4 shape SEM(TEXCOORD1);
     NOINTERP float4 radii SEM(TEXCOORD2);
     NOINTERP float4 color SEM(TEXCOORD3);
-    NOINTERP uint kind SEM(TEXCOORD4);  // low 4 bits: Prim kind; 16: reflected; 32: glows
+    NOINTERP uint kind SEM(TEXCOORD4);  // low 4 bits: Prim kind; 16: reflected; 32: FX; 64: dash/hollow; 128: tilt
 };
 
 // Quad corner `vid` (triangle strip 0..3) of the primitive's bounds. The
@@ -12521,6 +12588,17 @@ VsOut EmitVertex(Prim p, uint vid) {
         lo = float2(p.a.x - 1.0f, p.a.y - 1.0f);
         hi = float2(p.a.z + 1.0f, p.a.w + 1.0f);
     }
+    if ((p.kind & 128u) != 0u) {  // Tilt: the sheared shape's reach
+        if (fVertical == 0u) {
+            float d0 = fBarTiltK * (fBarPivot - lo.y), d1 = fBarTiltK * (fBarPivot - hi.y);
+            lo.x = lo.x + min(min(d0, d1), 0.0f) - 1.0f;
+            hi.x = hi.x + max(max(d0, d1), 0.0f) + 1.0f;
+        } else {
+            float d0 = fBarTiltK * (lo.x - fBarPivot), d1 = fBarTiltK * (hi.x - fBarPivot);
+            lo.y = lo.y + min(min(d0, d1), 0.0f) - 1.0f;
+            hi.y = hi.y + max(max(d0, d1), 0.0f) + 1.0f;
+        }
+    }
     if ((p.kind & 32u) != 0u) {  // room for the glow and the shadow
         float gr = max(fFxGlow > 0.0f ? fFxGlowR * 2.0f : 0.0f,
                        fFxShadowColor.w > 0.0f ? fFxShadowSoft + max(abs(fFxShadowX), abs(fFxShadowY)) + 1.0f : 0.0f);
@@ -12545,6 +12623,12 @@ VsOut VSMain(uint vid SEM(SV_VertexID), uint iid SEM(SV_InstanceID)) {
     // Glow: passes created with pPad1 = 1, rects and capsules only.
     if (pPad1 != 0u && (fFxGlow > 0.0f || fFxLineW > 0.0f || fFxShadowColor.w > 0.0f) && (p.kind == 0u || p.kind == 1u))
         p.kind = p.kind | 32u;
+    // Bar modifiers: the bars and their Afterimage; the caps tilt with them.
+    bool barPass = pPass == 1u || pPass == 16u;
+    if (barPass && (fModFlags & 11u) != 0u && (p.kind & 15u) <= 1u)
+        p.kind = p.kind | 64u;
+    if ((barPass || pPass == 2u) && (fModFlags & 4u) != 0u && (p.kind & 15u) <= 1u)
+        p.kind = p.kind | 128u;
     if (pPad0 != 0u) p = ReflectPrim(p);
     return EmitVertex(p, vid);
 }
@@ -12643,11 +12727,6 @@ float SdCapsule(float2 pix, float4 seg, float radius) {
     return length(float2(pa.x - ba.x * h, pa.y - ba.y * h)) - radius;
 }
 
-float Coverage(VsOut i, uint kb) {
-    if (kb == 1u) return saturate(0.5f - SdCapsule(i.pix, i.shape, i.radii.x));
-    return RectCoverage(i.pix, i.shape, i.radii);
-}
-
 // Glow (FX, 2.1): signed distance to a rounded rect (negative inside), so
 // the glow can fall off with the distance outside the shape.
 float SdRoundRect(float2 pix, float4 rect, float4 radii) {
@@ -12659,6 +12738,43 @@ float SdRoundRect(float2 pix, float4 rect, float4 radii) {
     float qx = abs(px) - hx + r, qy = abs(py) - hy + r;
     return length(float2(max(qx, 0.0f), max(qy, 0.0f))) + min(max(qx, qy), 0.0f) - r;
 }
+
+float ShapeCoverage(VsOut i, uint kb) {
+    if (kb == 1u) return saturate(0.5f - SdCapsule(i.pix, i.shape, i.radii.x));
+    return RectCoverage(i.pix, i.shape, i.radii);
+}
+
+// The bar's own pixels, with Hollow (only a band just inside the edge) and
+// Dashed (gaps along the growth direction, fixed to the base line so the
+// dashes stay still while the bar grows) applied.
+float Coverage(VsOut i, uint kb) {
+    float cov = ShapeCoverage(i, kb);
+    if ((i.kind & 64u) == 0u) return cov;
+    if ((fModFlags & 1u) != 0u) {
+        float d = (kb == 1u) ? SdCapsule(i.pix, i.shape, i.radii.x) : SdRoundRect(i.pix, i.shape, i.radii);
+        float w = max(fHollowW, 0.25f);
+        cov = min(cov, saturate(0.5f - (abs(d + w * 0.5f) - w * 0.5f)));
+    }
+    if ((fModFlags & 2u) != 0u) {
+        float period = max(fBarDash + fBarDashGap, 1.0f);
+        float t = (fVertical == 0u) ? abs(i.pix.y - fBarPivot) : abs(i.pix.x - fBarPivot);
+        float u = t - floor(t / period) * period;
+        float m = saturate(fBarDash - u + 0.5f) * saturate(u + 0.5f) + saturate(u - period + 0.5f);
+        cov = cov * saturate(m);
+    }
+    if ((fModFlags & 8u) != 0u) {  // Mirror: the two halves pulled apart from the centre line
+        float t = (fVertical == 0u) ? abs(i.pix.y - fBarPivot) : abs(i.pix.x - fBarPivot);
+        cov = cov * saturate(t - fMirrorGap * 0.5f + 0.5f);
+    }
+    return cov;
+}
+
+// Tilt: the pixel back in the unsheared bar's space.
+float2 Untilt(float2 pix) {
+    if (fVertical == 0u) return float2(pix.x - fBarTiltK * (fBarPivot - pix.y), pix.y);
+    return float2(pix.x, pix.y - fBarTiltK * (pix.x - fBarPivot));
+}
+
 
 // Glow, Outline and Shadow together, from one signed distance (and one more
 // for the shadow's offset copy). Outline is a band just inside the edge, so
@@ -12684,7 +12800,9 @@ float4 FxShade(VsOut i, uint kb) {
     return col;
 }
 
-float4 PSMain(VsOut i) SEM(SV_Target) {
+float4 PSMain(VsOut iIn) SEM(SV_Target) {
+    VsOut i = iIn;
+    if ((i.kind & 128u) != 0u) i.pix = Untilt(i.pix);
     uint kb = i.kind & 15u;
     float fade = 1.0f;
     if ((i.kind & 16u) != 0u) fade = saturate(1.0f - (i.pix.y - fReflBase) * fReflDir / max(fReflDepth, 1.0f));
@@ -13085,6 +13203,9 @@ struct FrameCB {
     float fxLineColor[4];
     float fxShadowColor[4];
     float fxLineW, fxShadowX, fxShadowY, fxShadowSoft;
+    float barDash, barDashGap, barTiltK, barPivot;
+    float ghostA, hollowW, mirrorGap;
+    uint32_t modFlags;
 };
 struct PassCB {
     uint32_t pass, count, pad0, pad1;
@@ -13101,13 +13222,13 @@ struct CsCB {
     float fmin, fmax, breatheUp, breatheDown;
 };
 #pragma pack(pop)
-static_assert(sizeof(FrameCB) == 37 * 16, "FrameCB must match tt_cb.hlsl");
+static_assert(sizeof(FrameCB) == 39 * 16, "FrameCB must match tt_cb.hlsl");
 static_assert(sizeof(PassCB) == 16, "PassCB must match tt_cb.hlsl");
 static_assert(sizeof(CsCB) == 9 * 16, "CsCB must match tt_cb.hlsl");
 
 enum Pass : uint32_t {
     kPlate = 0, kBars, kCaps, kDots, kRadial, kScope, kGonio, kCorr, kTerm,
-    kLed, kLine, kBloom, kSpectro, kVu, kSplit, kSpark, kPassCount
+    kLed, kLine, kBloom, kSpectro, kVu, kSplit, kSpark, kGhost, kPassCount
 };
 constexpr int kMaxPoints = 8192;
 constexpr int kGonioFrames = 6;  // persistence: this frame and the five before it
@@ -13341,7 +13462,7 @@ bool EnsureDevice() {
     for (uint32_t p = 0; p < kPassCount; p++) {
         // pPad1 = 1: this pass's rects and capsules take the Glow FX.
         const uint32_t glow = (p == kBars || p == kCaps || p == kDots || p == kRadial || p == kScope || p == kLed ||
-                               p == kSplit || p == kSpark) ? 1u : 0u;
+                               p == kSplit || p == kSpark || p == kGhost) ? 1u : 0u;
         PassCB pc = {p, 0, 0, glow};
         if (FAILED(MakeCB(sizeof(PassCB), false, &pc, g.passCB[p]))) return false;
         // The same pass mirrored for Reflection: pPad0 = 1.
@@ -14131,7 +14252,9 @@ bool Render(const FrameInputs& in) {
     const float fxShadowReach = fxShadow ? (g_settings.fxShadowSoft + std::max(fabsf(g_settings.fxShadowX), fabsf(g_settings.fxShadowY))) *
                                                g_dpiScale + 1.f
                                          : 0.f;
-    margin += std::max({fxGlowR * 2.f, fxBloomR, fxShadowReach});  // room for the light and shade to spread
+    margin += std::max({fxGlowR * 2.f, fxBloomR, fxShadowReach});
+    if (fabsf(g_settings.barTilt) > 0.01f)  // tilted bars lean out past the block
+        margin += maxSize * fabsf(tanf(g_settings.barTilt * 3.14159265f / 180.f));  // room for the light and shade to spread
     D2D1_RECT_F content = D2D1::RectF(L.blockX - margin, L.blockY - margin, L.blockX + L.totalWidth + margin,
                                       L.blockY + L.totalHeight + margin);
     D2D1_RECT_F want = content;
@@ -14332,6 +14455,33 @@ bool Render(const FrameInputs& in) {
         f.fxLineColor[2] = g_settings.fxOutlineB / 255.f;
         f.fxLineColor[3] = g_settings.fxOutlineA / 255.f;
     }
+    {
+        // Bar modifiers (2.1).
+        const bool horiz = g_settings.orientation == VizOrientation::Horizontal;
+        const int anchor = (int)f.anchor;
+        if (horiz) f.barPivot = anchor == 0 ? f.block[1] : anchor == 1 ? f.block[1] + maxSize * 0.5f : f.block[1] + maxSize;
+        else f.barPivot = anchor == 0 ? f.block[0] + maxSize : anchor == 1 ? f.block[0] + maxSize * 0.5f : f.block[0];
+        uint32_t mf = 0;
+        if (g_settings.barHollow) {
+            mf |= 1u;
+            f.hollowW = std::max(0.25f, g_settings.barHollowWidth * g_dpiScale);
+        }
+        if (g_settings.barDash > 0.f) {
+            mf |= 2u;
+            f.barDash = g_settings.barDash * g_dpiScale;
+            f.barDashGap = g_settings.barDashGap * g_dpiScale;
+        }
+        if (fabsf(g_settings.barTilt) > 0.01f) {
+            mf |= 4u;
+            f.barTiltK = tanf(g_settings.barTilt * 3.14159265f / 180.f);
+        }
+        if (g_settings.barMirrorGap > 0.f && anchor == 1) {
+            mf |= 8u;
+            f.mirrorGap = g_settings.barMirrorGap * g_dpiScale;
+        }
+        f.modFlags = mf;
+        f.ghostA = g_settings.afterimage / 100.f;
+    }
     if (fxShadow) {
         f.fxShadowColor[0] = g_settings.fxShadowR / 255.f;
         f.fxShadowColor[1] = g_settings.fxShadowG / 255.f;
@@ -14401,11 +14551,12 @@ bool Render(const FrameInputs& in) {
     // Stereo Field puts the left channel's levels where the bars go and the
     // right channel's where the peak caps go.
     const float* barLv = split ? g_vizSplitL : g_vizPeak;
-    const float* barHv = split ? g_vizSplitR : g_vizPeakHold;
+    // Afterimage carries its trail levels where the peak hold usually goes.
+    const float* barHv = split ? g_vizSplitR : (g_settings.afterimage > 0 ? g_vizGhost : g_vizPeakHold);
     if (cpuBars) {
         barsKey = 1469598103934665603ull;
         Mix(barsKey, (uint64_t)bars * 2u + (split ? 1u : 0u));
-        const bool caps = g_settings.peakHoldEnabled || split;
+        const bool caps = g_settings.peakHoldEnabled || split || g_settings.afterimage > 0;
         for (int i = 0; i < bars; i++) {
             MixF(barsKey, std::max(0.f, barLv[i]) * rangePx, 4.f);
             if (caps) MixF(barsKey, barHv[i] * rangePx, 4.f);
@@ -14662,6 +14813,7 @@ bool Render(const FrameInputs& in) {
         else if (style == VizStyle::Line) drawRefl(kLine, lineCount);
         else if (shape == VizShape::Dots) drawRefl(kDots, (UINT)bars * f.dotSlots);
         else {
+            if (g_settings.afterimage > 0) drawRefl(kGhost, (UINT)bars);
             drawRefl(kBars, (UINT)bars);
             if (g_settings.peakHoldEnabled) drawRefl(kCaps, (UINT)bars);
         }
@@ -14693,6 +14845,7 @@ bool Render(const FrameInputs& in) {
                 draw(kCorr, 2);
                 break;
             default:
+                if (g_settings.afterimage > 0) draw(kGhost, (UINT)bars);
                 draw(kBars, (UINT)bars);
                 if (g_settings.peakHoldEnabled) draw(kCaps, (UINT)bars);
                 break;
@@ -17750,6 +17903,14 @@ void LoadSettings() {
     g_settings.fxShadowX = ReadNumberSetting(L"appearance.fxShadowX", L"Appearance", L"Shadow Offset X", 2.f, -32.f, 32.f);
     g_settings.fxShadowY = ReadNumberSetting(L"appearance.fxShadowY", L"Appearance", L"Shadow Offset Y", 3.f, -32.f, 32.f);
     g_settings.fxShadowSoft = ReadNumberSetting(L"appearance.fxShadowSoftness", L"Appearance", L"Shadow Softness", 4.f, 0.f, 32.f);
+    g_settings.barHollow = Wh_GetIntSetting(L"appearance.barHollow") != 0;
+    g_settings.barHollowWidth = ReadSizeSetting(L"appearance.barHollowWidth", 0.25f, 16.f, 1.5f);
+    g_settings.barDash = ReadSizeSetting(L"appearance.barDash", 0.f, 200.f, 0.f);
+    g_settings.barDashGap = ReadSizeSetting(L"appearance.barDashGap", 0.f, 200.f, 2.f);
+    g_settings.barTilt = ReadSizeSetting(L"appearance.barTilt", -60.f, 60.f, 0.f);
+    g_settings.barMirrorGap = ReadSizeSetting(L"appearance.barMirrorGap", 0.f, 400.f, 0.f);
+    g_settings.afterimage = std::clamp(Wh_GetIntSetting(L"appearance.afterimage"), 0, 100);
+    g_settings.afterimageSeconds = ReadSizeSetting(L"appearance.afterimageLength", 0.1f, 10.f, 1.2f);
 
     PCWSTR orientation = Wh_GetStringSetting(L"appearance.orientation");
     g_settings.orientation =

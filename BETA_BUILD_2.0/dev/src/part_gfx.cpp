@@ -67,6 +67,9 @@ struct FrameCB {
     float fxLineColor[4];
     float fxShadowColor[4];
     float fxLineW, fxShadowX, fxShadowY, fxShadowSoft;
+    float barDash, barDashGap, barTiltK, barPivot;
+    float ghostA, hollowW, mirrorGap;
+    uint32_t modFlags;
 };
 struct PassCB {
     uint32_t pass, count, pad0, pad1;
@@ -83,13 +86,13 @@ struct CsCB {
     float fmin, fmax, breatheUp, breatheDown;
 };
 #pragma pack(pop)
-static_assert(sizeof(FrameCB) == 37 * 16, "FrameCB must match tt_cb.hlsl");
+static_assert(sizeof(FrameCB) == 39 * 16, "FrameCB must match tt_cb.hlsl");
 static_assert(sizeof(PassCB) == 16, "PassCB must match tt_cb.hlsl");
 static_assert(sizeof(CsCB) == 9 * 16, "CsCB must match tt_cb.hlsl");
 
 enum Pass : uint32_t {
     kPlate = 0, kBars, kCaps, kDots, kRadial, kScope, kGonio, kCorr, kTerm,
-    kLed, kLine, kBloom, kSpectro, kVu, kSplit, kSpark, kPassCount
+    kLed, kLine, kBloom, kSpectro, kVu, kSplit, kSpark, kGhost, kPassCount
 };
 constexpr int kMaxPoints = 8192;
 constexpr int kGonioFrames = 6;  // persistence: this frame and the five before it
@@ -323,7 +326,7 @@ bool EnsureDevice() {
     for (uint32_t p = 0; p < kPassCount; p++) {
         // pPad1 = 1: this pass's rects and capsules take the Glow FX.
         const uint32_t glow = (p == kBars || p == kCaps || p == kDots || p == kRadial || p == kScope || p == kLed ||
-                               p == kSplit || p == kSpark) ? 1u : 0u;
+                               p == kSplit || p == kSpark || p == kGhost) ? 1u : 0u;
         PassCB pc = {p, 0, 0, glow};
         if (FAILED(MakeCB(sizeof(PassCB), false, &pc, g.passCB[p]))) return false;
         // The same pass mirrored for Reflection: pPad0 = 1.
@@ -1103,7 +1106,9 @@ bool Render(const FrameInputs& in) {
     const float fxShadowReach = fxShadow ? (g_settings.fxShadowSoft + std::max(fabsf(g_settings.fxShadowX), fabsf(g_settings.fxShadowY))) *
                                                g_dpiScale + 1.f
                                          : 0.f;
-    margin += std::max({fxGlowR * 2.f, fxBloomR, fxShadowReach});  // room for the light and shade to spread
+    margin += std::max({fxGlowR * 2.f, fxBloomR, fxShadowReach});
+    if (fabsf(g_settings.barTilt) > 0.01f)  // tilted bars lean out past the block
+        margin += maxSize * fabsf(tanf(g_settings.barTilt * 3.14159265f / 180.f));  // room for the light and shade to spread
     D2D1_RECT_F content = D2D1::RectF(L.blockX - margin, L.blockY - margin, L.blockX + L.totalWidth + margin,
                                       L.blockY + L.totalHeight + margin);
     D2D1_RECT_F want = content;
@@ -1304,6 +1309,33 @@ bool Render(const FrameInputs& in) {
         f.fxLineColor[2] = g_settings.fxOutlineB / 255.f;
         f.fxLineColor[3] = g_settings.fxOutlineA / 255.f;
     }
+    {
+        // Bar modifiers (2.1).
+        const bool horiz = g_settings.orientation == VizOrientation::Horizontal;
+        const int anchor = (int)f.anchor;
+        if (horiz) f.barPivot = anchor == 0 ? f.block[1] : anchor == 1 ? f.block[1] + maxSize * 0.5f : f.block[1] + maxSize;
+        else f.barPivot = anchor == 0 ? f.block[0] + maxSize : anchor == 1 ? f.block[0] + maxSize * 0.5f : f.block[0];
+        uint32_t mf = 0;
+        if (g_settings.barHollow) {
+            mf |= 1u;
+            f.hollowW = std::max(0.25f, g_settings.barHollowWidth * g_dpiScale);
+        }
+        if (g_settings.barDash > 0.f) {
+            mf |= 2u;
+            f.barDash = g_settings.barDash * g_dpiScale;
+            f.barDashGap = g_settings.barDashGap * g_dpiScale;
+        }
+        if (fabsf(g_settings.barTilt) > 0.01f) {
+            mf |= 4u;
+            f.barTiltK = tanf(g_settings.barTilt * 3.14159265f / 180.f);
+        }
+        if (g_settings.barMirrorGap > 0.f && anchor == 1) {
+            mf |= 8u;
+            f.mirrorGap = g_settings.barMirrorGap * g_dpiScale;
+        }
+        f.modFlags = mf;
+        f.ghostA = g_settings.afterimage / 100.f;
+    }
     if (fxShadow) {
         f.fxShadowColor[0] = g_settings.fxShadowR / 255.f;
         f.fxShadowColor[1] = g_settings.fxShadowG / 255.f;
@@ -1373,11 +1405,12 @@ bool Render(const FrameInputs& in) {
     // Stereo Field puts the left channel's levels where the bars go and the
     // right channel's where the peak caps go.
     const float* barLv = split ? g_vizSplitL : g_vizPeak;
-    const float* barHv = split ? g_vizSplitR : g_vizPeakHold;
+    // Afterimage carries its trail levels where the peak hold usually goes.
+    const float* barHv = split ? g_vizSplitR : (g_settings.afterimage > 0 ? g_vizGhost : g_vizPeakHold);
     if (cpuBars) {
         barsKey = 1469598103934665603ull;
         Mix(barsKey, (uint64_t)bars * 2u + (split ? 1u : 0u));
-        const bool caps = g_settings.peakHoldEnabled || split;
+        const bool caps = g_settings.peakHoldEnabled || split || g_settings.afterimage > 0;
         for (int i = 0; i < bars; i++) {
             MixF(barsKey, std::max(0.f, barLv[i]) * rangePx, 4.f);
             if (caps) MixF(barsKey, barHv[i] * rangePx, 4.f);
@@ -1634,6 +1667,7 @@ bool Render(const FrameInputs& in) {
         else if (style == VizStyle::Line) drawRefl(kLine, lineCount);
         else if (shape == VizShape::Dots) drawRefl(kDots, (UINT)bars * f.dotSlots);
         else {
+            if (g_settings.afterimage > 0) drawRefl(kGhost, (UINT)bars);
             drawRefl(kBars, (UINT)bars);
             if (g_settings.peakHoldEnabled) drawRefl(kCaps, (UINT)bars);
         }
@@ -1665,6 +1699,7 @@ bool Render(const FrameInputs& in) {
                 draw(kCorr, 2);
                 break;
             default:
+                if (g_settings.afterimage > 0) draw(kGhost, (UINT)bars);
                 draw(kBars, (UINT)bars);
                 if (g_settings.peakHoldEnabled) draw(kCaps, (UINT)bars);
                 break;

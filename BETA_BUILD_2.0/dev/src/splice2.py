@@ -1613,6 +1613,77 @@ rep("""      $description: The peak cap in Columns (with Peak Hold on). One prin
 rep("""      $description: Characters from quiet to loud for the Waterfall. Printable ASCII""",
     """      $description: 'Characters from quiet to loud for the Waterfall, any characters, e.g. " ░▒▓█" or " ·•●". Up to 128 different non-ASCII characters across all three settings'""")
 
+# ================================================================ Bar modifiers (2.1)
+after("    float fxShadowX = 2.f, fxShadowY = 3.f, fxShadowSoft = 4.f;  // px\n",
+      "    bool barHollow = false;\n"
+      "    float barHollowWidth = 1.5f, barDash = 0.f, barDashGap = 2.f, barTilt = 0.f;  // px, px, px, degrees\n"
+      "    float barMirrorGap = 0.f;  // px\n"
+      "    int afterimage = 0;  // %\n"
+      "    float afterimageSeconds = 1.2f;\n")
+rep("""    g_settings.fxShadowSoft = ReadNumberSetting(L"appearance.fxShadowSoftness", L"Appearance", L"Shadow Softness", 4.f, 0.f, 32.f);""",
+    """    g_settings.fxShadowSoft = ReadNumberSetting(L"appearance.fxShadowSoftness", L"Appearance", L"Shadow Softness", 4.f, 0.f, 32.f);
+    g_settings.barHollow = Wh_GetIntSetting(L"appearance.barHollow") != 0;
+    g_settings.barHollowWidth = ReadSizeSetting(L"appearance.barHollowWidth", 0.25f, 16.f, 1.5f);
+    g_settings.barDash = ReadSizeSetting(L"appearance.barDash", 0.f, 200.f, 0.f);
+    g_settings.barDashGap = ReadSizeSetting(L"appearance.barDashGap", 0.f, 200.f, 2.f);
+    g_settings.barTilt = ReadSizeSetting(L"appearance.barTilt", -60.f, 60.f, 0.f);
+    g_settings.barMirrorGap = ReadSizeSetting(L"appearance.barMirrorGap", 0.f, 400.f, 0.f);
+    g_settings.afterimage = std::clamp(Wh_GetIntSetting(L"appearance.afterimage"), 0, 100);
+    g_settings.afterimageSeconds = ReadSizeSetting(L"appearance.afterimageLength", 0.1f, 10.f, 1.2f);""")
+rep("""    - fxShadowSoftness: '4'
+      $name: Shadow Softness
+      $description: 0-32 pixels, decimals allowed. 0 = a hard edge
+""", """    - fxShadowSoftness: '4'
+      $name: Shadow Softness
+      $description: 0-32 pixels, decimals allowed. 0 = a hard edge
+    - barHollow: false
+      $name: Hollow Bars
+      $description: Bars as outlines only, the inside left clear. Bar shapes (Stereo, Mountain, Mirror, Wave, Breathe). Direct3D 11 renderer
+    - barHollowWidth: '1.5'
+      $name: Hollow Line Width
+      $description: Pixels, decimals allowed
+    - barDash: '0'
+      $name: Dash Length
+      $description: Pixels, decimals allowed. Cuts the bars into dashes along their length, fixed to the base line so they stay put as a bar grows. 0 = solid. Bar shapes, Direct3D 11 renderer
+    - barDashGap: '2'
+      $name: Dash Gap
+      $description: Pixels between dashes, decimals allowed
+    - barTilt: '0'
+      $name: Tilt
+      $description: -60 to 60 degrees, decimals allowed. Leans every bar from its base line, like italics; peak caps and the Afterimage lean with them. Bar shapes, Direct3D 11 renderer
+    - barMirrorGap: '0'
+      $name: Mirror Gap
+      $description: Pixels, decimals allowed. With Anchor = Middle the bars already grow both ways from a centre line; this pulls the two halves apart, like a waveform with a spine. Bar shapes, Direct3D 11 renderer
+    - afterimage: 0
+      $name: Afterimage
+      $description: 0-100. A see-through trail behind each bar that jumps up with it and sinks back slowly. With Peak Hold on, the caps sit on the trail. Bar shapes, Direct3D 11 renderer; keeps the analysis on the CPU (Hybrid)
+    - afterimageLength: '1.2'
+      $name: Afterimage Length
+      $description: Seconds for a full-height trail to sink away, decimals allowed
+""")
+# The trail steps with the bars, on both engine paths.
+before("void VizComputeBarFrame() {", "void VizStepAfterimage(int barCount);  // Afterimage (2.1), with the styles\n\n")
+rep("""                g_peakState[i] = ttdsp::PeakHold();
+                g_vizPeakHold[i] = 0.f;
+            }
+        }
+        return;""", """                g_peakState[i] = ttdsp::PeakHold();
+                g_vizPeakHold[i] = 0.f;
+            }
+        }
+        VizStepAfterimage(barCount);
+        return;""")
+rep("""        } else {
+            g_vizPeakHold[i] = 0.f;
+        }
+    }
+}""", """        } else {
+            g_vizPeakHold[i] = 0.f;
+        }
+    }
+    VizStepAfterimage(barCount);
+}""")
+
 out = os.path.join(S, "v2b.cpp")
 open(out, "w", encoding="utf-8", newline="\n").write(src)
 print("wrote", out, src.count("\n"), "lines")
