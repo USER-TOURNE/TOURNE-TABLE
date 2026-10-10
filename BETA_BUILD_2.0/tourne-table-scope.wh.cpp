@@ -75,6 +75,14 @@ The 1.4 analysis is still there as **Analysis Engine = Classic**.
 
 **My Styles.** Right-click > My Styles > Style Editor: mix a base style, colours, bar sizes, reflection, glow and bloom while the visualizer previews it live, save it under a name, and pick it from the menu any time.
 
+**Finer looks.** Outline and Shadow around every bar; bar modifiers Hollow, Dashed, Tilt, Afterimage (a slowly falling trail) and Mirror Gap; scale numbers on Spectrogram and VU Needles; album colours that ease in; any Unicode character in Terminal. Reflection now works on both renderers.
+
+**Exact sizes.** Bar width, gap, height, padding, borders, radii, fonts and offsets take decimals (turn Pixel Snap off to keep the fractions).
+
+**Placement.** Drag snaps to the screen's edges and centre, the taskbar, the tray and the Start button (hold Shift to place freely). Position > Dock To App keeps the visualizer beside an app's window as it moves, and Split Into Two Pieces cuts it in two, e.g. either side of the taskbar's centred icons, at almost no cost.
+
+**Media.** Click to Seek on the progress bar (off by default, with an app list), custom icons on the Media Card, and Media Controls > Stacking (always on top, or a normal window apps can cover).
+
 ---
 
 ## ◈ PERFORMANCE AT A GLANCE
