@@ -1684,6 +1684,124 @@ rep("""        } else {
     VizStepAfterimage(barCount);
 }""")
 
+# ================================================================ Drag snapping (2.1)
+after("    bool dragEnabled = false;\n",
+      "    bool dragSnap = true;             // snap to screen and taskbar lines while dragging\n"
+      "    float dragSnapDistance = 8.f;     // logical px\n")
+after("""    g_settings.dragEnabled = Wh_GetIntSetting(L"interaction.dragEnabled") != 0;
+""", """    g_settings.dragSnap = Wh_GetIntSetting(L"interaction.dragSnap") != 0;
+    g_settings.dragSnapDistance = std::clamp((float)Wh_GetIntSetting(L"interaction.dragSnapDistance"), 1.f, 64.f);
+""")
+before("""    - dragModifier: ctrl
+      $name: Drag Modifier Key""", """    - dragSnap: true
+      $name: Snap While Dragging
+      $description: While dragging, the visualizer's edges and centre catch on the screen's edges and centre, the taskbar's edge, the tray and the Start button. Hold Shift (Alt when Shift is the drag key) to place it freely
+    - dragSnapDistance: 8
+      $name: Snap Distance
+      $description: How close, in pixels, an edge has to come before it snaps
+""")
+before("void UpdateDrag(POINT pt) {\n", r"""// ---- Drag snapping ---------------------------------------------------------
+// Lines the box can catch on while it is dragged, in screen pixels. Gathered once
+// when a drag starts (the taskbar does not move mid-drag), then each move only
+// compares a handful of numbers.
+std::vector<float> g_snapLinesX, g_snapLinesY;
+
+void VizSnapAddWindow(HWND w, bool xOnly) {
+    RECT r;
+    if (!w || !IsWindowVisible(w) || !GetWindowRect(w, &r) || r.right <= r.left || r.bottom <= r.top) return;
+    g_snapLinesX.push_back((float)r.left);
+    g_snapLinesX.push_back((float)r.right);
+    g_snapLinesX.push_back((r.left + r.right) * 0.5f);
+    if (xOnly) return;
+    g_snapLinesY.push_back((float)r.top);
+    g_snapLinesY.push_back((float)r.bottom);
+}
+
+void VizCollectSnapLines() {
+    g_snapLinesX.clear();
+    g_snapLinesY.clear();
+    if (!g_settings.dragSnap) return;
+    HMONITOR monitor = g_cachedMonitor;
+    if (!monitor) monitor = MonitorFromPoint({0, 0}, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi{.cbSize = sizeof(mi)};
+    if (!GetMonitorInfo(monitor, &mi)) return;
+    const RECT& wk = mi.rcWork;
+    g_snapLinesX = {(float)wk.left, (float)wk.right, (wk.left + wk.right) * 0.5f};
+    g_snapLinesY = {(float)wk.top, (float)wk.bottom, (wk.top + wk.bottom) * 0.5f};
+
+    // This monitor's taskbar: its edge, then the tray and the Start button along it.
+    for (PCWSTR cls : {L"Shell_TrayWnd", L"Shell_SecondaryTrayWnd"}) {
+        for (HWND tb = FindWindowEx(nullptr, nullptr, cls, nullptr); tb;
+             tb = FindWindowEx(nullptr, tb, cls, nullptr)) {
+            if (MonitorFromWindow(tb, MONITOR_DEFAULTTONULL) != monitor) continue;
+            RECT r;
+            if (GetWindowRect(tb, &r)) {
+                g_snapLinesY.push_back((float)r.top);
+                g_snapLinesY.push_back((float)r.bottom);
+            }
+            VizSnapAddWindow(FindWindowEx(tb, nullptr, L"TrayNotifyWnd", nullptr), true);
+            VizSnapAddWindow(FindWindowEx(tb, nullptr, L"Start", nullptr), true);
+        }
+    }
+}
+
+bool VizSnapBypassHeld() {
+    int key = g_settings.dragModifier == VizDragModifier::Shift ? VK_MENU : VK_SHIFT;
+    return (GetAsyncKeyState(key) & 0x8000) != 0;
+}
+
+// Moves a box [lo, lo+size] so its nearest edge or centre sits on a line within
+// reach. Returns the adjusted lo.
+float VizSnapAxis(float lo, float size, const std::vector<float>& lines, float reach) {
+    float best = reach + 1.f, shift = 0.f;
+    for (float line : lines) {
+        for (float a : {lo, lo + size * 0.5f, lo + size}) {
+            float d = line - a;
+            if (std::abs(d) < best) { best = std::abs(d); shift = d; }
+        }
+    }
+    return best <= reach ? lo + shift : lo;
+}
+
+void VizApplyDragSnap(float* h, float* v, float travelX, float travelY) {
+    if (!g_settings.dragSnap || g_snapLinesX.empty() || VizSnapBypassHeld()) return;
+    HMONITOR monitor = g_cachedMonitor;
+    if (!monitor) monitor = MonitorFromPoint({0, 0}, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi{.cbSize = sizeof(mi)};
+    if (!GetMonitorInfo(monitor, &mi)) return;
+    const RECT& wk = mi.rcWork;
+    float reach = g_settings.dragSnapDistance * g_dpiScale;
+    if (travelX > 1.0f) {
+        float boxW = (float)(wk.right - wk.left) - travelX;
+        float lo = VizSnapAxis(wk.left + travelX * *h / 100.0f, boxW, g_snapLinesX, reach);
+        *h = std::clamp((lo - wk.left) / travelX * 100.0f, 0.0f, 100.0f);
+    }
+    if (travelY > 1.0f) {
+        float boxH = (float)(wk.bottom - wk.top) - travelY;
+        float lo = VizSnapAxis(wk.top + travelY * *v / 100.0f, boxH, g_snapLinesY, reach);
+        *v = std::clamp((lo - wk.top) / travelY * 100.0f, 0.0f, 100.0f);
+    }
+}
+
+""")
+before("void BeginDrag(POINT pt) {\n", "void VizCollectSnapLines();\n\n")
+rep("""    g_dragRenderPauseActive.store(true, std::memory_order_relaxed);
+
+    Wh_Log(L"[Drag] BEGIN""", """    g_dragRenderPauseActive.store(true, std::memory_order_relaxed);
+    VizCollectSnapLines();
+
+    Wh_Log(L"[Drag] BEGIN""")
+rep("""    g_dragOverrideH.store(std::clamp(g_dragStartH + dxPercent, 0.0f, 100.0f), std::memory_order_relaxed);
+    g_dragOverrideV.store(std::clamp(g_dragStartV + dyPercent, 0.0f, 100.0f), std::memory_order_relaxed);
+    g_dragOverrideActive.store(true, std::memory_order_relaxed);
+""", """    float newH = std::clamp(g_dragStartH + dxPercent, 0.0f, 100.0f);
+    float newV = std::clamp(g_dragStartV + dyPercent, 0.0f, 100.0f);
+    VizApplyDragSnap(&newH, &newV, travelX, travelY);
+    g_dragOverrideH.store(newH, std::memory_order_relaxed);
+    g_dragOverrideV.store(newV, std::memory_order_relaxed);
+    g_dragOverrideActive.store(true, std::memory_order_relaxed);
+""")
+
 out = os.path.join(S, "v2b.cpp")
 open(out, "w", encoding="utf-8", newline="\n").write(src)
 print("wrote", out, src.count("\n"), "lines")
