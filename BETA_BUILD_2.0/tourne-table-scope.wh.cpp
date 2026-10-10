@@ -1047,13 +1047,13 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
       $description: Above this share of full height a character turns the Hot Color
     - columnGlyph: '#'
       $name: Column Glyph
-      $description: The character columns and meters are built from. One printable ASCII character
+      $description: 'The character columns and meters are built from. Any one character: ASCII, Unicode symbols (█ ▓ ● ◆ ★), box drawing, Nerd Font icons or emoji, as long as the font has it'
     - peakGlyph: '-'
       $name: Peak Glyph
-      $description: The peak cap in Columns (with Peak Hold on). One printable ASCII character
+      $description: The peak cap in Columns (with Peak Hold on). Any one character, as above
     - ramp: ' .:-=+*#%@'
       $name: Waterfall Ramp
-      $description: Characters from quiet to loud for the Waterfall. Printable ASCII
+      $description: 'Characters from quiet to loud for the Waterfall, any characters, e.g. " ░▒▓█" or " ·•●". Up to 128 different non-ASCII characters across all three settings'
     - scrollRate: 20
       $name: Waterfall Speed
       $description: Lines per second
@@ -9006,6 +9006,37 @@ std::vector<float> g_termHistory;  // waterfall: rows x cols levels, row 0 newes
 // (Waterfall scrolls included), so the renderer can tell a changed grid from an
 // unchanged one without hashing 65,536 cells every tick.
 uint32_t g_termGridSerial = 0;
+// Custom Terminal glyphs: code 128 + k draws g_termCustomGlyphs[k].
+std::vector<std::wstring> g_termCustomGlyphs;
+
+// The code for one character (a code point, plus a following emoji
+// presentation selector), adding it to the custom glyphs when it isn't ASCII.
+// 0 when there is no room left.
+wchar_t VizTermCodeFor(const std::wstring& glyph) {
+    if (glyph.size() == 1 && glyph[0] >= 32 && glyph[0] < 127) return glyph[0];
+    for (size_t k = 0; k < g_termCustomGlyphs.size(); k++)
+        if (g_termCustomGlyphs[k] == glyph) return (wchar_t)(128 + k);
+    if (g_termCustomGlyphs.size() >= 128) return 0;
+    g_termCustomGlyphs.push_back(glyph);
+    return (wchar_t)(128 + g_termCustomGlyphs.size() - 1);
+}
+
+// Splits text into characters as VizTermCodeFor takes them.
+std::vector<std::wstring> VizTermSplitGlyphs(const std::wstring& s) {
+    std::vector<std::wstring> out;
+    for (size_t i = 0; i < s.size();) {
+        size_t n = (IS_HIGH_SURROGATE(s[i]) && i + 1 < s.size() && IS_LOW_SURROGATE(s[i + 1])) ? 2 : 1;
+        if (i + n < s.size() && s[i + n] == 0xFE0F) n++;
+        if (s[i] >= 32 || n > 1) out.push_back(s.substr(i, n));
+        i += n;
+    }
+    return out;
+}
+
+std::wstring VizTermGlyphText(uint32_t code) {
+    if (code >= 128 && code - 128 < g_termCustomGlyphs.size()) return g_termCustomGlyphs[code - 128];
+    return std::wstring(1, (wchar_t)code);
+}
 float g_termScrollAcc = 0.f;
 
 // Cell size for the terminal font, in whole pixels so glyphs land 1:1.
@@ -9066,7 +9097,7 @@ void VizTermBox(float* w, float* h) {
 }
 
 static inline uint32_t TermCell(wchar_t c, int color) {
-    uint32_t ch = (c >= 32 && c < 127) ? (uint32_t)c : (uint32_t)'?';
+    uint32_t ch = ((c >= 32 && c < 127) || (c >= 128 && c < 256)) ? (uint32_t)c : (uint32_t)'?';
     return ch | ((uint32_t)color << 8);
 }
 
@@ -9249,7 +9280,7 @@ void VizDrawTermGridD2D(float originX, float originY) {
         int c = 0;
         while (c < g.cols) {
             uint32_t cell = g.cells[(size_t)r * g.cols + c];
-            if ((cell & 127u) <= 32u) {
+            if ((cell & 255u) <= 32u) {
                 c++;
                 continue;
             }
@@ -9258,9 +9289,10 @@ void VizDrawTermGridD2D(float originX, float originY) {
             run.clear();
             while (c < g.cols) {
                 uint32_t k = g.cells[(size_t)r * g.cols + c];
-                bool blank = (k & 127u) <= 32u;
+                bool blank = (k & 255u) <= 32u;
                 if (!blank && (int)((k >> 8) & 7u) != color) break;
-                run.push_back(blank ? L' ' : (wchar_t)(k & 127u));
+                if (blank) run.push_back(L' ');
+                else run += VizTermGlyphText(k & 255u);
                 c++;
             }
             while (!run.empty() && run.back() == L' ') run.pop_back();
@@ -12113,7 +12145,7 @@ Prim CorrPrim(uint j) {
 Prim TermPrim(uint id) {
     uint cols = max(fTermCols, 1u);
     uint cell = gCells[id];
-    uint ch = cell & 127u;
+    uint ch = cell & 255u;  // 33-126 ASCII, 128-255 the custom glyphs (2.1)
     uint idx = cell >> 16u;
     if (ch <= 32u || idx >= cols * fTermRows) return NoPrim();
     uint ci = min((cell >> 8u) & 7u, 4u);
@@ -13918,7 +13950,7 @@ int BuildGonioPoints(float* out4, int maxPoints) {
 // point filtering: a pixel font stays pixel-exact, and the whole grid is one
 // instanced draw. Rebaked only when the font, its size or the text rendering
 // mode changes.
-constexpr UINT kAtlasCols = 16, kAtlasRows = 6;
+constexpr UINT kAtlasCols = 16, kAtlasRows = 14;  // ASCII, then 128 custom glyphs
 
 bool EnsureTermResources() {
     if (!g.cellsDyn) {
@@ -13932,6 +13964,8 @@ bool EnsureTermResources() {
     MixF(key, g_termFormatPx, 64.f);
     Mix(key, (uint64_t)g_termCellW * 4096u + (uint64_t)g_termCellH);
     Mix(key, g_settings.textPixel ? 1u : 0u);
+    for (const auto& gl : g_termCustomGlyphs)
+        for (wchar_t c : gl) Mix(key, 0x10000u + (uint64_t)c);
     if (g.glyphSRV && key == g.glyphKey) return true;
     g.glyphSRV.Reset();
     g.glyphTex.Reset();
@@ -13972,6 +14006,14 @@ bool EnsureTermResources() {
         float x = (float)(col * (UINT)g_termCellW), y = (float)(row * (UINT)g_termCellH);
         dc->DrawText(&c, 1, g_termFormat.Get(), D2D1::RectF(x, y, x + g_termCellW, y + g_termCellH), white.Get(),
                      D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    }
+    for (UINT k = 0; k < (UINT)g_termCustomGlyphs.size() && k < 128; k++) {
+        UINT i = 96 + k;  // code 128 + k
+        UINT col = i % kAtlasCols, row = i / kAtlasCols;
+        float x = (float)(col * (UINT)g_termCellW), y = (float)(row * (UINT)g_termCellH);
+        const std::wstring& gl = g_termCustomGlyphs[k];
+        dc->DrawText(gl.c_str(), (UINT32)gl.size(), g_termFormat.Get(),
+                     D2D1::RectF(x, y, x + g_termCellW, y + g_termCellH), white.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
     }
     if (FAILED(dc->EndDraw())) {
         g.glyphTex.Reset();
@@ -14463,7 +14505,7 @@ bool Render(const FrameInputs& in) {
             for (size_t i = 0; i < n; i++) {  // branch-free: k <= i, always in bounds
                 uint32_t cell = src[i];
                 out[k] = (cell & 0xFFFFu) | ((uint32_t)i << 16);
-                k += ((cell & 127u) > 32u) ? 1u : 0u;
+                k += ((cell & 255u) > 32u) ? 1u : 0u;
             }
             g.ctx->Unmap(g.cellsDyn.Get(), 0);
             VizPerf(kPerfMaps);
@@ -18327,13 +18369,17 @@ void LoadSettings() {
         g_settings.termMeterColumns = std::clamp(Wh_GetIntSetting(L"terminal.meterColumns"), 20, 200);
         g_settings.termHotThreshold = std::clamp(Wh_GetIntSetting(L"terminal.hotThreshold"), 1, 100);
         g_settings.termScrollRate = std::clamp(Wh_GetIntSetting(L"terminal.scrollRate"), 1, 120);
-        // One printable ASCII character each; the atlas holds 32-126.
+        // Any one character each (2.1): ASCII as itself, anything else as a
+        // custom glyph code. The font has to have it.
+        g_termCustomGlyphs.clear();
         auto glyph = [](PCWSTR key, PCWSTR name, wchar_t def) {
             PCWSTR v = Wh_GetStringSetting(key);
-            wchar_t c = (v && v[0]) ? v[0] : def;
-            if (c < 33 || c > 126) {
+            std::vector<std::wstring> gs = VizTermSplitGlyphs(v ? v : L"");
+            wchar_t c = 0;
+            if (!gs.empty() && gs[0] != L" ") c = VizTermCodeFor(gs[0]);
+            if (!c) {
                 WCHAR d[2] = {def, 0};
-                ReportSettingIssue(L"Terminal", name, v ? v : L"", L"one printable ASCII character", d);
+                ReportSettingIssue(L"Terminal", name, v ? v : L"", L"one character", d);
                 c = def;
             }
             Wh_FreeStringSetting(v);
@@ -18343,8 +18389,8 @@ void LoadSettings() {
         g_settings.termPeakGlyph = glyph(L"terminal.peakGlyph", L"Peak Glyph", L'-');
         str(L"terminal.ramp", [](PCWSTR v) {
             std::wstring r;
-            for (const wchar_t* p = v; *p; p++)
-                if (*p >= 32 && *p < 127) r.push_back(*p);
+            for (const auto& gl : VizTermSplitGlyphs(v))
+                if (wchar_t c = VizTermCodeFor(gl)) r.push_back(c);
             g_settings.termRamp = r.size() >= 2 ? r : L" .:-=+*#%@";
         });
         ReadColorSetting(L"terminal.dimColor", L"Terminal", L"Dim Color", 255, 0x1E, 0x6B, 0x34, &g_settings.termDimA,

@@ -1509,6 +1509,110 @@ rep("""    if (nCode == HC_ACTION && !g_unloading.load(std::memory_order_relaxed
         return 1;""")
 after("#include <commdlg.h>\n", "#include <tlhelp32.h>\n")
 
+# ================================================================ Terminal: any character (2.1)
+# Glyph codes stay one byte per cell: 33-126 are themselves, and any other
+# character (Unicode, symbols, emoji, Nerd Font icons) gets a code from 128 up
+# while the settings load. The atlas bakes those after ASCII, at slot code - 32.
+after("uint32_t g_termGridSerial = 0;\n", """// Custom Terminal glyphs: code 128 + k draws g_termCustomGlyphs[k].
+std::vector<std::wstring> g_termCustomGlyphs;
+
+// The code for one character (a code point, plus a following emoji
+// presentation selector), adding it to the custom glyphs when it isn't ASCII.
+// 0 when there is no room left.
+wchar_t VizTermCodeFor(const std::wstring& glyph) {
+    if (glyph.size() == 1 && glyph[0] >= 32 && glyph[0] < 127) return glyph[0];
+    for (size_t k = 0; k < g_termCustomGlyphs.size(); k++)
+        if (g_termCustomGlyphs[k] == glyph) return (wchar_t)(128 + k);
+    if (g_termCustomGlyphs.size() >= 128) return 0;
+    g_termCustomGlyphs.push_back(glyph);
+    return (wchar_t)(128 + g_termCustomGlyphs.size() - 1);
+}
+
+// Splits text into characters as VizTermCodeFor takes them.
+std::vector<std::wstring> VizTermSplitGlyphs(const std::wstring& s) {
+    std::vector<std::wstring> out;
+    for (size_t i = 0; i < s.size();) {
+        size_t n = (IS_HIGH_SURROGATE(s[i]) && i + 1 < s.size() && IS_LOW_SURROGATE(s[i + 1])) ? 2 : 1;
+        if (i + n < s.size() && s[i + n] == 0xFE0F) n++;
+        if (s[i] >= 32 || n > 1) out.push_back(s.substr(i, n));
+        i += n;
+    }
+    return out;
+}
+
+std::wstring VizTermGlyphText(uint32_t code) {
+    if (code >= 128 && code - 128 < g_termCustomGlyphs.size()) return g_termCustomGlyphs[code - 128];
+    return std::wstring(1, (wchar_t)code);
+}
+""")
+rep("""    uint32_t ch = (c >= 32 && c < 127) ? (uint32_t)c : (uint32_t)'?';""",
+    """    uint32_t ch = ((c >= 32 && c < 127) || (c >= 128 && c < 256)) ? (uint32_t)c : (uint32_t)'?';""")
+rep("""            if ((cell & 127u) <= 32u) {""", """            if ((cell & 255u) <= 32u) {""")
+rep("""                bool blank = (k & 127u) <= 32u;""", """                bool blank = (k & 255u) <= 32u;""")
+rep("""                run.push_back(blank ? L' ' : (wchar_t)(k & 127u));""",
+    """                if (blank) run.push_back(L' ');
+                else run += VizTermGlyphText(k & 255u);""")
+rep("""                k += ((cell & 127u) > 32u) ? 1u : 0u;""", """                k += ((cell & 255u) > 32u) ? 1u : 0u;""")
+rep("constexpr UINT kAtlasCols = 16, kAtlasRows = 6;", "constexpr UINT kAtlasCols = 16, kAtlasRows = 14;  // ASCII, then 128 custom glyphs")
+rep("""    Mix(key, g_settings.textPixel ? 1u : 0u);
+    if (g.glyphSRV && key == g.glyphKey) return true;""", """    Mix(key, g_settings.textPixel ? 1u : 0u);
+    for (const auto& gl : g_termCustomGlyphs)
+        for (wchar_t c : gl) Mix(key, 0x10000u + (uint64_t)c);
+    if (g.glyphSRV && key == g.glyphKey) return true;""")
+rep("""        dc->DrawText(&c, 1, g_termFormat.Get(), D2D1::RectF(x, y, x + g_termCellW, y + g_termCellH), white.Get(),
+                     D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    }""", """        dc->DrawText(&c, 1, g_termFormat.Get(), D2D1::RectF(x, y, x + g_termCellW, y + g_termCellH), white.Get(),
+                     D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    }
+    for (UINT k = 0; k < (UINT)g_termCustomGlyphs.size() && k < 128; k++) {
+        UINT i = 96 + k;  // code 128 + k
+        UINT col = i % kAtlasCols, row = i / kAtlasCols;
+        float x = (float)(col * (UINT)g_termCellW), y = (float)(row * (UINT)g_termCellH);
+        const std::wstring& gl = g_termCustomGlyphs[k];
+        dc->DrawText(gl.c_str(), (UINT32)gl.size(), g_termFormat.Get(),
+                     D2D1::RectF(x, y, x + g_termCellW, y + g_termCellH), white.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    }""")
+rep("""        // One printable ASCII character each; the atlas holds 32-126.
+        auto glyph = [](PCWSTR key, PCWSTR name, wchar_t def) {
+            PCWSTR v = Wh_GetStringSetting(key);
+            wchar_t c = (v && v[0]) ? v[0] : def;
+            if (c < 33 || c > 126) {
+                WCHAR d[2] = {def, 0};
+                ReportSettingIssue(L"Terminal", name, v ? v : L"", L"one printable ASCII character", d);
+                c = def;
+            }
+            Wh_FreeStringSetting(v);
+            return c;
+        };""", """        // Any one character each (2.1): ASCII as itself, anything else as a
+        // custom glyph code. The font has to have it.
+        g_termCustomGlyphs.clear();
+        auto glyph = [](PCWSTR key, PCWSTR name, wchar_t def) {
+            PCWSTR v = Wh_GetStringSetting(key);
+            std::vector<std::wstring> gs = VizTermSplitGlyphs(v ? v : L"");
+            wchar_t c = 0;
+            if (!gs.empty() && gs[0] != L" ") c = VizTermCodeFor(gs[0]);
+            if (!c) {
+                WCHAR d[2] = {def, 0};
+                ReportSettingIssue(L"Terminal", name, v ? v : L"", L"one character", d);
+                c = def;
+            }
+            Wh_FreeStringSetting(v);
+            return c;
+        };""")
+rep("""            std::wstring r;
+            for (const wchar_t* p = v; *p; p++)
+                if (*p >= 32 && *p < 127) r.push_back(*p);
+            g_settings.termRamp = r.size() >= 2 ? r : L" .:-=+*#%@";""", """            std::wstring r;
+            for (const auto& gl : VizTermSplitGlyphs(v))
+                if (wchar_t c = VizTermCodeFor(gl)) r.push_back(c);
+            g_settings.termRamp = r.size() >= 2 ? r : L" .:-=+*#%@";""")
+rep("""      $description: The character columns and meters are built from. One printable ASCII character""",
+    """      $description: 'The character columns and meters are built from. Any one character: ASCII, Unicode symbols (█ ▓ ● ◆ ★), box drawing, Nerd Font icons or emoji, as long as the font has it'""")
+rep("""      $description: The peak cap in Columns (with Peak Hold on). One printable ASCII character""",
+    """      $description: The peak cap in Columns (with Peak Hold on). Any one character, as above""")
+rep("""      $description: Characters from quiet to loud for the Waterfall. Printable ASCII""",
+    """      $description: 'Characters from quiet to loud for the Waterfall, any characters, e.g. " ░▒▓█" or " ·•●". Up to 128 different non-ASCII characters across all three settings'""")
+
 out = os.path.join(S, "v2b.cpp")
 open(out, "w", encoding="utf-8", newline="\n").write(src)
 print("wrote", out, src.count("\n"), "lines")

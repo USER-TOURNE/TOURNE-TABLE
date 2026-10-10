@@ -297,7 +297,7 @@ Prim CorrPrim(uint j) {
 Prim TermPrim(uint id) {
     uint cols = max(fTermCols, 1u);
     uint cell = gCells[id];
-    uint ch = cell & 127u;
+    uint ch = cell & 255u;  // 33-126 ASCII, 128-255 the custom glyphs (2.1)
     uint idx = cell >> 16u;
     if (ch <= 32u || idx >= cols * fTermRows) return NoPrim();
     uint ci = min((cell >> 8u) & 7u, 4u);
