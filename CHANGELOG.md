@@ -33,6 +33,7 @@ Beta build, in `BETA_BUILD_2.0/`. Same `@id` as the 1.4 beta, so it upgrades tha
 - **Bar modifiers** (Appearance): Hollow, Dashed, Tilt, Afterimage (a trail that falls slowly) and Mirror Gap. Each is one shader branch, free when off.
 - **Snap while dragging**: edges and centre catch on the screen, the taskbar edge, the tray and the Start button. Hold Shift to place freely.
 - **Dock To App** (Position): sits beside a chosen app's window and follows it as it moves; back to its usual place while the app is closed or minimized.
+- **Place In = Taskbar** (Position): the visualizer sits inside the taskbar, above it, with the positions measured across the taskbar. Clicks still go through to the taskbar under it.
 - **Split Into Two Pieces** (Position): cut at a chosen point, the second piece moved by a gap and shift. Windows composes the second piece from the same frame, so it costs next to nothing.
 - **Fix:** the drag and menu hooks no longer take clicks while another app (e.g. a full-screen game) covers the visualizer.
 - **Card fixes:** custom media icons now show on the Media Card too (they only worked on the strip); the card no longer covers its own device menu or the right-click menu; new Media Controls > Stacking setting (Always on top, or a Normal window that apps can cover).

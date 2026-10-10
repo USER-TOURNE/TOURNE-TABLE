@@ -1189,6 +1189,7 @@ rep("media controls pinned to the panel.\n",
     "scale numbers on Spectrogram and VU Needles; album colours that ease in; any Unicode character in Terminal. Reflection now works on both renderers.\n\n"
     "**Exact sizes.** Bar width, gap, height, padding, borders, radii, fonts and offsets take decimals (turn Pixel Snap off to keep the fractions).\n\n"
     "**Placement.** Drag snaps to the screen's edges and centre, the taskbar, the tray and the Start button (hold Shift to place freely). "
+    "Position > Place In = Taskbar puts it inside the taskbar. "
     "Position > Dock To App keeps the visualizer beside an app's window as it moves, and Split Into Two Pieces cuts it in two, "
     "e.g. either side of the taskbar's centred icons, at almost no cost.\n\n"
     "**Media.** Click to Seek on the progress bar (off by default, with an app list), custom icons on the Media Card, and Media Controls > Stacking "
@@ -2272,6 +2273,179 @@ rep("""    UINT cmd = (UINT)TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_NONOTIFY 
 """, """    VizMediaMenuBegin();
     UINT cmd = (UINT)TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_BOTTOMALIGN, pt.x, pt.y, hWnd, nullptr);
     VizMediaMenuEnd();
+""")
+# ================================================================ Host: inside the taskbar (2.1)
+# The overlay is normally a child of the desktop's WorkerW, so apps and the
+# taskbar cover it. Taskbar mode makes it a click-through top-level window
+# owned by the taskbar instead (an owned window always stays above its owner),
+# still spanning the virtual screen so every layout coordinate means the same,
+# and places the box within the taskbar rather than the work area.
+after("    bool dragEnabled = false;\n",
+      "    bool hostTaskbar = false;         // Position > Place In = Taskbar\n")
+after("""    g_settings.dragEnabled = Wh_GetIntSetting(L"interaction.dragEnabled") != 0;
+""", """    {
+        PCWSTR host = Wh_GetStringSetting(L"position.host");
+        g_settings.hostTaskbar = wcscmp(host, L"taskbar") == 0;
+        Wh_FreeStringSetting(host);
+    }
+""")
+rep("""- position:
+    - horizontalPosition: '50'""",
+    """- position:
+    - host: desktop
+      $name: Place In
+      $description: Desktop keeps the visualizer on the wallpaper layer, behind your apps. Taskbar puts it inside the taskbar, above it, and the positions below then mean a percentage across and down the taskbar instead of the screen. It never takes clicks there; the taskbar under it still works, except that the right-click menu and drag answer over the visualizer's own box
+      $options:
+        - desktop: Desktop (behind apps)
+        - taskbar: Taskbar
+    - horizontalPosition: '50'""")
+before("struct VizLayout {\n", r"""// Whether the current overlay window was made for the taskbar (it has to be
+// recreated when Place In changes).
+bool g_overlayInTaskbar = false;
+
+// The taskbar on a monitor (the main one or a secondary one), or null.
+HWND VizTaskbarFor(HMONITOR monitor) {
+    for (PCWSTR cls : {L"Shell_TrayWnd", L"Shell_SecondaryTrayWnd"})
+        for (HWND tb = FindWindowEx(nullptr, nullptr, cls, nullptr); tb; tb = FindWindowEx(nullptr, tb, cls, nullptr))
+            if (MonitorFromWindow(tb, MONITOR_DEFAULTTONULL) == monitor) return tb;
+    return nullptr;
+}
+
+// The area the Position percentages span: the work area, or in taskbar mode
+// the taskbar itself.
+RECT VizPlaceArea(HMONITOR monitor, const MONITORINFO& mi) {
+    if (g_settings.hostTaskbar) {
+        RECT r;
+        HWND tb = VizTaskbarFor(monitor);
+        if (tb && GetWindowRect(tb, &r) && r.right > r.left && r.bottom > r.top) return r;
+    }
+    return mi.rcWork;
+}
+
+""")
+rep("""    float waLeft   = (float)(mi.rcWork.left   - vsx);
+    float waTop    = (float)(mi.rcWork.top    - vsy);
+    float workWidth  = (float)(mi.rcWork.right  - mi.rcWork.left);
+    float workHeight = (float)(mi.rcWork.bottom - mi.rcWork.top);
+""", """    const RECT area = VizPlaceArea(monitor, mi);
+    float waLeft   = (float)(area.left   - vsx);
+    float waTop    = (float)(area.top    - vsy);
+    float workWidth  = (float)(area.right  - area.left);
+    float workHeight = (float)(area.bottom - area.top);
+""")
+rep("""    *travelX = (float)(mi.rcWork.right  - mi.rcWork.left) - totalWidth;
+    *travelY = (float)(mi.rcWork.bottom - mi.rcWork.top)  - totalHeight;
+""", """    const RECT area = VizPlaceArea(monitor, mi);
+    *travelX = (float)(area.right  - area.left) - totalWidth;
+    *travelY = (float)(area.bottom - area.top)  - totalHeight;
+""")
+rep("    const RECT& wk = mi.rcWork;\n", "    const RECT wk = VizPlaceArea(monitor, mi);\n", 2)
+rep("""                if (!shouldPause && g_settings.pauseWhenObscured && IsVisualizerOccluded())""",
+    """                if (!shouldPause && g_settings.pauseWhenObscured && !g_settings.hostTaskbar && IsVisualizerOccluded())""")
+rep("""    return wcscmp(cls, L"WorkerW") == 0 || wcscmp(cls, L"Progman") == 0;
+}""", """    if (g_settings.hostTaskbar &&
+        (wcscmp(cls, L"Shell_TrayWnd") == 0 || wcscmp(cls, L"Shell_SecondaryTrayWnd") == 0))
+        return true;
+    return wcscmp(cls, L"WorkerW") == 0 || wcscmp(cls, L"Progman") == 0;
+}""")
+rep("""    HWND hWorkerW = GetParent(g_overlayWnd);
+    if (!hWorkerW) return;
+
+    RECT rc;
+    GetWindowRect(hWorkerW, &rc);
+    SetWindowPos(g_overlayWnd, nullptr, 0, 0, rc.right - rc.left, rc.bottom - rc.top,
+                 SWP_NOZORDER | SWP_NOACTIVATE);
+""", """    if (g_overlayInTaskbar) {
+        // A top-level window over the whole virtual screen (see CreateOverlayWindow).
+        SetWindowPos(g_overlayWnd, nullptr, GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN),
+                     GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN),
+                     SWP_NOZORDER | SWP_NOACTIVATE);
+    } else {
+        HWND hWorkerW = GetParent(g_overlayWnd);
+        if (!hWorkerW) return;
+
+        RECT rc;
+        GetWindowRect(hWorkerW, &rc);
+        SetWindowPos(g_overlayWnd, nullptr, 0, 0, rc.right - rc.left, rc.bottom - rc.top,
+                     SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+""")
+rep("""    HWND hWorkerW = GetWorkerW();
+    if (!hWorkerW) {
+        Wh_Log(L"Failed to find WorkerW");
+        return;
+    }
+""", """    HWND hWorkerW = nullptr, hTaskbar = nullptr;
+    if (g_settings.hostTaskbar) {
+        HMONITOR m = GetMonitorById(g_settings.monitor - 1);
+        if (!m) m = MonitorFromPoint({0, 0}, MONITOR_DEFAULTTOPRIMARY);
+        hTaskbar = VizTaskbarFor(m);
+        if (!hTaskbar) hTaskbar = FindWindow(L"Shell_TrayWnd", nullptr);
+        if (!hTaskbar) {
+            Wh_Log(L"Failed to find the taskbar");
+            return;
+        }
+    } else {
+        hWorkerW = GetWorkerW();
+        if (!hWorkerW) {
+            Wh_Log(L"Failed to find WorkerW");
+            return;
+        }
+    }
+""")
+rep("""    RECT rc;
+    GetWindowRect(hWorkerW, &rc);
+    int width = rc.right - rc.left;
+    int height = rc.bottom - rc.top;
+
+    g_overlayWnd = CreateWindowEx(
+        WS_EX_NOREDIRECTIONBITMAP | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE, OVERLAY_WINDOW_CLASS,
+        nullptr, WS_CHILD | WS_VISIBLE, 0, 0, width, height, hWorkerW, nullptr, hInstance,
+        nullptr);
+    if (!g_overlayWnd) return;
+""", """    if (hTaskbar) {
+        // Owned by the taskbar, so it always stays above it; layered and
+        // transparent, so every click goes through to the taskbar under it.
+        g_overlayWnd = CreateWindowEx(
+            WS_EX_NOREDIRECTIONBITMAP | WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW |
+                WS_EX_TOPMOST,
+            OVERLAY_WINDOW_CLASS, nullptr, WS_POPUP, GetSystemMetrics(SM_XVIRTUALSCREEN),
+            GetSystemMetrics(SM_YVIRTUALSCREEN), GetSystemMetrics(SM_CXVIRTUALSCREEN),
+            GetSystemMetrics(SM_CYVIRTUALSCREEN), hTaskbar, nullptr, hInstance, nullptr);
+        if (!g_overlayWnd) return;
+        SetLayeredWindowAttributes(g_overlayWnd, 0, 255, LWA_ALPHA);
+        ShowWindow(g_overlayWnd, SW_SHOWNOACTIVATE);
+        g_overlayInTaskbar = true;
+    } else {
+        RECT rc;
+        GetWindowRect(hWorkerW, &rc);
+        int width = rc.right - rc.left;
+        int height = rc.bottom - rc.top;
+
+        g_overlayWnd = CreateWindowEx(
+            WS_EX_NOREDIRECTIONBITMAP | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE, OVERLAY_WINDOW_CLASS,
+            nullptr, WS_CHILD | WS_VISIBLE, 0, 0, width, height, hWorkerW, nullptr, hInstance,
+            nullptr);
+        if (!g_overlayWnd) return;
+        g_overlayInTaskbar = false;
+    }
+    Wh_Log(L"[Host] overlay in %s", g_overlayInTaskbar ? L"taskbar" : L"desktop");
+""")
+rep("""    int oldMonitor = g_settings.monitor;
+    VizColorMode oldColorMode = g_settings.colorMode;
+
+    LoadSettings();
+""", """    int oldMonitor = g_settings.monitor;
+    VizColorMode oldColorMode = g_settings.colorMode;
+
+    LoadSettings();
+
+    // Place In changed: the window itself has to be made again (WM_DESTROY
+    // schedules the new one).
+    if (g_overlayWnd && g_settings.hostTaskbar != g_overlayInTaskbar) {
+        Wh_Log(L"[Host] Place In changed, recreating the overlay");
+        PostMessage(g_overlayWnd, WM_APP_CLEANUP, 0, 0);
+    }
 """)
 out = os.path.join(S, "v2b.cpp")
 open(out, "w", encoding="utf-8", newline="\n").write(src)
