@@ -10413,7 +10413,8 @@ LRESULT CALLBACK MoveKeyboardHookProc(int nCode, WPARAM wParam, LPARAM lParam) {
         bool isDown = (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN);
         bool isUp   = (wParam == WM_KEYUP   || wParam == WM_SYSKEYUP);
 
-        if ((isDown || isUp) && ModKeysHeld(g_settings.keyMoveModifier)) {
+        if ((isDown || isUp) && !g_fullscreenPaused.load(std::memory_order_relaxed) &&
+            ModKeysHeld(g_settings.keyMoveModifier)) {
             int dx = 0, dy = 0;
             if (KeyMoveDirection(kb->vkCode, &dx, &dy)) {
                 if (isDown) {
@@ -10544,7 +10545,9 @@ LRESULT CALLBACK DragMouseHookProc(int nCode, WPARAM wParam, LPARAM lParam) {
         UINT upMsg = DragButtonUpMsg();
 
         if (!g_dragInProgress) {
-            if (wParam == downMsg && DragModifierHeld() && PointInVisualizerBounds(info->pt)) {
+            if (wParam == downMsg && DragModifierHeld() && PointInVisualizerBounds(info->pt) &&
+                !g_fullscreenPaused.load(std::memory_order_relaxed) &&
+                !g_vizSceneHidden.load(std::memory_order_relaxed) && VizDesktopUnderPoint(info->pt)) {
                 BeginDrag(info->pt);
                 return 1;
             }
