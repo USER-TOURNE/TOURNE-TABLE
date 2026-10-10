@@ -666,21 +666,25 @@ bool VizDrawStyleD2D(float blockX, float blockY, float totalWidth, float totalHe
     return false;
 }
 
-// ---- Reflection on the Direct2D renderer ------------------------------------------------
+// ---- Reflection and Shadow on the Direct2D renderer -------------------------------------
 // The bars go into an offscreen bitmap the size of the target, which is then
-// drawn twice: as is, and mirrored about the base line through a layer whose
-// opacity fades from 40 % to nothing over the reflection depth, as on
-// Direct3D 11. Skipped for the frames where the whole scene fades in or out,
-// since the target can't change under a pushed layer.
+// drawn up to three times: a Shadow effect of it, offset; the bitmap as is;
+// and mirrored about the base line through a layer whose opacity fades from
+// 40 % to nothing over the reflection depth, as on Direct3D 11. Skipped for
+// the frames where the whole scene fades in or out, since the target can't
+// change under a pushed layer.
 namespace {
 ComPtr<ID2D1Bitmap1> s_reflBmp;
 ComPtr<ID2D1Image> s_reflOld;
 ComPtr<ID2D1LinearGradientBrush> s_reflFade;
+ComPtr<ID2D1Effect> s_shadowFx;
 ID2D1DeviceContext* s_reflDc = nullptr;
+float s_reflDpi = 96.f;
+const CLSID kVizClsidShadow = {0xC67EA361, 0x1863, 0x4E69, {0x89, 0xDB, 0x69, 0x5D, 0x3E, 0x9A, 0x5B, 0x6B}};
 }  // namespace
 
-bool VizReflD2DBegin(bool fadeLayer) {
-    if (fadeLayer || !g_dc || !VizReflectionActive()) return false;
+bool VizFxD2DBegin(bool fadeLayer) {
+    if (fadeLayer || !g_dc || !(VizReflectionActive() || g_settings.fxShadow > 0)) return false;
     ComPtr<ID2D1Image> old;
     g_dc->GetTarget(&old);
     ComPtr<ID2D1Bitmap1> tb;
@@ -690,8 +694,10 @@ bool VizReflD2DBegin(bool fadeLayer) {
         s_reflBmp->GetPixelSize().height != sz.height) {
         s_reflBmp.Reset();
         s_reflFade.Reset();
+        s_shadowFx.Reset();
         float dx = 96.f, dy = 96.f;
         tb->GetDpi(&dx, &dy);
+        s_reflDpi = dx > 0.f ? dx : 96.f;
         D2D1_BITMAP_PROPERTIES1 bp = D2D1::BitmapProperties1(
             D2D1_BITMAP_OPTIONS_TARGET, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), dx, dy);
         if (FAILED(g_dc->CreateBitmap(sz, nullptr, 0, bp, &s_reflBmp))) return false;
@@ -703,6 +709,7 @@ bool VizReflD2DBegin(bool fadeLayer) {
             s_reflBmp.Reset();
             return false;
         }
+        if (SUCCEEDED(g_dc->CreateEffect(kVizClsidShadow, &s_shadowFx))) s_shadowFx->SetInput(0, s_reflBmp.Get());
         s_reflDc = g_dc.Get();
     }
     s_reflOld = old;
@@ -712,15 +719,23 @@ bool VizReflD2DBegin(bool fadeLayer) {
 }
 
 // `baseY` is the bars' base line in the drawing's own coordinates.
-void VizReflD2DEnd(float baseY, float depth) {
+void VizFxD2DEnd(float baseY, float depth) {
     g_dc->SetTarget(s_reflOld.Get());
     s_reflOld.Reset();
     D2D1_MATRIX_3X2_F old;
     g_dc->GetTransform(&old);
     g_dc->SetTransform(D2D1::IdentityMatrix());  // the bitmap is already in target space
+    if (g_settings.fxShadow > 0 && s_shadowFx) {
+        const float toDip = 96.f / s_reflDpi * g_dpiScale;  // settings px -> target DIPs
+        s_shadowFx->SetValue(D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION, std::max(0.01f, g_settings.fxShadowSoft * 0.5f * toDip));
+        s_shadowFx->SetValue(D2D1_SHADOW_PROP_COLOR,
+                             D2D1::Vector4F(g_settings.fxShadowR / 255.f, g_settings.fxShadowG / 255.f,
+                                            g_settings.fxShadowB / 255.f, g_settings.fxShadow / 100.f));
+        g_dc->DrawImage(s_shadowFx.Get(), D2D1::Point2F(g_settings.fxShadowX * toDip, g_settings.fxShadowY * toDip));
+    }
     g_dc->DrawImage(s_reflBmp.Get());
     float base = old._22 * baseY + old._32, d = depth * fabsf(old._22);
-    if (d >= 1.f) {
+    if (VizReflectionActive() && d >= 1.f) {
         D2D1_SIZE_F ts = g_dc->GetSize();
         s_reflFade->SetStartPoint(D2D1::Point2F(0, base));
         s_reflFade->SetEndPoint(D2D1::Point2F(0, base + d));
@@ -734,4 +749,34 @@ void VizReflD2DEnd(float baseY, float depth) {
         g_dc->PopLayer();
     }
     g_dc->SetTransform(old);
+}
+
+// ---- Album colours ease in -------------------------------------------------------------
+// A new cover's colours fade in over 0.6 s instead of jumping (smoothstep).
+// Render thread only. It moves only while frames are drawing, which they are
+// while a track plays.
+DWORD VizAlbumColorShown(int which) {
+    static DWORD from[2], to[2], shown[2];
+    static ULONGLONG t0[2];
+    static bool init[2];
+    DWORD target = (which ? g_albumArtColorSecondary : g_albumArtColor).load(std::memory_order_relaxed);
+    ULONGLONG now = GetTickCount64();
+    if (!init[which]) {
+        init[which] = true;
+        from[which] = to[which] = shown[which] = target;
+    }
+    if (target != to[which]) {
+        from[which] = shown[which];
+        to[which] = target;
+        t0[which] = now;
+    }
+    float t = std::clamp((float)(now - t0[which]) / 600.f, 0.f, 1.f);
+    t = t * t * (3.f - 2.f * t);
+    DWORD out = 0;
+    for (int sh = 0; sh < 32; sh += 8) {
+        float a = (float)((from[which] >> sh) & 0xFF), b = (float)((to[which] >> sh) & 0xFF);
+        out |= (DWORD)lroundf(a + (b - a) * t) << sh;
+    }
+    shown[which] = out;
+    return out;
 }
