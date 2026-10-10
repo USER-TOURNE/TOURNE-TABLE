@@ -1183,6 +1183,21 @@ rep("media controls pinned to the panel.\n",
     "**My Styles.** Right-click > My Styles > Style Editor: mix a base style, colours, bar sizes, reflection, glow and bloom while the visualizer previews it live, "
     "save it under a name, and pick it from the menu any time.\n")
 
+# ================================================================ Input hooks yield to covering apps (2.1)
+# A drag used to start whenever the combo was pressed inside the visualizer's
+# rectangle, even with a game on top, and then swallowed every mouse move
+# until release. It now needs the desktop itself under the cursor, like the
+# right-click menu, and the visualizer to be showing.
+rep("""            if (wParam == downMsg && DragModifierHeld() && PointInVisualizerBounds(info->pt)) {""",
+    """            if (wParam == downMsg && DragModifierHeld() && PointInVisualizerBounds(info->pt) &&
+                !g_fullscreenPaused.load(std::memory_order_relaxed) &&
+                !g_vizSceneHidden.load(std::memory_order_relaxed) && VizDesktopUnderPoint(info->pt)) {""")
+# The move keys go to whatever has focus while a fullscreen or covering app
+# has the visualizer hidden.
+rep("""        if ((isDown || isUp) && ModKeysHeld(g_settings.keyMoveModifier)) {""",
+    """        if ((isDown || isUp) && !g_fullscreenPaused.load(std::memory_order_relaxed) &&
+            ModKeysHeld(g_settings.keyMoveModifier)) {""")
+
 out = os.path.join(S, "v2b.cpp")
 open(out, "w", encoding="utf-8", newline="\n").write(src)
 print("wrote", out, src.count("\n"), "lines")
