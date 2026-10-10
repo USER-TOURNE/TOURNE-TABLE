@@ -2183,6 +2183,88 @@ rep("""    UpdateSwapChainForLayout();
     ttgfx::SplitSync();
 
     // Smooth Mode""")
+# ================================================================ Card fixes: custom icons, stacking, menus (2.1)
+rep("""    int sizePx = std::max(1, (int)std::lround(g_settings.mediaIconSize * dpiScale));
+    g_mediaIconLoadedSize = sizePx;
+""", """    int sizePx = std::max(1, (int)std::lround(g_settings.mediaIconSize * dpiScale));
+    if (g_settings.mediaCard) {
+        // The card draws its controls at a quarter of the art tile; load the
+        // icons at that size so they are not stretched up from the strip size.
+        int sp = std::max(0, (int)std::lround(g_settings.mediaIconSpacing * dpiScale));
+        int tile = g_settings.cardArtSize > 0 ? std::max(24, (int)std::lround(g_settings.cardArtSize * dpiScale))
+                                              : sizePx * 3 + sp * 2;
+        sizePx = std::max(8, tile / 4);
+    }
+    g_mediaIconLoadedSize = sizePx;
+""")
+after("    bool mediaHideWhenCovered = false;\n",
+      "    bool mediaOnTop = true;           // the strip / card stays above other windows\n")
+rep("""    g_settings.mediaHideWhenCovered = Wh_GetIntSetting(L"media_controls.hideWhenCovered") != 0;
+""", """    g_settings.mediaHideWhenCovered = Wh_GetIntSetting(L"media_controls.hideWhenCovered") != 0;
+    {
+        PCWSTR z = Wh_GetStringSetting(L"media_controls.stacking");
+        g_settings.mediaOnTop = wcscmp(z, L"normal") != 0;
+        Wh_FreeStringSetting(z);
+    }
+""")
+rep("""    - hideWhenCovered: false
+      $name: Hide When Covered
+""", """    - stacking: top
+      $name: Stacking
+      $description: Whether the strip or card stays above other windows
+      $options:
+        - top: Always on top (covers apps, even ones run as administrator)
+        - normal: Normal window (apps you click on cover it)
+    - hideWhenCovered: false
+      $name: Hide When Covered
+""")
+rep("""    BOOL posOk = SetWindowPos(g_mediaWnd, HWND_TOPMOST, x, y, width, height,
+                              SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOOWNERZORDER);
+""", """    // Stacking: only touch the z-order when it is wrong. Raising it on every
+    // repaint put the card back over its own open menus.
+    const bool isTop = (GetWindowLongPtr(g_mediaWnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+    const bool wantTop = g_settings.mediaOnTop && !g_menuOpen.load(std::memory_order_acquire);
+    UINT zFlags = (isTop == wantTop) ? SWP_NOZORDER : 0;
+    BOOL posOk = SetWindowPos(g_mediaWnd, wantTop ? HWND_TOPMOST : HWND_NOTOPMOST, x, y, width, height,
+                              SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOOWNERZORDER | zFlags);
+""")
+rep("""                        if (!g_mediaHiddenByCover &&
+                            (!IsWindowVisible(g_mediaWnd) ||
+                             !(GetWindowLongPtr(g_mediaWnd, GWL_EXSTYLE) & WS_EX_TOPMOST))) {""",
+    """                        if (!g_mediaHiddenByCover && !g_menuOpen.load(std::memory_order_acquire) &&
+                            (!IsWindowVisible(g_mediaWnd) ||
+                             (g_settings.mediaOnTop &&
+                              !(GetWindowLongPtr(g_mediaWnd, GWL_EXSTYLE) & WS_EX_TOPMOST)))) {""")
+# Menus: the strip / card steps out of the topmost band while any of our menus is
+# open, then goes back.
+before("LRESULT CALLBACK MediaWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {", r"""// While one of the mod's menus is open the strip / card leaves the topmost band
+// (menus are topmost too, and the later raise would win), then returns.
+void VizMediaMenuBegin() {
+    g_menuOpen.store(true, std::memory_order_release);
+    if (g_mediaWnd && (GetWindowLongPtr(g_mediaWnd, GWL_EXSTYLE) & WS_EX_TOPMOST))
+        SetWindowPos(g_mediaWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+}
+void VizMediaMenuEnd() {
+    g_menuOpen.store(false, std::memory_order_release);
+    if (g_mediaWnd && g_settings.mediaOnTop && IsWindowVisible(g_mediaWnd))
+        SetWindowPos(g_mediaWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+}
+
+""")
+rep("""    g_menuOpen.store(true, std::memory_order_release);
+    UINT cmd = (UINT)TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, pt.x, pt.y, g_messageWnd,
+                                      nullptr);
+    g_menuOpen.store(false, std::memory_order_release);
+""", """    VizMediaMenuBegin();
+    UINT cmd = (UINT)TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, pt.x, pt.y, g_messageWnd,
+                                      nullptr);
+    VizMediaMenuEnd();
+""")
+rep("""    UINT cmd = (UINT)TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_BOTTOMALIGN, pt.x, pt.y, hWnd, nullptr);
+""", """    VizMediaMenuBegin();
+    UINT cmd = (UINT)TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_BOTTOMALIGN, pt.x, pt.y, hWnd, nullptr);
+    VizMediaMenuEnd();
+""")
 out = os.path.join(S, "v2b.cpp")
 open(out, "w", encoding="utf-8", newline="\n").write(src)
 print("wrote", out, src.count("\n"), "lines")
