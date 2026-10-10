@@ -60,6 +60,46 @@ float s_cardVolume = -1.f;
 int s_cardProgPx = -1;
 
 // Straight-alpha colour over the premultiplied buffer, with coverage.
+// A control glyph on the card: the custom icon for that slot when one is set
+// (Media Controls > icon paths), resampled to the card's size, else the
+// built-in shape. Slots: 0 previous, 1 play, 2 pause, 3 next.
+void CardGlyph(BYTE* buf, int stride, int x, int y, int s, int slot) {
+    const auto& src = g_mediaIconPixels[slot];
+    const int n = g_mediaIconLoadedSize;
+    if (n <= 0 || s <= 0 || (int)src.size() < n * n * 4) {
+        DrawBuiltinGlyph(buf, stride, x, y, s, slot);
+        return;
+    }
+    const float k = (float)n / (float)s;
+    for (int dy = 0; dy < s; dy++)
+        for (int dx = 0; dx < s; dx++) {
+            float acc[4] = {0, 0, 0, 0};
+            if (k > 1.f) {
+                // Shrinking: average the source pixels this one covers.
+                int x0 = (int)(dx * k), x1 = std::min(n, std::max(x0 + 1, (int)ceilf((dx + 1) * k)));
+                int y0 = (int)(dy * k), y1 = std::min(n, std::max(y0 + 1, (int)ceilf((dy + 1) * k)));
+                for (int sy = y0; sy < y1; sy++)
+                    for (int sx = x0; sx < x1; sx++)
+                        for (int c = 0; c < 4; c++) acc[c] += src[((size_t)sy * n + sx) * 4 + c];
+                float inv = 1.f / (float)((x1 - x0) * (y1 - y0));
+                for (float& v : acc) v *= inv;
+            } else {
+                // Growing: bilinear.
+                float u = (dx + 0.5f) * k - 0.5f, v = (dy + 0.5f) * k - 0.5f;
+                int x0 = std::clamp((int)floorf(u), 0, n - 1), y0 = std::clamp((int)floorf(v), 0, n - 1);
+                int x1 = std::min(x0 + 1, n - 1), y1 = std::min(y0 + 1, n - 1);
+                float fx = std::clamp(u - x0, 0.f, 1.f), fy = std::clamp(v - y0, 0.f, 1.f);
+                for (int c = 0; c < 4; c++) {
+                    auto px = [&](int xx, int yy) { return (float)src[((size_t)yy * n + xx) * 4 + c]; };
+                    acc[c] = (px(x0, y0) * (1 - fx) + px(x1, y0) * fx) * (1 - fy) +
+                             (px(x0, y1) * (1 - fx) + px(x1, y1) * fx) * fy;
+                }
+            }
+            BlendPremultipliedOver(buf + (size_t)(y + dy) * stride + (size_t)(x + dx) * 4, (BYTE)lroundf(acc[0]),
+                                   (BYTE)lroundf(acc[1]), (BYTE)lroundf(acc[2]), (BYTE)lroundf(acc[3]));
+        }
+}
+
 void CardBlend(BYTE* p, float r, float g, float b, float a) {
     if (a <= 0.f) return;
     BlendPremultipliedOver(p, (BYTE)std::lround(b * a * 255.f), (BYTE)std::lround(g * a * 255.f),
@@ -215,9 +255,9 @@ void VizPaintCard(BYTE* buf, int stride, int W, int H) {
         int gy = g.pad + (g.tile - gs) / 2;
         bool playing = g_mediaIsPlaying.load(std::memory_order_relaxed);
         int slot = g.tile / 3;
-        DrawBuiltinGlyph(buf, stride, g.pad + (slot - gs) / 2, gy, gs, 0);
-        DrawBuiltinGlyph(buf, stride, g.pad + slot + (slot - gs) / 2, gy, gs, playing ? 2 : 1);
-        DrawBuiltinGlyph(buf, stride, g.pad + 2 * slot + (slot - gs) / 2, gy, gs, 3);
+        CardGlyph(buf, stride, g.pad + (slot - gs) / 2, gy, gs, 0);
+        CardGlyph(buf, stride, g.pad + slot + (slot - gs) / 2, gy, gs, playing ? 2 : 1);
+        CardGlyph(buf, stride, g.pad + 2 * slot + (slot - gs) / 2, gy, gs, 3);
     }
 
     // Seek bar.

@@ -35,6 +35,7 @@ Beta build, in `BETA_BUILD_2.0/`. Same `@id` as the 1.4 beta, so it upgrades tha
 - **Dock To App** (Position): sits beside a chosen app's window and follows it as it moves; back to its usual place while the app is closed or minimized.
 - **Split Into Two Pieces** (Position): cut at a chosen point, the second piece moved by a gap and shift. Windows composes the second piece from the same frame, so it costs next to nothing.
 - **Fix:** the drag and menu hooks no longer take clicks while another app (e.g. a full-screen game) covers the visualizer.
+- **Card fixes:** custom media icons now show on the Media Card too (they only worked on the strip); the card no longer covers its own device menu or the right-click menu; new Media Controls > Stacking setting (Always on top, or a Normal window that apps can cover).
 
 ### ✦ Efficiency and fixes pass (review merge)
 

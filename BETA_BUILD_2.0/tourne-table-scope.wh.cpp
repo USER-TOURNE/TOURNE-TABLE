@@ -1396,6 +1396,12 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
     - plateBorderColor: '#40FFFFFF'
       $name: Backing Plate Border Color
       $description: 'Color of the backing plate outline. Format is #AARRGGBB, #RRGGBB, rgba(r, g, b, a), or rgb(r, g, b)'
+    - stacking: top
+      $name: Stacking
+      $description: Whether the strip or card stays above other windows
+      $options:
+        - top: Always on top (covers apps, even ones run as administrator)
+        - normal: Normal window (apps you click on cover it)
     - hideWhenCovered: false
       $name: Hide When Covered
       $description: The strip is topmost, so by default it stays on screen over whatever else you have open. Turn this on to have it get out of the way while a real application window sits underneath it, and come back when that window moves or closes. Note that while it is parked out of the way it is genuinely hidden, so keyboard nudges (move target 4) still apply but you will not see them land until it comes back. Coverage is re-checked once a second, not instantly
@@ -1861,6 +1867,7 @@ struct Settings {
     BYTE mediaPlateBorderA = 0x40, mediaPlateBorderR = 255, mediaPlateBorderG = 255,
          mediaPlateBorderB = 255;
     bool mediaHideWhenCovered = false;
+    bool mediaOnTop = true;           // the strip / card stays above other windows
     int mediaCoveredThresholdPercent = 50;
     float mediaHorizontalPosition = 50.0f;
     float mediaVerticalPosition = 95.0f;
@@ -3720,6 +3727,14 @@ void LoadMediaIconSlot(const std::wstring& path, int sizePx, std::vector<BYTE>& 
 void RecreateMediaControlResources() {
     float dpiScale = GetMediaControlsDpiScale();
     int sizePx = std::max(1, (int)std::lround(g_settings.mediaIconSize * dpiScale));
+    if (g_settings.mediaCard) {
+        // The card draws its controls at a quarter of the art tile; load the
+        // icons at that size so they are not stretched up from the strip size.
+        int sp = std::max(0, (int)std::lround(g_settings.mediaIconSpacing * dpiScale));
+        int tile = g_settings.cardArtSize > 0 ? std::max(24, (int)std::lround(g_settings.cardArtSize * dpiScale))
+                                              : sizePx * 3 + sp * 2;
+        sizePx = std::max(8, tile / 4);
+    }
     g_mediaIconLoadedSize = sizePx;
     LoadMediaIconSlot(g_settings.mediaIconPrevPath, sizePx, g_mediaIconPixels[0], L"Previous");
     LoadMediaIconSlot(g_settings.mediaIconPlayPath, sizePx, g_mediaIconPixels[1], L"Play");
@@ -3906,6 +3921,46 @@ float s_cardVolume = -1.f;
 int s_cardProgPx = -1;
 
 // Straight-alpha colour over the premultiplied buffer, with coverage.
+// A control glyph on the card: the custom icon for that slot when one is set
+// (Media Controls > icon paths), resampled to the card's size, else the
+// built-in shape. Slots: 0 previous, 1 play, 2 pause, 3 next.
+void CardGlyph(BYTE* buf, int stride, int x, int y, int s, int slot) {
+    const auto& src = g_mediaIconPixels[slot];
+    const int n = g_mediaIconLoadedSize;
+    if (n <= 0 || s <= 0 || (int)src.size() < n * n * 4) {
+        DrawBuiltinGlyph(buf, stride, x, y, s, slot);
+        return;
+    }
+    const float k = (float)n / (float)s;
+    for (int dy = 0; dy < s; dy++)
+        for (int dx = 0; dx < s; dx++) {
+            float acc[4] = {0, 0, 0, 0};
+            if (k > 1.f) {
+                // Shrinking: average the source pixels this one covers.
+                int x0 = (int)(dx * k), x1 = std::min(n, std::max(x0 + 1, (int)ceilf((dx + 1) * k)));
+                int y0 = (int)(dy * k), y1 = std::min(n, std::max(y0 + 1, (int)ceilf((dy + 1) * k)));
+                for (int sy = y0; sy < y1; sy++)
+                    for (int sx = x0; sx < x1; sx++)
+                        for (int c = 0; c < 4; c++) acc[c] += src[((size_t)sy * n + sx) * 4 + c];
+                float inv = 1.f / (float)((x1 - x0) * (y1 - y0));
+                for (float& v : acc) v *= inv;
+            } else {
+                // Growing: bilinear.
+                float u = (dx + 0.5f) * k - 0.5f, v = (dy + 0.5f) * k - 0.5f;
+                int x0 = std::clamp((int)floorf(u), 0, n - 1), y0 = std::clamp((int)floorf(v), 0, n - 1);
+                int x1 = std::min(x0 + 1, n - 1), y1 = std::min(y0 + 1, n - 1);
+                float fx = std::clamp(u - x0, 0.f, 1.f), fy = std::clamp(v - y0, 0.f, 1.f);
+                for (int c = 0; c < 4; c++) {
+                    auto px = [&](int xx, int yy) { return (float)src[((size_t)yy * n + xx) * 4 + c]; };
+                    acc[c] = (px(x0, y0) * (1 - fx) + px(x1, y0) * fx) * (1 - fy) +
+                             (px(x0, y1) * (1 - fx) + px(x1, y1) * fx) * fy;
+                }
+            }
+            BlendPremultipliedOver(buf + (size_t)(y + dy) * stride + (size_t)(x + dx) * 4, (BYTE)lroundf(acc[0]),
+                                   (BYTE)lroundf(acc[1]), (BYTE)lroundf(acc[2]), (BYTE)lroundf(acc[3]));
+        }
+}
+
 void CardBlend(BYTE* p, float r, float g, float b, float a) {
     if (a <= 0.f) return;
     BlendPremultipliedOver(p, (BYTE)std::lround(b * a * 255.f), (BYTE)std::lround(g * a * 255.f),
@@ -4061,9 +4116,9 @@ void VizPaintCard(BYTE* buf, int stride, int W, int H) {
         int gy = g.pad + (g.tile - gs) / 2;
         bool playing = g_mediaIsPlaying.load(std::memory_order_relaxed);
         int slot = g.tile / 3;
-        DrawBuiltinGlyph(buf, stride, g.pad + (slot - gs) / 2, gy, gs, 0);
-        DrawBuiltinGlyph(buf, stride, g.pad + slot + (slot - gs) / 2, gy, gs, playing ? 2 : 1);
-        DrawBuiltinGlyph(buf, stride, g.pad + 2 * slot + (slot - gs) / 2, gy, gs, 3);
+        CardGlyph(buf, stride, g.pad + (slot - gs) / 2, gy, gs, 0);
+        CardGlyph(buf, stride, g.pad + slot + (slot - gs) / 2, gy, gs, playing ? 2 : 1);
+        CardGlyph(buf, stride, g.pad + 2 * slot + (slot - gs) / 2, gy, gs, 3);
     }
 
     // Seek bar.
@@ -4428,8 +4483,13 @@ void RepositionAndRepaintMediaControls() {
     // invisible, which is indistinguishable from "the mod isn't working."
     PaintMediaControls(x, y, width, height);
 
-    BOOL posOk = SetWindowPos(g_mediaWnd, HWND_TOPMOST, x, y, width, height,
-                              SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOOWNERZORDER);
+    // Stacking: only touch the z-order when it is wrong. Raising it on every
+    // repaint put the card back over its own open menus.
+    const bool isTop = (GetWindowLongPtr(g_mediaWnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+    const bool wantTop = g_settings.mediaOnTop && !g_menuOpen.load(std::memory_order_acquire);
+    UINT zFlags = (isTop == wantTop) ? SWP_NOZORDER : 0;
+    BOOL posOk = SetWindowPos(g_mediaWnd, wantTop ? HWND_TOPMOST : HWND_NOTOPMOST, x, y, width, height,
+                              SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOOWNERZORDER | zFlags);
 
     RECT actualRect{};
     GetWindowRect(g_mediaWnd, &actualRect);
@@ -4437,6 +4497,19 @@ void RepositionAndRepaintMediaControls() {
            (int)posOk, actualRect.left, actualRect.top, actualRect.right, actualRect.bottom,
            (int)IsWindowVisible(g_mediaWnd),
            (int)((GetWindowLongPtr(g_mediaWnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0));
+}
+
+// While one of the mod's menus is open the strip / card leaves the topmost band
+// (menus are topmost too, and the later raise would win), then returns.
+void VizMediaMenuBegin() {
+    g_menuOpen.store(true, std::memory_order_release);
+    if (g_mediaWnd && (GetWindowLongPtr(g_mediaWnd, GWL_EXSTYLE) & WS_EX_TOPMOST))
+        SetWindowPos(g_mediaWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+}
+void VizMediaMenuEnd() {
+    g_menuOpen.store(false, std::memory_order_release);
+    if (g_mediaWnd && g_settings.mediaOnTop && IsWindowVisible(g_mediaWnd))
+        SetWindowPos(g_mediaWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
 }
 
 LRESULT CALLBACK MediaWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
@@ -6932,7 +7005,9 @@ void VizCardOutputMenu(HWND hWnd, POINT pt) {
     for (size_t i = 0; i < outs.size(); i++)
         AppendMenuW(menu, MF_STRING | (outs[i].id == current ? MF_CHECKED : 0), 1 + i, outs[i].name.c_str());
     SetForegroundWindow(hWnd);  // so a click elsewhere closes the menu
+    VizMediaMenuBegin();
     UINT cmd = (UINT)TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_BOTTOMALIGN, pt.x, pt.y, hWnd, nullptr);
+    VizMediaMenuEnd();
     PostMessage(hWnd, WM_NULL, 0, 0);
     DestroyMenu(menu);
     if (cmd < 1 || cmd > outs.size() || outs[cmd - 1].id == current) return;
@@ -17539,10 +17614,10 @@ void VizShowContextMenu(POINT pt) {
 
     // While the menu is up the mouse hook passes every click through, so a
     // right-click elsewhere closes it instead of being swallowed.
-    g_menuOpen.store(true, std::memory_order_release);
+    VizMediaMenuBegin();
     UINT cmd = (UINT)TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, pt.x, pt.y, g_messageWnd,
                                       nullptr);
-    g_menuOpen.store(false, std::memory_order_release);
+    VizMediaMenuEnd();
     PostMessage(g_messageWnd, WM_NULL, 0, 0);
     DestroyMenu(menu);  // destroys the submenus with it
     if (!cmd) return;
@@ -18117,9 +18192,10 @@ LRESULT CALLBACK MessageWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                         // Still worth re-asserting even with Hide When Covered
                         // on -- that only accounts for the times we hid it
                         // ourselves, not for another app taking topmost.
-                        if (!g_mediaHiddenByCover &&
+                        if (!g_mediaHiddenByCover && !g_menuOpen.load(std::memory_order_acquire) &&
                             (!IsWindowVisible(g_mediaWnd) ||
-                             !(GetWindowLongPtr(g_mediaWnd, GWL_EXSTYLE) & WS_EX_TOPMOST))) {
+                             (g_settings.mediaOnTop &&
+                              !(GetWindowLongPtr(g_mediaWnd, GWL_EXSTYLE) & WS_EX_TOPMOST)))) {
                             Wh_Log(L"[Media] window not visible/topmost, re-asserting");
                             RepositionAndRepaintMediaControls();
                         }
@@ -18744,6 +18820,11 @@ void LoadSettings() {
                      &g_settings.mediaPlateBorderA, &g_settings.mediaPlateBorderR,
                      &g_settings.mediaPlateBorderG, &g_settings.mediaPlateBorderB);
     g_settings.mediaHideWhenCovered = Wh_GetIntSetting(L"media_controls.hideWhenCovered") != 0;
+    {
+        PCWSTR z = Wh_GetStringSetting(L"media_controls.stacking");
+        g_settings.mediaOnTop = wcscmp(z, L"normal") != 0;
+        Wh_FreeStringSetting(z);
+    }
     g_settings.mediaCoveredThresholdPercent =
         ReadThresholdPercentSetting(L"media_controls.coveredThresholdPercent", L"Media Controls",
                                     L"Hide When Covered - Threshold", 50);
