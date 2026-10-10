@@ -967,7 +967,7 @@ rep("""        - terminal: Terminal (text characters, see the Terminal section)
         - particles: Particles (bars plus sparks on each beat)
     - reflection: 0
       $name: Reflection
-      $description: 0-100. Mirrors the bars onto a floor beneath them, fading out over this percentage of Bar Max Size. Horizontal bars anchored to the bottom only, with the bar shapes, LED Meter, Line Spectrum and Particles. Direct3D 11 renderer only
+      $description: 0-100. Mirrors the bars onto a floor beneath them, fading out over this percentage of Bar Max Size. Horizontal bars anchored to the bottom only, with the bar shapes, LED Meter, Line Spectrum and Particles. Both renderers (Direct2D draws it on the CPU, so it costs a little more there)
     - orientation: horizontal""")
 
 # ================================================================ Media Card (2.1)
@@ -1147,8 +1147,8 @@ rep("""    g_settings.reflection = std::clamp(Wh_GetIntSetting(L"appearance.refl
     g_settings.fxGlowRadius = std::clamp(Wh_GetIntSetting(L"appearance.fxGlowRadius"), 1, 32);
     g_settings.fxBloom = std::clamp(Wh_GetIntSetting(L"appearance.fxBloom"), 0, 100);
     g_settings.fxBloomRadius = std::clamp(Wh_GetIntSetting(L"appearance.fxBloomRadius"), 4, 64);""")
-rep("""      $description: 0-100. Mirrors the bars onto a floor beneath them, fading out over this percentage of Bar Max Size. Horizontal bars anchored to the bottom only, with the bar shapes, LED Meter, Line Spectrum and Particles. Direct3D 11 renderer only
-""", """      $description: 0-100. Mirrors the bars onto a floor beneath them, fading out over this percentage of Bar Max Size. Horizontal bars anchored to the bottom only, with the bar shapes, LED Meter, Line Spectrum and Particles. Direct3D 11 renderer only
+rep("""      $description: 0-100. Mirrors the bars onto a floor beneath them, fading out over this percentage of Bar Max Size. Horizontal bars anchored to the bottom only, with the bar shapes, LED Meter, Line Spectrum and Particles. Both renderers (Direct2D draws it on the CPU, so it costs a little more there)
+""", """      $description: 0-100. Mirrors the bars onto a floor beneath them, fading out over this percentage of Bar Max Size. Horizontal bars anchored to the bottom only, with the bar shapes, LED Meter, Line Spectrum and Particles. Both renderers (Direct2D draws it on the CPU, so it costs a little more there)
     - fxGlow: 0
       $name: Glow
       $description: 0-100. A soft halo around each bar, dot, line and spark, worked out in the same shader pass that draws them, so it costs next to nothing. Direct3D 11 renderer only
@@ -1197,6 +1197,26 @@ rep("""            if (wParam == downMsg && DragModifierHeld() && PointInVisuali
 rep("""        if ((isDown || isUp) && ModKeysHeld(g_settings.keyMoveModifier)) {""",
     """        if ((isDown || isUp) && !g_fullscreenPaused.load(std::memory_order_relaxed) &&
             ModKeysHeld(g_settings.keyMoveModifier)) {""")
+
+# ================================================================ Reflection on Direct2D (2.1)
+rep("""        if (VizDrawStyleD2D(blockX, blockY, totalWidth, totalHeight, barCount, barW, barGap, maxSize, idleSize,
+                            horizontal, c1, cGrad1, c2, rainbowBase)) {""",
+    """        const bool reflD2D = VizReflD2DBegin(useFadeLayer);
+        if (VizDrawStyleD2D(blockX, blockY, totalWidth, totalHeight, barCount, barW, barGap, maxSize, idleSize,
+                            horizontal, c1, cGrad1, c2, rainbowBase)) {""")
+rep("""        }
+
+        {
+            VizTextFrame tf;
+            VizBuildTextFrame(tf);
+            VizDrawTextOverlays(tf, layout, smooth);""",
+    """        }
+        if (reflD2D) VizReflD2DEnd(blockY + maxSize, VizReflectionDepth(maxSize));
+
+        {
+            VizTextFrame tf;
+            VizBuildTextFrame(tf);
+            VizDrawTextOverlays(tf, layout, smooth);""")
 
 out = os.path.join(S, "v2b.cpp")
 open(out, "w", encoding="utf-8", newline="\n").write(src)
