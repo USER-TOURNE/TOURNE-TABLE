@@ -507,11 +507,27 @@ bool RenderVisualizerD3D(float sceneAlpha) {
     ttgfx::MixF(key, layout.blockX, 64.f);
     ttgfx::MixF(key, layout.blockY, 64.f);
     ttgfx::Mix(key, (uint64_t)g_swapChainWidth * 65536u + g_swapChainHeight);
+    // Scale numbers (Spectrogram, VU): fixed by the settings and the size.
+    const bool scale = VizStyleHasScale();
+    const bool scaleHorizontal = g_settings.orientation == VizOrientation::Horizontal;
+    const float scaleMax = std::max(2.f, VizPx((float)std::max(2, g_settings.barMaxSize)));
+    const int scaleBars = VizEffectiveBarCount();
+    const float scaleBarW = std::max(1.f, VizPx((float)std::max(1, g_settings.barWidth)));
+    const float scaleGap = VizPx((float)std::max(0, g_settings.barGap));
+    const float scaleThick = scaleBars * (scaleBarW + scaleGap) - scaleGap;
+    if (scale) {
+        ttgfx::Mix(key, 7u + (uint64_t)g_settings.style * 131u + (uint64_t)(g_settings.dbFloor + 200) * 1009u +
+                            (uint64_t)(g_settings.dbCeiling + 200) * 65537u + (uint64_t)g_settings.engine);
+        ttgfx::MixF(key, scaleMax, 64.f);
+        ttgfx::MixF(key, scaleThick, 64.f);
+        ttgfx::Mix(key, scaleHorizontal ? 1u : 2u);
+    }
     if (!ttgfx::g.textForce && key == ttgfx::g.textKey) return true;
     ttgfx::g.textKey = key;
     ttgfx::g.textForce = false;
     // Nothing to show: take the surface off rather than present a clear one.
-    const bool textEmpty = tf.pf.empty() && tf.progress < 0.f && (tf.np.empty() || tf.npAlpha <= 0.01f);
+    const bool textEmpty = tf.pf.empty() && tf.progress < 0.f && (tf.np.empty() || tf.npAlpha <= 0.01f)
+                           && !(scale && sceneAlpha > 0.001f);
     if (textEmpty) {
         ttgfx::ShowTextSurface(false);
         return true;
@@ -524,6 +540,7 @@ bool RenderVisualizerD3D(float sceneAlpha) {
                                               D2D1::IdentityMatrix(), sceneAlpha),
                         nullptr);
     VizDrawTextOverlays(tf, layout, true);
+    if (scale && sceneAlpha > 0.001f) VizDrawStyleScale(layout.blockX, layout.blockY, scaleMax, scaleThick, scaleHorizontal);
     if (fade) g_dc->PopLayer();
     HRESULT hrEnd = g_dc->EndDraw();
     HRESULT hrPresent = g_swapChain->Present(0, 0);
