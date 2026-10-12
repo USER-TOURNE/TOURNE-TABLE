@@ -2944,6 +2944,240 @@ rep("""    } else if (cmd == kMenuPause) {
         return;
     } else if (cmd == kMenuPause) {
 """)
+# ================================================================ Sharing setups (2.3)
+# A setup (Look, Motion, Extras, Place: every setting in those parts) goes around as a TT2: code, a
+# .ttstyle file or through the community folder on GitHub. Imported, it sits in a layer every
+# setting read goes through (p4_share_layer.cpp), under quick settings; Reset Quick Settings clears it.
+rep("// @compilerOptions     -ldxgi", "// @compilerOptions     -lcabinet -lurlmon -ldxgi")
+after("#include <commdlg.h>\n", "#include <compressapi.h>\n#include <urlmon.h>\n")
+after("#include <mutex>\n", "#include <map>\n")
+after("using Microsoft::WRL::ComPtr;\n", read("p4_share_layer.cpp"))
+before("// ---- The editor window ----\n", read("p4_share.cpp"))
+after("constexpr UINT_PTR kApplyTimer = 1;\n", """enum : int {
+    kIdShareCopy = 400, kIdSharePaste, kIdShareCommunity, kIdShareSave, kIdShareOpen,
+    kIdPartLook, kIdPartMotion, kIdPartExtras, kIdPartPlace,
+};
+constexpr UINT_PTR kShareTimer = 2;
+bool s_communityBusy = false;
+
+// The ticked parts (Look, Motion, Extras, Place).
+unsigned EditorParts(HWND hWnd) {
+    unsigned parts = 0;
+    for (int i = 0; i < 4; i++)
+        if (IsDlgButtonChecked(hWnd, kIdPartLook + i) == BST_CHECKED) parts |= 1u << i;
+    return parts;
+}
+
+// What a shared setup is called: the Saved style box's name, or "My setup".
+std::wstring EditorSetupName(HWND hWnd) {
+    WCHAR name[64] = {};
+    GetDlgItemTextW(hWnd, kIdPreset, name, ARRAYSIZE(name));
+    std::wstring n = VizCleanPresetName(name);
+    return n.empty() ? L"My setup" : n;
+}
+""")
+rep("""    y += rowH + px(6);
+    label(L"Base style");""", """    y += rowH + px(6);
+    label(L"Share");
+    add(L"BUTTON", L"Copy code", BS_PUSHBUTTON | WS_TABSTOP, ctlX, y, px(84), px(24), kIdShareCopy);
+    add(L"BUTTON", L"Paste code", BS_PUSHBUTTON | WS_TABSTOP, ctlX + px(88), y, px(84), px(24), kIdSharePaste);
+    add(L"BUTTON", L"Community", BS_PUSHBUTTON | WS_TABSTOP, ctlX + px(176), y, px(84), px(24), kIdShareCommunity);
+    y += rowH;
+    add(L"BUTTON", L"Save file...", BS_PUSHBUTTON | WS_TABSTOP, ctlX, y, px(84), px(24), kIdShareSave);
+    add(L"BUTTON", L"Open file...", BS_PUSHBUTTON | WS_TABSTOP, ctlX + px(88), y, px(84), px(24), kIdShareOpen);
+    y += rowH;
+    label(L"Parts");
+    add(L"BUTTON", L"Look", BS_AUTOCHECKBOX | WS_TABSTOP, ctlX, y, px(58), px(22), kIdPartLook);
+    add(L"BUTTON", L"Motion", BS_AUTOCHECKBOX | WS_TABSTOP, ctlX + px(62), y, px(66), px(22), kIdPartMotion);
+    add(L"BUTTON", L"Extras", BS_AUTOCHECKBOX | WS_TABSTOP, ctlX + px(132), y, px(62), px(22), kIdPartExtras);
+    add(L"BUTTON", L"Place", BS_AUTOCHECKBOX | WS_TABSTOP, ctlX + px(198), y, px(62), px(22), kIdPartPlace);
+    y += rowH + px(6);
+    label(L"Base style");""")
+rep("""        L"Reflection, Glow and Bloom need the Direct3D 11 renderer.",
+        SS_LEFT, L, y, labelW + ctlW, px(48), -1);
+    y += px(56);""", """        L"Reflection, Glow and Bloom need the Direct3D 11 renderer. Share carries the ticked parts; your audio "
+        L"device, hotkeys and file paths stay out. Community reads its list from GitHub only when pressed.",
+        SS_LEFT, L, y, labelW + ctlW, px(80), -1);
+    y += px(88);""")
+rep("""    EditorFillPresets(hWnd, L"");
+    EditorSync(hWnd);
+}
+""", """    WCHAR parts[64] = {};
+    unsigned ticked = Wh_GetStringValue(L"shareParts", parts, ARRAYSIZE(parts)) ? VizPartsFrom(parts)
+                                                                               : (kPartLook | kPartMotion | kPartExtras);
+    for (int i = 0; i < 4; i++) CheckDlgButton(hWnd, kIdPartLook + i, ticked & (1u << i) ? BST_CHECKED : BST_UNCHECKED);
+    EditorFillPresets(hWnd, L"");
+    EditorSync(hWnd);
+}
+""")
+rep("""            if (wParam == kApplyTimer) EditorApplyNow(hWnd);
+""", """            if (wParam == kApplyTimer) EditorApplyNow(hWnd);
+            if (wParam == kShareTimer) {
+                KillTimer(hWnd, kShareTimer);
+                SetDlgItemTextW(hWnd, kIdShareCopy, L"Copy code");
+            }
+""")
+rep("""            } else if (id == kIdLoad || id == kIdSave || id == kIdDelete) {""", """            } else if (id >= kIdPartLook && id <= kIdPartPlace && code == BN_CLICKED) {
+                Wh_SetStringValue(L"shareParts", VizPartsText(EditorParts(hWnd)).c_str());
+            } else if (id == kIdShareCopy || id == kIdShareSave) {
+                unsigned parts = EditorParts(hWnd);
+                if (!parts) {
+                    MessageBeep(MB_ICONWARNING);
+                    return 0;
+                }
+                std::wstring text = VizExportSetup(parts, EditorSetupName(hWnd));
+                if (id == kIdShareSave) {
+                    VizSaveSetupFile(hWnd, text, EditorSetupName(hWnd));
+                } else {
+                    VizClipboardSet(hWnd, VizShareCode(text));
+                    SetDlgItemTextW(hWnd, kIdShareCopy, L"Copied");
+                    SetTimer(hWnd, kShareTimer, 1500, nullptr);
+                }
+            } else if (id == kIdSharePaste || id == kIdShareOpen) {
+                std::wstring text;
+                if (id == kIdSharePaste) text = VizClipboardGet(hWnd);
+                else if (!VizOpenSetupFile(hWnd, &text)) return 0;
+                VizImportSetup(hWnd, text, EditorParts(hWnd));
+                EditorSync(hWnd);
+            } else if (id == kIdShareCommunity) {
+                if (s_communityBusy) return 0;
+                s_communityBusy = true;
+                SetDlgItemTextW(hWnd, kIdShareCommunity, L"Loading...");
+                VizFetchCommunityList(hWnd);
+            } else if (id == kIdLoad || id == kIdSave || id == kIdDelete) {""")
+rep("""        case WM_CLOSE:
+            DestroyWindow(hWnd);
+            return 0;
+        case WM_DESTROY:
+            KillTimer(hWnd, kApplyTimer);""", """        case WM_APP_SHARE_LIST: {
+            std::unique_ptr<std::vector<VizCommunityItem>> items((std::vector<VizCommunityItem>*)lParam);
+            s_communityBusy = false;
+            SetDlgItemTextW(hWnd, kIdShareCommunity, L"Community");
+            HMENU m = CreatePopupMenu();
+            if (!wParam) AppendMenuW(m, MF_STRING | MF_GRAYED, 0, L"Couldn't reach the community list");
+            else if (items->empty()) AppendMenuW(m, MF_STRING | MF_GRAYED, 0, L"No community setups yet");
+            for (size_t i = 0; i < items->size() && i < 60; i++) {
+                const auto& it = (*items)[i];
+                std::wstring text = (it.name.empty() ? it.file : it.name) + (it.author.empty() ? L"" : L"  (by " + it.author + L")");
+                AppendMenuW(m, MF_STRING, 1 + i, text.c_str());
+            }
+            AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(m, MF_STRING, 1000, L"Share Mine to the Community...");
+            AppendMenuW(m, MF_STRING, 1001, L"Open the Community Folder");
+            RECT rc = {};
+            GetWindowRect(GetDlgItem(hWnd, kIdShareCommunity), &rc);
+            UINT cmd = TrackPopupMenu(m, TPM_RETURNCMD | TPM_RIGHTBUTTON, rc.left, rc.bottom, 0, hWnd, nullptr);
+            DestroyMenu(m);
+            if (cmd >= 1 && cmd <= items->size() && cmd <= 60) {
+                s_communityBusy = true;
+                SetDlgItemTextW(hWnd, kIdShareCommunity, L"Loading...");
+                VizFetchCommunitySetup(hWnd, (*items)[cmd - 1].file);
+            } else if (cmd == 1000) {
+                unsigned parts = EditorParts(hWnd);
+                if (parts) VizShareToCommunity(hWnd, parts, EditorSetupName(hWnd));
+                else MessageBeep(MB_ICONWARNING);
+            } else if (cmd == 1001) {
+                ShellExecuteW(nullptr, L"open", kCommunityFolder, nullptr, nullptr, SW_SHOWNORMAL);
+            }
+            return 0;
+        }
+        case WM_APP_SHARE_SETUP: {
+            std::unique_ptr<std::wstring> text((std::wstring*)lParam);
+            s_communityBusy = false;
+            SetDlgItemTextW(hWnd, kIdShareCommunity, L"Community");
+            if (text->empty()) MessageBoxW(hWnd, L"Couldn't get that setup from GitHub.", L"Tourne'Table", MB_OK | MB_ICONWARNING);
+            else VizImportSetup(hWnd, *text, EditorParts(hWnd));
+            EditorSync(hWnd);
+            return 0;
+        }
+        case WM_CLOSE:
+            DestroyWindow(hWnd);
+            return 0;
+        case WM_DESTROY:
+            KillTimer(hWnd, kApplyTimer);
+            KillTimer(hWnd, kShareTimer);
+            s_communityBusy = false;""")
+# Reset Quick Settings clears an imported setup too.
+rep("""    } else if (cmd == kMenuReset) {
+        g_menuOverrides.clear();
+""", """    } else if (cmd == kMenuReset) {
+        g_menuOverrides.clear();
+        if (!g_setupLayerLoaded) VizSetupLoad();
+        g_setupLayer.clear();
+        VizSetupSave();
+""")
+rep("""AppendMenuW(menu, MF_STRING | (g_menuOverrides.empty() ? MF_GRAYED : 0), kMenuReset, reset.c_str());""",
+    """if (!g_setupLayerLoaded) VizSetupLoad();
+    if (!g_setupLayer.empty()) reset += L" and Setup";
+    AppendMenuW(menu, MF_STRING | (g_menuOverrides.empty() && g_setupLayer.empty() ? MF_GRAYED : 0), kMenuReset, reset.c_str());""")
+
+
+# Every setting from the settings YAML, with its default and the part of a setup it belongs to (0: the
+# person's own, never shared).
+def _setup_keys():
+    import re
+    a = src.index("// ==WindhawkModSettings==")
+    b = src.index("// ==/WindhawkModSettings==")
+    motion = {"sensitivity", "sensitivityCurve", "inputGain", "autoGain", "autoGainMaxBoost", "smoothing", "eqPreset",
+              "fftSize", "freqScale", "oscilloscopeMultibandEnabled", "oscilloscopeWindowMs", "oscilloscopeDamping"}
+    own = {"position.panelHotkey", "position.monitor", "position.dockApp", "progress.seekApps",
+           "progress.seekAppsMode", "progress.clickToSeek"}
+    card_place = {"horizontalPosition", "verticalPosition", "anchor", "anchorOffsetX", "anchorOffsetY", "stacking",
+                  "hideWhenCovered", "coveredThresholdPercent"}
+
+    def part(sec, key):
+        full = sec + "." + key
+        if sec in ("audio", "interaction", "validation", "hardware") or full in own:
+            return 0
+        if sec == "media_controls" and key.startswith("icon") and key.endswith("Path"):
+            return 0
+        if sec == "performance":
+            return 2 if key == "targetFps" else 0
+        if sec == "position" or (sec == "media_controls" and key in card_place):
+            return 8
+        if sec == "analysis":
+            return 4 if key in ("readout", "loudnessResetOnTrack") else 2
+        if sec in ("progress", "media_controls"):
+            return 4
+        if sec == "appearance":
+            if key in motion:
+                return 2
+            if key.startswith("nowPlaying") or key.startswith("peakFreq"):
+                return 4
+            return 1
+        if sec in ("terminal", "background"):
+            return 1
+        return 0
+
+    rows, sec = [], None
+    for line in src[a:b].split("\n"):
+        body = line[3:] if line.startswith("// ") else line[2:] if line.startswith("//") else line
+        m = re.match(r"^- ([A-Za-z_][A-Za-z0-9_]*):\s*$", body)
+        if m:
+            sec = m.group(1)
+            continue
+        m = re.match(r"^    - ([A-Za-z_][A-Za-z0-9_]*): ?(.*)$", body)
+        if not m or not sec:
+            continue
+        key, raw = m.group(1), m.group(2).strip()
+        if raw.startswith("'") and raw.endswith("'") and len(raw) >= 2:
+            text, value = True, raw[1:-1].replace("''", "'")
+        elif raw in ("true", "false"):
+            text, value = False, "1" if raw == "true" else "0"
+        elif re.fullmatch(r"-?\d+", raw):
+            text, value = False, raw
+        else:
+            text, value = True, raw
+        p = part(sec, key)
+        if p:
+            lit = value.replace("\\", "\\\\").replace('"', '\\"')
+            rows.append('    {L"%s.%s", L"%s", %s, %d},' % (sec, key, lit, "true" if text else "false", p))
+    if len(rows) < 100:
+        sys.exit("setup keys: only %d found" % len(rows))
+    return "static const VizSetupKey kSetupKeys[] = {\n" + "\n".join(rows) + "\n};"
+
+
+rep("@@SETUP_KEYS@@", _setup_keys())
 out = os.path.join(S, "v2b.cpp")
 open(out, "w", encoding="utf-8", newline="\n").write(src)
 print("wrote", out, src.count("\n"), "lines")
