@@ -1,0 +1,11 @@
+Tourne'Table setup 1
+name=Neon Gradient
+author=Tourne'Table
+parts=look
+appearance.colorMode=gradient
+appearance.gradientColor1=#FFFF2D95
+appearance.gradientColor2=#FF00E5FF
+appearance.peakHoldEnabled=1
+appearance.peakHoldColor=#FFFFFFFF
+appearance.reflection=25
+appearance.fxBloom=40

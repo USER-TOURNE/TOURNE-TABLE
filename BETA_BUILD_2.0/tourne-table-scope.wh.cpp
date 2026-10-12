@@ -9,7 +9,7 @@
 // @donateUrl           https://ko-fi.com/tourne
 // @license             MIT
 // @include             windhawk.exe
-// @compilerOptions     -ldxgi -ld2d1 -ld3d11 -ldcomp -ldwmapi -ldwrite -lgdi32 -lshcore -lshlwapi -lole32 -lshell32 -lksuser -lwindowscodecs -lruntimeobject -lwindowsapp -luuid -luser32 -ladvapi32 -lcomctl32 -lcomdlg32
+// @compilerOptions     -lcabinet -lurlmon -ldxgi -ld2d1 -ld3d11 -ldcomp -ldwmapi -ldwrite -lgdi32 -lshcore -lshlwapi -lole32 -lshell32 -lksuser -lwindowscodecs -lruntimeobject -lwindowsapp -luuid -luser32 -ladvapi32 -lcomctl32 -lcomdlg32
 // ==/WindhawkMod==
 
 // ==WindhawkModReadme==
@@ -1654,6 +1654,8 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
 #include <windowsx.h>
 #include <commctrl.h>
 #include <commdlg.h>
+#include <compressapi.h>
+#include <urlmon.h>
 #include <tlhelp32.h>
 
 #include <algorithm>
@@ -1667,6 +1669,7 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
 #include <cstring>
 #include <cwchar>
 #include <mutex>
+#include <map>
 #include <optional>
 #include <string>
 #include <thread>
@@ -1680,6 +1683,66 @@ using namespace winrt::Windows::Media::Control;
 using namespace winrt::Windows::Storage::Streams;
 
 using Microsoft::WRL::ComPtr;
+
+// ---- Shared setups (2.3): the layer an imported setup sits in -------------------------------------
+// Every setting is read through here. An imported setup's values (the mod value "sharedSetup", as
+// key=value lines) come first, then the settings page; quick settings still go on top of both.
+// Reset Quick Settings clears it, and the settings page's values come back.
+std::map<std::wstring, std::wstring> g_setupLayer;
+bool g_setupLayerLoaded = false;
+
+void VizSetupLoad() {
+    g_setupLayerLoaded = true;
+    g_setupLayer.clear();
+    std::vector<WCHAR> buf(32768);
+    if (!Wh_GetStringValue(L"sharedSetup", buf.data(), buf.size())) return;
+    std::wstring s = buf.data();
+    for (size_t pos = 0; pos < s.size();) {
+        size_t nl = s.find(L'\n', pos);
+        if (nl == std::wstring::npos) nl = s.size();
+        std::wstring line = s.substr(pos, nl - pos);
+        size_t eq = line.find(L'=');
+        if (eq != std::wstring::npos && eq > 0) g_setupLayer[line.substr(0, eq)] = line.substr(eq + 1);
+        pos = nl + 1;
+    }
+}
+
+void VizSetupSave() {
+    std::wstring s;
+    for (const auto& kv : g_setupLayer) s += kv.first + L"=" + kv.second + L"\n";
+    Wh_SetStringValue(L"sharedSetup", s.c_str());
+}
+
+const std::wstring* VizSetupFind(PCWSTR name) {
+    if (!g_setupLayerLoaded) VizSetupLoad();
+    auto it = g_setupLayer.find(name);
+    return it == g_setupLayer.end() ? nullptr : &it->second;
+}
+
+int VizSettingInt(PCWSTR name) {
+    if (const std::wstring* v = VizSetupFind(name)) return *v == L"true" ? 1 : *v == L"false" ? 0 : _wtoi(v->c_str());
+    return Wh_GetIntSetting(name);
+}
+
+PCWSTR VizSettingString(PCWSTR name) {
+    std::wstring v;
+    if (const std::wstring* found = VizSetupFind(name)) {
+        v = *found;
+    } else if (PCWSTR s = Wh_GetStringSetting(name)) {
+        v = s;
+        Wh_FreeStringSetting(s);
+    }
+    WCHAR* out = new WCHAR[v.size() + 1];
+    wcscpy_s(out, v.size() + 1, v.c_str());
+    return out;
+}
+
+void VizSettingFree(PCWSTR s) { delete[] s; }
+
+// From here on, settings come through the layer.
+#define Wh_GetIntSetting VizSettingInt
+#define Wh_GetStringSetting VizSettingString
+#define Wh_FreeStringSetting VizSettingFree
 
 #ifndef DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
 #define DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 ((DPI_AWARENESS_CONTEXT)-4)
@@ -17989,7 +18052,9 @@ void VizShowContextMenu(POINT pt) {
     std::wstring reset = L"Reset Quick Settings";
     if (!g_menuOverrides.empty()) reset += L" (" + std::to_wstring(g_menuOverrides.size()) + L" active)";
     AppendMenuW(menu, MF_STRING | (g_menuOverrides.empty() ? MF_GRAYED : 0), kMenuCopy, L"Copy Quick Settings");
-    AppendMenuW(menu, MF_STRING | (g_menuOverrides.empty() ? MF_GRAYED : 0), kMenuReset, reset.c_str());
+    if (!g_setupLayerLoaded) VizSetupLoad();
+    if (!g_setupLayer.empty()) reset += L" and Setup";
+    AppendMenuW(menu, MF_STRING | (g_menuOverrides.empty() && g_setupLayer.empty() ? MF_GRAYED : 0), kMenuReset, reset.c_str());
 
     // A menu only closes on an outside click when its owner is foreground.
     // The right-click went to the desktop (the hook swallowed it), so borrow
@@ -18021,6 +18086,9 @@ void VizShowContextMenu(POINT pt) {
         return;
     } else if (cmd == kMenuReset) {
         g_menuOverrides.clear();
+        if (!g_setupLayerLoaded) VizSetupLoad();
+        g_setupLayer.clear();
+        VizSetupSave();
         VizSaveMenuOverrides();
     } else if (cmd == kMenuPanelPin) {
         VizPanelPin(!g_panelPinned);
@@ -18186,6 +18254,629 @@ bool VizApplyStylePreset(const std::wstring& name) {
     return true;
 }
 
+// ---- Sharing setups (2.3) ----
+// A setup is plain text anyone can read: a first line, its name and the parts it carries, then the
+// settings in those parts that differ from the defaults, then quick settings as quick.<key>. It goes
+// around as a file (.ttstyle), as a one-line code (TT2: and the text packed, for chats), or through
+// the community list (a folder of setups on GitHub, read only when its button is pressed). The audio
+// device, hotkeys, file paths, hardware and how it is moved or dragged never go in one.
+
+enum : unsigned { kPartLook = 1, kPartMotion = 2, kPartExtras = 4, kPartPlace = 8, kPartsAll = 15 };
+struct VizSetupKey {
+    const wchar_t* name;
+    const wchar_t* def;
+    bool text;
+    unsigned part;
+};
+static const VizSetupKey kSetupKeys[] = {
+    {L"appearance.shape", L"stereo", true, 1},
+    {L"appearance.reflection", L"0", false, 1},
+    {L"appearance.fxGlow", L"0", false, 1},
+    {L"appearance.fxGlowRadius", L"6", true, 1},
+    {L"appearance.fxBloom", L"0", false, 1},
+    {L"appearance.fxBloomRadius", L"16", true, 1},
+    {L"appearance.fxOutlineWidth", L"0", true, 1},
+    {L"appearance.fxOutlineColor", L"#B0FFFFFF", true, 1},
+    {L"appearance.fxShadow", L"0", false, 1},
+    {L"appearance.fxShadowColor", L"#000000", true, 1},
+    {L"appearance.fxShadowX", L"2", true, 1},
+    {L"appearance.fxShadowY", L"3", true, 1},
+    {L"appearance.fxShadowSoftness", L"4", true, 1},
+    {L"appearance.barHollow", L"0", false, 1},
+    {L"appearance.barHollowWidth", L"1.5", true, 1},
+    {L"appearance.barDash", L"0", true, 1},
+    {L"appearance.barDashGap", L"2", true, 1},
+    {L"appearance.barTilt", L"0", true, 1},
+    {L"appearance.barMirrorGap", L"0", true, 1},
+    {L"appearance.afterimage", L"0", false, 1},
+    {L"appearance.afterimageLength", L"1.2", true, 1},
+    {L"appearance.orientation", L"horizontal", true, 1},
+    {L"appearance.barCount", L"32", false, 1},
+    {L"appearance.barWidth", L"6", true, 1},
+    {L"appearance.barGap", L"4", true, 1},
+    {L"appearance.barMaxSize", L"140", true, 1},
+    {L"appearance.barIdleSize", L"4", true, 1},
+    {L"appearance.barCornerRadius", L"3", true, 1},
+    {L"appearance.colorMode", L"solid", true, 1},
+    {L"appearance.color", L"#FFFFFFFF", true, 1},
+    {L"appearance.gradientColor1", L"#FF1ED760", true, 1},
+    {L"appearance.gradientColor2", L"#FF00B4FF", true, 1},
+    {L"appearance.sensitivity", L"150", false, 2},
+    {L"appearance.sensitivityCurve", L"knee", true, 2},
+    {L"appearance.inputGain", L"0", false, 2},
+    {L"appearance.autoGain", L"0", false, 2},
+    {L"appearance.autoGainMaxBoost", L"12", false, 2},
+    {L"appearance.smoothing", L"0", false, 2},
+    {L"appearance.eqPreset", L"default", true, 2},
+    {L"appearance.fftSize", L"2048", true, 2},
+    {L"appearance.freqScale", L"log", true, 2},
+    {L"appearance.peakFreqEnabled", L"0", false, 4},
+    {L"appearance.peakFreqAlignH", L"right", true, 4},
+    {L"appearance.peakFreqAlignV", L"top", true, 4},
+    {L"appearance.oscilloscopeMultibandEnabled", L"0", false, 2},
+    {L"appearance.oscilloscopeWindowMs", L"24", false, 2},
+    {L"appearance.oscilloscopeDamping", L"0", false, 2},
+    {L"appearance.verticalAnchor", L"bottom", true, 1},
+    {L"appearance.peakHoldEnabled", L"0", false, 1},
+    {L"appearance.peakHoldColor", L"#FF00B4FF", true, 1},
+    {L"appearance.beatFlashEnabled", L"0", false, 1},
+    {L"appearance.beatFlashColor", L"#FFFFFFFF", true, 1},
+    {L"appearance.beatFlashIntensity", L"80", false, 1},
+    {L"appearance.rainbowSpeed", L"40", false, 1},
+    {L"appearance.nowPlayingEnabled", L"0", false, 4},
+    {L"appearance.nowPlayingColor", L"#FFFFFFFF", true, 4},
+    {L"appearance.nowPlayingFont", L"Segoe UI", true, 4},
+    {L"appearance.nowPlayingFontSize", L"16", true, 4},
+    {L"appearance.nowPlayingDisplaySeconds", L"6", false, 4},
+    {L"appearance.nowPlayingOffsetX", L"0", true, 4},
+    {L"appearance.nowPlayingOffsetY", L"0", true, 4},
+    {L"appearance.nowPlayingBgColor", L"#00000000", true, 4},
+    {L"appearance.nowPlayingBgPadding", L"6", true, 4},
+    {L"appearance.nowPlayingBgCornerRadius", L"6", true, 4},
+    {L"appearance.nowPlayingBgBorderSize", L"0", true, 4},
+    {L"appearance.nowPlayingBgBorderColor", L"#40FFFFFF", true, 4},
+    {L"appearance.peakFreqOffsetX", L"0", true, 4},
+    {L"appearance.peakFreqOffsetY", L"0", true, 4},
+    {L"appearance.peakFreqBgColor", L"#00000000", true, 4},
+    {L"appearance.peakFreqBgPadding", L"6", true, 4},
+    {L"appearance.peakFreqBgCornerRadius", L"6", true, 4},
+    {L"appearance.peakFreqBgBorderSize", L"0", true, 4},
+    {L"appearance.peakFreqBgBorderColor", L"#40FFFFFF", true, 4},
+    {L"appearance.nowPlayingLayout", L"one_line", true, 4},
+    {L"appearance.nowPlayingPlacement", L"above", true, 4},
+    {L"appearance.nowPlayingAlign", L"center", true, 4},
+    {L"appearance.nowPlayingArtistColor", L"#B3FFFFFF", true, 4},
+    {L"appearance.textRendering", L"smooth", true, 1},
+    {L"progress.enabled", L"0", false, 4},
+    {L"progress.placement", L"below", true, 4},
+    {L"progress.height", L"2", true, 4},
+    {L"progress.gap", L"6", true, 4},
+    {L"progress.color", L"#FFFFFFFF", true, 4},
+    {L"progress.trackColor", L"#40FFFFFF", true, 4},
+    {L"terminal.style", L"columns", true, 1},
+    {L"terminal.font", L"Consolas", true, 1},
+    {L"terminal.fontSize", L"14", true, 1},
+    {L"terminal.rows", L"16", false, 1},
+    {L"terminal.meterColumns", L"40", false, 1},
+    {L"terminal.hotThreshold", L"75", false, 1},
+    {L"terminal.columnGlyph", L"#", true, 1},
+    {L"terminal.peakGlyph", L"-", true, 1},
+    {L"terminal.ramp", L" .:-=+*#%@", true, 1},
+    {L"terminal.scrollRate", L"20", false, 1},
+    {L"terminal.lowColor", L"#FF33FF66", true, 1},
+    {L"terminal.highColor", L"#FFFF3B3B", true, 1},
+    {L"terminal.dimColor", L"#FF1E6B34", true, 1},
+    {L"terminal.labelColor", L"#FFB8FFB8", true, 1},
+    {L"analysis.engine", L"precision", true, 2},
+    {L"analysis.bandLayout", L"scale", true, 2},
+    {L"analysis.octaveFraction", L"6", true, 2},
+    {L"analysis.minFrequency", L"20", false, 2},
+    {L"analysis.maxFrequency", L"20000", false, 2},
+    {L"analysis.tuningA4", L"440", false, 2},
+    {L"analysis.weighting", L"z", true, 2},
+    {L"analysis.tilt", L"1.5", true, 2},
+    {L"analysis.detector", L"rms", true, 2},
+    {L"analysis.levelReference", L"third_octave", true, 2},
+    {L"analysis.window", L"hann", true, 2},
+    {L"analysis.bassDetail", L"2", true, 2},
+    {L"analysis.channel", L"mix", true, 2},
+    {L"analysis.dbFloor", L"-72", false, 2},
+    {L"analysis.dbCeiling", L"-12", false, 2},
+    {L"analysis.ballistics", L"snappy", true, 2},
+    {L"analysis.attackMs", L"10", false, 2},
+    {L"analysis.releaseDbPerSecond", L"20", false, 2},
+    {L"analysis.peakHoldMs", L"500", false, 2},
+    {L"analysis.peakFall", L"gravity", true, 2},
+    {L"analysis.readout", L"frequency", true, 4},
+    {L"analysis.loudnessResetOnTrack", L"1", false, 4},
+    {L"position.host", L"desktop", true, 8},
+    {L"position.panelBackdrop", L"acrylic", true, 8},
+    {L"position.horizontalPosition", L"50", true, 8},
+    {L"position.verticalPosition", L"88", true, 8},
+    {L"position.pixelSnap", L"1", false, 8},
+    {L"position.dockSide", L"below", true, 8},
+    {L"position.dockAlign", L"center", true, 8},
+    {L"position.dockGap", L"0", false, 8},
+    {L"position.dockShift", L"0", false, 8},
+    {L"position.split", L"0", false, 8},
+    {L"position.splitAt", L"50", false, 8},
+    {L"position.splitGap", L"200", false, 8},
+    {L"position.splitShift", L"0", false, 8},
+    {L"media_controls.enabled", L"0", false, 4},
+    {L"media_controls.iconColor", L"#FFFFFFFF", true, 4},
+    {L"media_controls.iconSize", L"32", true, 4},
+    {L"media_controls.iconSpacing", L"14", true, 4},
+    {L"media_controls.plateColor", L"#00000000", true, 4},
+    {L"media_controls.platePadding", L"0", true, 4},
+    {L"media_controls.plateCornerRadius", L"8", true, 4},
+    {L"media_controls.plateBorderSize", L"0", true, 4},
+    {L"media_controls.plateBorderColor", L"#40FFFFFF", true, 4},
+    {L"media_controls.stacking", L"top", true, 8},
+    {L"media_controls.hideWhenCovered", L"0", false, 8},
+    {L"media_controls.coveredThresholdPercent", L"50", true, 8},
+    {L"media_controls.horizontalPosition", L"50", true, 8},
+    {L"media_controls.verticalPosition", L"95", true, 8},
+    {L"media_controls.anchor", L"screen", true, 8},
+    {L"media_controls.anchorOffsetX", L"8", true, 8},
+    {L"media_controls.anchorOffsetY", L"8", true, 8},
+    {L"media_controls.layout", L"strip", true, 4},
+    {L"media_controls.cardBackground", L"#9E0A0A0D", true, 4},
+    {L"media_controls.cardBorderColor", L"#00FFFFFF", true, 4},
+    {L"media_controls.cardBorderSize", L"0", true, 4},
+    {L"media_controls.cardCornerRadius", L"12", true, 4},
+    {L"media_controls.cardArtSize", L"0", true, 4},
+    {L"media_controls.cardAccent", L"icon", true, 4},
+    {L"media_controls.cardAccentColor", L"#FFFFFFFF", true, 4},
+    {L"background.enabled", L"1", false, 1},
+    {L"background.color", L"#60000000", true, 1},
+    {L"background.padding", L"24", true, 1},
+    {L"background.cornerRadius", L"14", true, 1},
+    {L"background.blur", L"0", false, 1},
+    {L"background.borderSize", L"0", true, 1},
+    {L"background.borderColor", L"#40FFFFFF", true, 1},
+    {L"performance.targetFps", L"60", false, 2},
+};
+
+struct VizQuickPart {
+    const wchar_t* key;
+    unsigned part;
+};
+static const VizQuickPart kQuickParts[] = {
+    {L"shape", kPartLook},        {L"colorMode", kPartLook},    {L"color", kPartLook},       {L"grad1", kPartLook},
+    {L"grad2", kPartLook},        {L"peakHold", kPartLook},     {L"beatFlash", kPartLook},   {L"barWidth", kPartLook},
+    {L"barGap", kPartLook},       {L"barMaxSize", kPartLook},   {L"barRadius", kPartLook},   {L"reflection", kPartLook},
+    {L"fxGlow", kPartLook},       {L"fxGlowRadius", kPartLook}, {L"fxBloom", kPartLook},     {L"fxBloomRadius", kPartLook},
+    {L"termStyle", kPartLook},    {L"pixelText", kPartLook},    {L"engine", kPartMotion},    {L"bandLayout", kPartMotion},
+    {L"weighting", kPartMotion},  {L"ballistics", kPartMotion}, {L"targetFps", kPartMotion}, {L"nowPlaying", kPartExtras},
+    {L"progress", kPartExtras},   {L"mediaControls", kPartExtras}, {L"readout", kPartExtras}, {L"pixelSnap", kPartPlace},
+};
+
+static const wchar_t kCommunityFiles[] = L"https://raw.githubusercontent.com/USER-TOURNE/TOURNE-TABLE/main/community/setups/";
+static const wchar_t kCommunityFolder[] = L"https://github.com/USER-TOURNE/TOURNE-TABLE/tree/main/community/setups";
+static const wchar_t kCommunityIssue[] = L"https://github.com/USER-TOURNE/TOURNE-TABLE/issues/new";
+
+unsigned VizQuickPartOf(const std::wstring& key) {
+    for (const auto& q : kQuickParts)
+        if (key == q.key) return q.part;
+    return 0;  // (audio source, hardware, nudging: the person's own)
+}
+
+const VizSetupKey* VizSetupKeyOf(const std::wstring& name) {
+    for (const auto& k : kSetupKeys)
+        if (name == k.name) return &k;
+    return nullptr;
+}
+
+std::wstring VizPartsText(unsigned parts) {
+    std::wstring s;
+    const wchar_t* names[] = {L"look", L"motion", L"extras", L"place"};
+    for (int i = 0; i < 4; i++)
+        if (parts & (1u << i)) s += (s.empty() ? L"" : L",") + std::wstring(names[i]);
+    return s;
+}
+
+unsigned VizPartsFrom(const std::wstring& s) {
+    unsigned parts = 0;
+    const wchar_t* names[] = {L"look", L"motion", L"extras", L"place"};
+    for (int i = 0; i < 4; i++)
+        if (s.find(names[i]) != std::wstring::npos) parts |= 1u << i;
+    return parts;
+}
+
+std::wstring VizPartsWords(unsigned parts) {
+    std::wstring s;
+    const wchar_t* names[] = {L"Look", L"Motion", L"Extras", L"Place"};
+    for (int i = 0; i < 4; i++)
+        if (parts & (1u << i)) s += (s.empty() ? L"" : L", ") + std::wstring(names[i]);
+    return s;
+}
+
+std::string VizShareUtf8(const std::wstring& w) {
+    if (w.empty()) return {};
+    int n = WideCharToMultiByte(CP_UTF8, 0, w.data(), (int)w.size(), nullptr, 0, nullptr, nullptr);
+    std::string s(n > 0 ? n : 0, '\0');
+    if (n > 0) WideCharToMultiByte(CP_UTF8, 0, w.data(), (int)w.size(), s.data(), n, nullptr, nullptr);
+    return s;
+}
+
+std::wstring VizShareWide(const std::string& s) {
+    size_t skip = s.size() >= 3 && (unsigned char)s[0] == 0xEF && (unsigned char)s[1] == 0xBB && (unsigned char)s[2] == 0xBF ? 3 : 0;
+    if (s.size() <= skip) return {};
+    int n = MultiByteToWideChar(CP_UTF8, 0, s.data() + skip, (int)(s.size() - skip), nullptr, 0);
+    std::wstring w(n > 0 ? n : 0, L'\0');
+    if (n > 0) MultiByteToWideChar(CP_UTF8, 0, s.data() + skip, (int)(s.size() - skip), w.data(), n);
+    return w;
+}
+
+std::wstring VizOneLine(std::wstring v) {
+    for (auto& c : v)
+        if (c == L'\r' || c == L'\n') c = L' ';
+    return v.substr(0, 1024);
+}
+
+// What a setting is now (an imported setup's value, else the settings page's), as text.
+std::wstring VizSettingNow(const VizSetupKey& k) {
+    if (!k.text) return std::to_wstring(Wh_GetIntSetting(k.name));
+    PCWSTR s = Wh_GetStringSetting(k.name);
+    std::wstring v = s ? s : L"";
+    Wh_FreeStringSetting(s);
+    if (v.empty() && *k.def) {  // (a size saved as a whole number before 2.1)
+        int n = Wh_GetIntSetting(k.name);
+        if (n) v = std::to_wstring(n);
+    }
+    return v;
+}
+
+std::wstring VizExportSetup(unsigned parts, const std::wstring& name) {
+    std::wstring t = L"Tourne'Table setup 1\n";
+    if (!name.empty()) t += L"name=" + VizOneLine(name) + L"\n";
+    t += L"parts=" + VizPartsText(parts) + L"\n";
+    for (const auto& k : kSetupKeys) {
+        if (!(k.part & parts)) continue;
+        std::wstring v = VizSettingNow(k);
+        bool same = k.text ? v == k.def : _wtoi(v.c_str()) == _wtoi(k.def);
+        if (!same) t += std::wstring(k.name) + L"=" + VizOneLine(v) + L"\n";
+    }
+    for (const auto& kv : g_menuOverrides)
+        if (VizQuickPartOf(kv.first) & parts) t += L"quick." + kv.first + L"=" + VizOneLine(kv.second) + L"\n";
+    return t;
+}
+
+struct VizSetup {
+    bool ok = false;
+    std::wstring name, author;
+    unsigned parts = 0;
+    std::vector<std::pair<std::wstring, std::wstring>> values;
+};
+
+// Reads a setup out of text: a file, a code's contents, or a GitHub issue with it pasted in (lines
+// before its first line, ``` fences and # notes are skipped).
+VizSetup VizParseSetup(const std::wstring& text) {
+    VizSetup s;
+    bool started = false;
+    for (size_t pos = 0; pos < text.size();) {
+        size_t nl = text.find(L'\n', pos);
+        if (nl == std::wstring::npos) nl = text.size();
+        std::wstring line = text.substr(pos, nl - pos);
+        pos = nl + 1;
+        while (!line.empty() && iswspace(line.back())) line.pop_back();
+        while (!line.empty() && iswspace(line.front())) line.erase(line.begin());
+        if (!started) {
+            started = line.rfind(L"Tourne'Table setup", 0) == 0;
+            s.ok = started;
+            continue;
+        }
+        if (line.empty() || line[0] == L'#' || line.rfind(L"```", 0) == 0) continue;
+        size_t eq = line.find(L'=');
+        if (eq == std::wstring::npos || eq == 0) continue;
+        std::wstring key = line.substr(0, eq), value = line.substr(eq + 1, 1024);
+        if (key == L"name") s.name = value.substr(0, 60);
+        else if (key == L"author") s.author = value.substr(0, 40);
+        else if (key == L"parts") s.parts = VizPartsFrom(value);
+        else if (s.values.size() < 2000) s.values.emplace_back(key, value);
+    }
+    if (s.ok && !s.parts) s.parts = kPartLook;
+    return s;
+}
+
+// Lays a setup's parts over the settings: each setting in them takes the setup's value or the default,
+// and quick settings in them give way to the setup's own.
+void VizApplySetup(const VizSetup& s, unsigned parts) {
+    if (!g_setupLayerLoaded) VizSetupLoad();
+    for (const auto& k : kSetupKeys)
+        if (k.part & parts) g_setupLayer[k.name] = k.def;
+    g_menuOverrides.erase(std::remove_if(g_menuOverrides.begin(), g_menuOverrides.end(),
+                                         [&](const auto& kv) { return (VizQuickPartOf(kv.first) & parts) != 0; }),
+                          g_menuOverrides.end());
+    for (const auto& kv : s.values) {
+        if (kv.first.rfind(L"quick.", 0) == 0) {
+            std::wstring key = kv.first.substr(6);
+            if (VizQuickPartOf(key) & parts) g_menuOverrides.emplace_back(key, kv.second);
+        } else if (const VizSetupKey* k = VizSetupKeyOf(kv.first)) {
+            if (k->part & parts) g_setupLayer[k->name] = kv.second;
+        }
+    }
+    VizSetupSave();
+    VizSaveMenuOverrides();
+}
+
+std::wstring VizBase64(const std::string& in) {
+    static const char* abc = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    std::wstring out;
+    for (size_t i = 0; i < in.size(); i += 3) {
+        unsigned v = (unsigned char)in[i] << 16;
+        if (i + 1 < in.size()) v |= (unsigned char)in[i + 1] << 8;
+        if (i + 2 < in.size()) v |= (unsigned char)in[i + 2];
+        out += abc[(v >> 18) & 63];
+        out += abc[(v >> 12) & 63];
+        if (i + 1 < in.size()) out += abc[(v >> 6) & 63];
+        if (i + 2 < in.size()) out += abc[v & 63];
+    }
+    return out;
+}
+
+bool VizUnbase64(const std::wstring& in, std::string* out) {
+    unsigned v = 0;
+    int bits = 0;
+    for (wchar_t c : in) {
+        int d = c >= L'A' && c <= L'Z' ? c - L'A' : c >= L'a' && c <= L'z' ? c - L'a' + 26 : c >= L'0' && c <= L'9' ? c - L'0' + 52
+              : c == L'-' || c == L'+' ? 62 : c == L'_' || c == L'/' ? 63 : -1;
+        if (d < 0) {
+            if (iswspace(c) || c == L'=') continue;
+            return false;
+        }
+        v = (v << 6) | d;
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            out->push_back((char)((v >> bits) & 0xFF));
+        }
+    }
+    return true;
+}
+
+// Windows' own compression (XPRESS with Huffman): a setup's text packs to about a third.
+bool VizPack(const std::string& in, std::string* out) {
+    COMPRESSOR_HANDLE c = nullptr;
+    if (!CreateCompressor(COMPRESS_ALGORITHM_XPRESS_HUFF, nullptr, &c)) return false;
+    SIZE_T need = 0;
+    Compress(c, (PVOID)in.data(), in.size(), nullptr, 0, &need);  // (PVOID: MinGW's header isn't const)
+    out->resize(need);
+    bool ok = need && Compress(c, (PVOID)in.data(), in.size(), out->data(), need, &need);
+    if (ok) out->resize(need);
+    CloseCompressor(c);
+    return ok;
+}
+
+bool VizUnpack(const std::string& in, std::string* out) {
+    DECOMPRESSOR_HANDLE d = nullptr;
+    if (!CreateDecompressor(COMPRESS_ALGORITHM_XPRESS_HUFF, nullptr, &d)) return false;
+    SIZE_T need = 0;
+    Decompress(d, (PVOID)in.data(), in.size(), nullptr, 0, &need);
+    bool ok = need && need <= (1 << 20);
+    if (ok) {
+        out->resize(need);
+        ok = Decompress(d, (PVOID)in.data(), in.size(), out->data(), need, &need);
+        if (ok) out->resize(need);
+    }
+    CloseDecompressor(d);
+    return ok;
+}
+
+std::wstring VizShareCode(const std::wstring& text) {
+    std::string raw = VizShareUtf8(text), packed;
+    if (VizPack(raw, &packed)) return L"TT2:" + VizBase64(packed);
+    return L"TT2T:" + VizBase64(raw);  // (unpacked: longer, the same setup)
+}
+
+// A code back to its text; anything else is taken as the text itself.
+std::wstring VizSetupText(std::wstring given) {
+    while (!given.empty() && iswspace(given.front())) given.erase(given.begin());
+    while (!given.empty() && iswspace(given.back())) given.pop_back();
+    std::string bytes, text;
+    if (given.rfind(L"TT2:", 0) == 0 && VizUnbase64(given.substr(4), &bytes) && VizUnpack(bytes, &text)) return VizShareWide(text);
+    if (given.rfind(L"TT2T:", 0) == 0 && VizUnbase64(given.substr(5), &bytes)) return VizShareWide(bytes);
+    return given;
+}
+
+void VizClipboardSet(HWND owner, const std::wstring& text) {
+    if (!OpenClipboard(owner)) return;
+    EmptyClipboard();
+    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, (text.size() + 1) * sizeof(wchar_t));
+    if (mem) {
+        memcpy(GlobalLock(mem), text.c_str(), (text.size() + 1) * sizeof(wchar_t));
+        GlobalUnlock(mem);
+        if (!SetClipboardData(CF_UNICODETEXT, mem)) GlobalFree(mem);
+    }
+    CloseClipboard();
+}
+
+std::wstring VizClipboardGet(HWND owner) {
+    std::wstring out;
+    if (!OpenClipboard(owner)) return out;
+    if (HANDLE h = GetClipboardData(CF_UNICODETEXT)) {
+        if (const wchar_t* p = (const wchar_t*)GlobalLock(h)) {
+            out.assign(p, wcsnlen(p, 1 << 20));
+            GlobalUnlock(h);
+        }
+    }
+    CloseClipboard();
+    return out;
+}
+
+// Imports a setup (a code, a file's text, a community one) into the parts both it and the ticked boxes
+// have, shows it, and keeps it only if asked to; otherwise everything goes back as it was.
+bool VizImportSetup(HWND owner, const std::wstring& given, unsigned boxes) {
+    VizSetup s = VizParseSetup(VizSetupText(given));
+    if (!s.ok) {
+        MessageBoxW(owner, L"That isn't a Tourne'Table setup. Copy a TT2: code, or open a .ttstyle file.", L"Tourne'Table",
+                    MB_OK | MB_ICONWARNING);
+        return false;
+    }
+    unsigned parts = s.parts & boxes;
+    if (!parts) {
+        std::wstring why = L"This setup carries " + VizPartsWords(s.parts) + L", and none of those boxes is ticked.";
+        MessageBoxW(owner, why.c_str(), L"Tourne'Table", MB_OK | MB_ICONINFORMATION);
+        return false;
+    }
+    if (!g_setupLayerLoaded) VizSetupLoad();
+    auto layer = g_setupLayer;
+    auto quick = g_menuOverrides;
+    VizApplySetup(s, parts);
+    ApplySettingsChanged();
+    std::wstring ask = L"Keep " + (s.name.empty() ? std::wstring(L"this setup") : L"\"" + s.name + L"\"") +
+                       (s.author.empty() ? L"" : L" by " + s.author) + L"?\n\nIt changed " + VizPartsWords(parts) +
+                       L". No puts yours back.";
+    if (MessageBoxW(owner, ask.c_str(), L"Tourne'Table", MB_YESNO | MB_ICONQUESTION) == IDYES) return true;
+    g_setupLayer = layer;
+    g_menuOverrides = quick;
+    VizSetupSave();
+    VizSaveMenuOverrides();
+    ApplySettingsChanged();
+    return false;
+}
+
+bool VizSaveSetupFile(HWND owner, const std::wstring& text, const std::wstring& name) {
+    WCHAR path[MAX_PATH] = {};
+    wcsncpy_s(path, (name.empty() ? std::wstring(L"My setup") : name).c_str(), _TRUNCATE);
+    OPENFILENAMEW ofn = {sizeof(ofn)};
+    ofn.hwndOwner = owner;
+    ofn.lpstrFilter = L"Tourne'Table setups (*.ttstyle)\0*.ttstyle\0All files\0*.*\0";
+    ofn.lpstrFile = path;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.lpstrDefExt = L"ttstyle";
+    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+    if (!GetSaveFileNameW(&ofn)) return false;
+    std::string bytes = VizShareUtf8(text);
+    HANDLE f = CreateFileW(path, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return false;
+    DWORD put = 0;
+    bool ok = WriteFile(f, bytes.data(), (DWORD)bytes.size(), &put, nullptr) && put == bytes.size();
+    CloseHandle(f);
+    return ok;
+}
+
+bool VizOpenSetupFile(HWND owner, std::wstring* text) {
+    WCHAR path[MAX_PATH] = {};
+    OPENFILENAMEW ofn = {sizeof(ofn)};
+    ofn.hwndOwner = owner;
+    ofn.lpstrFilter = L"Tourne'Table setups (*.ttstyle)\0*.ttstyle\0Text\0*.txt\0All files\0*.*\0";
+    ofn.lpstrFile = path;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+    if (!GetOpenFileNameW(&ofn)) return false;
+    HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return false;
+    std::string bytes(256 * 1024, '\0');
+    DWORD got = 0;
+    bool ok = ReadFile(f, bytes.data(), (DWORD)bytes.size(), &got, nullptr);
+    CloseHandle(f);
+    bytes.resize(got);
+    *text = VizShareWide(bytes);
+    return ok;
+}
+
+// ---- The community list: setups in a folder of the TOURNE-TABLE repository on GitHub ----
+// index.txt there has a line per setup, "file|name|author|about". Nothing is fetched until the
+// Community button is pressed, and then only those small text files.
+struct VizCommunityItem {
+    std::wstring file, name, author;
+};
+constexpr UINT WM_APP_SHARE_LIST = WM_APP + 60;   // wParam: reached; lParam: std::vector<VizCommunityItem>*
+constexpr UINT WM_APP_SHARE_SETUP = WM_APP + 61;  // lParam: std::wstring* (empty: not reached)
+
+bool VizFetchText(const std::wstring& url, std::wstring* out) {
+    IStream* stream = nullptr;
+    if (url.rfind(L"https://", 0) != 0 || FAILED(URLOpenBlockingStreamW(nullptr, url.c_str(), &stream, 0, nullptr)) || !stream)
+        return false;
+    std::string data;
+    char buf[8192];
+    for (;;) {
+        ULONG got = 0;
+        HRESULT hr = stream->Read(buf, sizeof(buf), &got);
+        if (FAILED(hr) || !got) break;
+        data.append(buf, got);
+        if (data.size() > 256 * 1024) break;
+    }
+    stream->Release();
+    if (data.empty() || data.size() > 256 * 1024) return false;
+    *out = VizShareWide(data);
+    return true;
+}
+
+bool VizCommunityFileName(const std::wstring& f) {
+    if (f.size() < 9 || f.size() > 80 || f.compare(f.size() - 8, 8, L".ttstyle") != 0) return false;
+    for (wchar_t c : f)
+        if (!(iswalnum(c) || c == L'-' || c == L'_' || c == L'.')) return false;
+    return f.find(L"..") == std::wstring::npos;
+}
+
+void VizFetchCommunityList(HWND notify) {
+    std::thread([notify] {
+        HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        auto* items = new std::vector<VizCommunityItem>;
+        std::wstring text;
+        bool ok = VizFetchText(std::wstring(kCommunityFiles) + L"index.txt?t=" + std::to_wstring(GetTickCount64()), &text);
+        for (size_t pos = 0; ok && pos < text.size() && items->size() < 200;) {
+            size_t nl = text.find(L'\n', pos);
+            if (nl == std::wstring::npos) nl = text.size();
+            std::wstring line = text.substr(pos, nl - pos);
+            pos = nl + 1;
+            while (!line.empty() && iswspace(line.back())) line.pop_back();
+            if (line.empty() || line[0] == L'#') continue;
+            std::wstring parts[4];
+            size_t at = 0;
+            for (int i = 0; i < 4; i++) {
+                size_t bar = i < 3 ? line.find(L'|', at) : std::wstring::npos;
+                parts[i] = line.substr(at, bar == std::wstring::npos ? std::wstring::npos : bar - at);
+                if (bar == std::wstring::npos) break;
+                at = bar + 1;
+            }
+            if (VizCommunityFileName(parts[0])) items->push_back({parts[0], parts[1].substr(0, 60), parts[2].substr(0, 40)});
+        }
+        if (SUCCEEDED(com)) CoUninitialize();
+        if (!PostMessageW(notify, WM_APP_SHARE_LIST, ok, (LPARAM)items)) delete items;
+    }).detach();
+}
+
+void VizFetchCommunitySetup(HWND notify, const std::wstring& file) {
+    std::thread([notify, file] {
+        HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        auto* text = new std::wstring;
+        if (!VizFetchText(std::wstring(kCommunityFiles) + file, text)) text->clear();
+        if (SUCCEEDED(com)) CoUninitialize();
+        if (!PostMessageW(notify, WM_APP_SHARE_SETUP, 0, (LPARAM)text)) delete text;
+    }).detach();
+}
+
+std::wstring VizUrlEncode(const std::wstring& w) {
+    std::string s = VizShareUtf8(w);
+    std::wstring out;
+    for (unsigned char c : s) {
+        if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+            out += (wchar_t)c;
+        } else {
+            wchar_t b[4];
+            swprintf(b, 4, L"%%%02X", c);
+            out += b;
+        }
+    }
+    return out;
+}
+
+// Opens a new GitHub issue with the setup in it, for the person to send; Tourne adds the good ones
+// to the community folder.
+void VizShareToCommunity(HWND owner, unsigned parts, const std::wstring& name) {
+    std::wstring text = VizExportSetup(parts, name);
+    std::wstring head = std::wstring(kCommunityIssue) + L"?title=" + VizUrlEncode(L"Setup: " + name) + L"&body=";
+    std::wstring url = head + VizUrlEncode(L"Made in Tourne'Table. A screenshot helps people pick it.\n\n```\n" + text + L"```\n");
+    if (url.size() > 7000) {  // (too long for a link: it goes on the clipboard instead)
+        VizClipboardSet(owner, text);
+        url = head + VizUrlEncode(L"Made in Tourne'Table. Paste the setup here (it's on your clipboard):\n\n```\n\n```\n");
+    }
+    ShellExecuteW(nullptr, L"open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+}
+
 // ---- The editor window ----
 namespace {
 enum : int {
@@ -18193,6 +18884,28 @@ enum : int {
     kIdPeak, kIdBeat, kIdSliderBase = 200,  // + slider index; value labels at + 100
 };
 constexpr UINT_PTR kApplyTimer = 1;
+enum : int {
+    kIdShareCopy = 400, kIdSharePaste, kIdShareCommunity, kIdShareSave, kIdShareOpen,
+    kIdPartLook, kIdPartMotion, kIdPartExtras, kIdPartPlace,
+};
+constexpr UINT_PTR kShareTimer = 2;
+bool s_communityBusy = false;
+
+// The ticked parts (Look, Motion, Extras, Place).
+unsigned EditorParts(HWND hWnd) {
+    unsigned parts = 0;
+    for (int i = 0; i < 4; i++)
+        if (IsDlgButtonChecked(hWnd, kIdPartLook + i) == BST_CHECKED) parts |= 1u << i;
+    return parts;
+}
+
+// What a shared setup is called: the Saved style box's name, or "My setup".
+std::wstring EditorSetupName(HWND hWnd) {
+    WCHAR name[64] = {};
+    GetDlgItemTextW(hWnd, kIdPreset, name, ARRAYSIZE(name));
+    std::wstring n = VizCleanPresetName(name);
+    return n.empty() ? L"My setup" : n;
+}
 
 struct EditorSlider {
     const wchar_t* key;
@@ -18281,6 +18994,20 @@ void EditorBuild(HWND hWnd) {
     add(L"BUTTON", L"Save", BS_PUSHBUTTON | WS_TABSTOP, ctlX + px(170), y, px(44), px(24), kIdSave);
     add(L"BUTTON", L"Delete", BS_PUSHBUTTON | WS_TABSTOP, ctlX + px(218), y, px(50), px(24), kIdDelete);
     y += rowH + px(6);
+    label(L"Share");
+    add(L"BUTTON", L"Copy code", BS_PUSHBUTTON | WS_TABSTOP, ctlX, y, px(84), px(24), kIdShareCopy);
+    add(L"BUTTON", L"Paste code", BS_PUSHBUTTON | WS_TABSTOP, ctlX + px(88), y, px(84), px(24), kIdSharePaste);
+    add(L"BUTTON", L"Community", BS_PUSHBUTTON | WS_TABSTOP, ctlX + px(176), y, px(84), px(24), kIdShareCommunity);
+    y += rowH;
+    add(L"BUTTON", L"Save file...", BS_PUSHBUTTON | WS_TABSTOP, ctlX, y, px(84), px(24), kIdShareSave);
+    add(L"BUTTON", L"Open file...", BS_PUSHBUTTON | WS_TABSTOP, ctlX + px(88), y, px(84), px(24), kIdShareOpen);
+    y += rowH;
+    label(L"Parts");
+    add(L"BUTTON", L"Look", BS_AUTOCHECKBOX | WS_TABSTOP, ctlX, y, px(58), px(22), kIdPartLook);
+    add(L"BUTTON", L"Motion", BS_AUTOCHECKBOX | WS_TABSTOP, ctlX + px(62), y, px(66), px(22), kIdPartMotion);
+    add(L"BUTTON", L"Extras", BS_AUTOCHECKBOX | WS_TABSTOP, ctlX + px(132), y, px(62), px(22), kIdPartExtras);
+    add(L"BUTTON", L"Place", BS_AUTOCHECKBOX | WS_TABSTOP, ctlX + px(198), y, px(62), px(22), kIdPartPlace);
+    y += rowH + px(6);
     label(L"Base style");
     HWND shape = add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, ctlX, y, ctlW, px(320), kIdShape);
     for (const auto& o : kShapes) SendMessageW(shape, CB_ADDSTRING, 0, (LPARAM)o.label);
@@ -18308,12 +19035,17 @@ void EditorBuild(HWND hWnd) {
     y += px(4);
     add(L"STATIC",
         L"Changes apply at once. Reset Quick Settings in the right-click menu returns to the settings page. "
-        L"Reflection, Glow and Bloom need the Direct3D 11 renderer.",
-        SS_LEFT, L, y, labelW + ctlW, px(48), -1);
-    y += px(56);
+        L"Reflection, Glow and Bloom need the Direct3D 11 renderer. Share carries the ticked parts; your audio "
+        L"device, hotkeys and file paths stay out. Community reads its list from GitHub only when pressed.",
+        SS_LEFT, L, y, labelW + ctlW, px(80), -1);
+    y += px(88);
     RECT rc = {0, 0, labelW + ctlW + L * 2, y};
     AdjustWindowRectExForDpi(&rc, GetWindowLongW(hWnd, GWL_STYLE), FALSE, GetWindowLongW(hWnd, GWL_EXSTYLE), dpi);
     SetWindowPos(hWnd, nullptr, 0, 0, rc.right - rc.left, rc.bottom - rc.top, SWP_NOMOVE | SWP_NOZORDER);
+    WCHAR parts[64] = {};
+    unsigned ticked = Wh_GetStringValue(L"shareParts", parts, ARRAYSIZE(parts)) ? VizPartsFrom(parts)
+                                                                               : (kPartLook | kPartMotion | kPartExtras);
+    for (int i = 0; i < 4; i++) CheckDlgButton(hWnd, kIdPartLook + i, ticked & (1u << i) ? BST_CHECKED : BST_UNCHECKED);
     EditorFillPresets(hWnd, L"");
     EditorSync(hWnd);
 }
@@ -18337,6 +19069,10 @@ LRESULT CALLBACK StyleEditorProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
         }
         case WM_TIMER:
             if (wParam == kApplyTimer) EditorApplyNow(hWnd);
+            if (wParam == kShareTimer) {
+                KillTimer(hWnd, kShareTimer);
+                SetDlgItemTextW(hWnd, kIdShareCopy, L"Copy code");
+            }
             return 0;
         case WM_COMMAND: {
             int id = LOWORD(wParam), code = HIWORD(wParam);
@@ -18354,6 +19090,33 @@ LRESULT CALLBACK StyleEditorProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
                 EditorApplyNow(hWnd);
             } else if (id == kIdColor || id == kIdGrad1 || id == kIdGrad2) {
                 EditorPickColor(hWnd, id == kIdColor ? L"color" : id == kIdGrad1 ? L"grad1" : L"grad2");
+            } else if (id >= kIdPartLook && id <= kIdPartPlace && code == BN_CLICKED) {
+                Wh_SetStringValue(L"shareParts", VizPartsText(EditorParts(hWnd)).c_str());
+            } else if (id == kIdShareCopy || id == kIdShareSave) {
+                unsigned parts = EditorParts(hWnd);
+                if (!parts) {
+                    MessageBeep(MB_ICONWARNING);
+                    return 0;
+                }
+                std::wstring text = VizExportSetup(parts, EditorSetupName(hWnd));
+                if (id == kIdShareSave) {
+                    VizSaveSetupFile(hWnd, text, EditorSetupName(hWnd));
+                } else {
+                    VizClipboardSet(hWnd, VizShareCode(text));
+                    SetDlgItemTextW(hWnd, kIdShareCopy, L"Copied");
+                    SetTimer(hWnd, kShareTimer, 1500, nullptr);
+                }
+            } else if (id == kIdSharePaste || id == kIdShareOpen) {
+                std::wstring text;
+                if (id == kIdSharePaste) text = VizClipboardGet(hWnd);
+                else if (!VizOpenSetupFile(hWnd, &text)) return 0;
+                VizImportSetup(hWnd, text, EditorParts(hWnd));
+                EditorSync(hWnd);
+            } else if (id == kIdShareCommunity) {
+                if (s_communityBusy) return 0;
+                s_communityBusy = true;
+                SetDlgItemTextW(hWnd, kIdShareCommunity, L"Loading...");
+                VizFetchCommunityList(hWnd);
             } else if (id == kIdLoad || id == kIdSave || id == kIdDelete) {
                 WCHAR name[64] = {};
                 GetDlgItemTextW(hWnd, kIdPreset, name, ARRAYSIZE(name));
@@ -18375,11 +19138,54 @@ LRESULT CALLBACK StyleEditorProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
             }
             return 0;
         }
+        case WM_APP_SHARE_LIST: {
+            std::unique_ptr<std::vector<VizCommunityItem>> items((std::vector<VizCommunityItem>*)lParam);
+            s_communityBusy = false;
+            SetDlgItemTextW(hWnd, kIdShareCommunity, L"Community");
+            HMENU m = CreatePopupMenu();
+            if (!wParam) AppendMenuW(m, MF_STRING | MF_GRAYED, 0, L"Couldn't reach the community list");
+            else if (items->empty()) AppendMenuW(m, MF_STRING | MF_GRAYED, 0, L"No community setups yet");
+            for (size_t i = 0; i < items->size() && i < 60; i++) {
+                const auto& it = (*items)[i];
+                std::wstring text = (it.name.empty() ? it.file : it.name) + (it.author.empty() ? L"" : L"  (by " + it.author + L")");
+                AppendMenuW(m, MF_STRING, 1 + i, text.c_str());
+            }
+            AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(m, MF_STRING, 1000, L"Share Mine to the Community...");
+            AppendMenuW(m, MF_STRING, 1001, L"Open the Community Folder");
+            RECT rc = {};
+            GetWindowRect(GetDlgItem(hWnd, kIdShareCommunity), &rc);
+            UINT cmd = TrackPopupMenu(m, TPM_RETURNCMD | TPM_RIGHTBUTTON, rc.left, rc.bottom, 0, hWnd, nullptr);
+            DestroyMenu(m);
+            if (cmd >= 1 && cmd <= items->size() && cmd <= 60) {
+                s_communityBusy = true;
+                SetDlgItemTextW(hWnd, kIdShareCommunity, L"Loading...");
+                VizFetchCommunitySetup(hWnd, (*items)[cmd - 1].file);
+            } else if (cmd == 1000) {
+                unsigned parts = EditorParts(hWnd);
+                if (parts) VizShareToCommunity(hWnd, parts, EditorSetupName(hWnd));
+                else MessageBeep(MB_ICONWARNING);
+            } else if (cmd == 1001) {
+                ShellExecuteW(nullptr, L"open", kCommunityFolder, nullptr, nullptr, SW_SHOWNORMAL);
+            }
+            return 0;
+        }
+        case WM_APP_SHARE_SETUP: {
+            std::unique_ptr<std::wstring> text((std::wstring*)lParam);
+            s_communityBusy = false;
+            SetDlgItemTextW(hWnd, kIdShareCommunity, L"Community");
+            if (text->empty()) MessageBoxW(hWnd, L"Couldn't get that setup from GitHub.", L"Tourne'Table", MB_OK | MB_ICONWARNING);
+            else VizImportSetup(hWnd, *text, EditorParts(hWnd));
+            EditorSync(hWnd);
+            return 0;
+        }
         case WM_CLOSE:
             DestroyWindow(hWnd);
             return 0;
         case WM_DESTROY:
             KillTimer(hWnd, kApplyTimer);
+            KillTimer(hWnd, kShareTimer);
+            s_communityBusy = false;
             g_styleEditorWnd = nullptr;
             return 0;
     }
