@@ -1,0 +1,10 @@
+Tourne'Table setup 1
+name=Mono Mirror
+author=Tourne'Table
+parts=look
+appearance.shape=mirror
+appearance.barCount=48
+appearance.barWidth=4
+appearance.barGap=3
+appearance.barCornerRadius=2
+appearance.fxGlow=30

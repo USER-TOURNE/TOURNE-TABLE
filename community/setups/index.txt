@@ -1,0 +1,4 @@
+# Tourne'Table community setups: one line each, file|name|author|about.
+# Tourne'Table's Community button reads this file from the main branch.
+mono-mirror.ttstyle|Mono Mirror|Tourne'Table|White mirrored bars with a soft glow
+neon-gradient.ttstyle|Neon Gradient|Tourne'Table|Pink to cyan with bloom, peak caps and a reflection
