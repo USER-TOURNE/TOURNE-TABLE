@@ -1231,10 +1231,21 @@ look at, you can throw something in the hat. Entirely optional, genuinely apprec
 - position:
     - host: desktop
       $name: Place In
-      $description: Desktop keeps the visualizer on the wallpaper layer, behind your apps. Taskbar puts it inside the taskbar, above it, and the positions below then mean a percentage across and down the taskbar instead of the screen. It never takes clicks there; the taskbar under it still works, except that the right-click menu and drag answer over the visualizer's own box
+      $description: Desktop keeps the visualizer on the wallpaper layer, behind your apps. Taskbar puts it inside the taskbar, above it, and the positions below then mean a percentage across and down the taskbar instead of the screen. It never takes clicks there; the taskbar under it still works, except that the right-click menu and drag answer over the visualizer's own box. Panel gives it a small window of its own, the size of the visualizer, that floats with your apps; drag it to move it, drag an edge or corner to scale it, and pin or hide it from the right-click menu (the positions below don't apply there)
       $options:
         - desktop: Desktop (behind apps)
         - taskbar: Taskbar
+        - panel: Panel (a window of its own)
+    - panelBackdrop: acrylic
+      $name: Panel Backdrop
+      $description: Place In = Panel only. What shows behind the visualizer in its window. Acrylic and Mica need Windows 11; on Windows 10 it stays clear
+      $options:
+        - none: Clear
+        - acrylic: Acrylic (frosted)
+        - mica: Mica
+    - panelHotkey: ''
+      $name: Panel Hotkey
+      $description: Place In = Panel only. Shows or hides the panel from anywhere, e.g. Ctrl+Alt+V or Win+Shift+F9. Empty for none
     - horizontalPosition: '50'
       $name: Horizontal Position
       $description: 0-100, percentage across the monitor's work area. Decimals are allowed (e.g. 50.25) for fine-grained placement -- useful since a whole-number step can be a big jump in pixels on a large monitor. IMPORTANT -- once you have moved the visualizer by keyboard or by dragging, that saved position REPLACES this field, and editing this will appear to do nothing until you clear it with the move modifier + Home (see Interaction)
@@ -1694,6 +1705,7 @@ using Microsoft::WRL::ComPtr;
 #define WM_APP_HW_NOTICE (WM_APP + 7)        // lParam: heap std::wstring*, owned by receiver
 #define WM_APP_REBUILD_DEVICE (WM_APP + 8)   // wParam: 1 = device was lost
 #define WM_APP_CONTEXT_MENU (WM_APP + 9)     // wParam, lParam: screen x, y
+#define WM_APP_PANEL_FIT (WM_APP + 10)       // Place In = Panel: size the window to the box
 #define OVERLAY_WINDOW_CLASS (L"DesktopAudioVisOverlay_" WH_MOD_ID)
 #define MESSAGE_WINDOW_CLASS (L"DesktopAudioVisMessage_" WH_MOD_ID)
 #define MEDIA_WINDOW_CLASS (L"DesktopAudioVisMedia_" WH_MOD_ID)
@@ -1788,6 +1800,9 @@ struct Settings {
 
     bool dragEnabled = false;
     bool hostTaskbar = false;         // Position > Place In = Taskbar
+    bool hostPanel = false;           // Position > Place In = Panel (2.2)
+    int panelBackdrop = 1;            // 0 clear, 1 acrylic, 2 mica
+    std::wstring panelHotkey;
     bool splitEnabled = false;        // show the visualizer as two pieces
     float splitAt = 50.f;             // % of the bars in the first piece
     float splitGap = 0.f, splitShift = 0.f;  // logical px: along, and across
@@ -2018,6 +2033,15 @@ std::atomic<float> g_mediaOverrideH{50.0f};
 std::atomic<float> g_mediaOverrideV{95.0f};
 
 std::atomic<HWND> g_overlayWnd{nullptr};
+// Place In = Panel (2.2): whether the current overlay window is the panel,
+// and the panel's own state (kept in the "panel" mod value).
+bool g_overlayInPanel = false;
+bool g_panelHidden = false;
+bool g_panelPinned = false;
+float g_panelZoom = 1.0f;
+RECT g_panelRect{0, 0, 0, 0};  // empty until placed once
+int g_panelSizingW = 0, g_panelSizingH = 0;  // non-zero while an edge is being dragged
+UINT g_panelMsg = 0;  // RegisterWindowMessage("TourneTable.Panel")
 ComPtr<IDXGISwapChain1> g_swapChain;
 ComPtr<ID2D1DeviceContext> g_dc;
 ComPtr<IDCompositionDevice> g_compositionDevice;
@@ -4439,6 +4463,11 @@ bool g_mediaHiddenByCover = false;
 
 void RepositionAndRepaintMediaControls() {
     if (!g_mediaWnd) return;
+    if (g_overlayInPanel && g_panelHidden) {
+        VizCardTimer(g_mediaWnd, false);
+        ShowWindow(g_mediaWnd, SW_HIDE);
+        return;
+    }
     if (!g_settings.mediaControlsEnabled) {
         VizCardTimer(g_mediaWnd, false);
         ShowWindow(g_mediaWnd, SW_HIDE);
@@ -9025,12 +9054,27 @@ HWND VizTaskbarFor(HMONITOR monitor) {
 // The area the Position percentages span: the work area, or in taskbar mode
 // the taskbar itself.
 RECT VizPlaceArea(HMONITOR monitor, const MONITORINFO& mi) {
+    RECT panel;
+    if (g_overlayInPanel && g_overlayWnd && GetWindowRect(g_overlayWnd, &panel)) return panel;
     if (g_settings.hostTaskbar) {
         RECT r;
         HWND tb = VizTaskbarFor(monitor);
         if (tb && GetWindowRect(tb, &r) && r.right > r.left && r.bottom > r.top) return r;
     }
     return mi.rcWork;
+}
+
+// The monitor's DPI, times the panel's own zoom in Place In = Panel.
+float VizHostDpiScale(HMONITOR monitor) {
+    return GetMonitorDpiScale(monitor) * (g_settings.hostPanel ? g_panelZoom : 1.0f);
+}
+
+// Where layout coordinates count from: the virtual screen's top-left, or the
+// panel window's own in Place In = Panel.
+POINT VizLayoutOrigin() {
+    RECT r;
+    if (g_overlayInPanel && g_overlayWnd && GetWindowRect(g_overlayWnd, &r)) return POINT{r.left, r.top};
+    return POINT{GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN)};
 }
 
 struct VizLayout {
@@ -10358,8 +10402,9 @@ bool ComputeVizLayout(VizLayout* out) {
     MONITORINFO mi{.cbSize = sizeof(mi)};
     if (!GetMonitorInfo(monitor, &mi)) return false;
 
-    int vsx = GetSystemMetrics(SM_XVIRTUALSCREEN);
-    int vsy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    const POINT layoutOrigin = VizLayoutOrigin();
+    int vsx = layoutOrigin.x;
+    int vsy = layoutOrigin.y;
 
     const RECT area = VizPlaceArea(monitor, mi);
     float waLeft   = (float)(area.left   - vsx);
@@ -10367,7 +10412,7 @@ bool ComputeVizLayout(VizLayout* out) {
     float workWidth  = (float)(area.right  - area.left);
     float workHeight = (float)(area.bottom - area.top);
 
-    bool dragOverride = g_dragOverrideActive.load(std::memory_order_relaxed);
+    bool dragOverride = g_dragOverrideActive.load(std::memory_order_relaxed) && !g_overlayInPanel;
     float hPercent = dragOverride ? g_dragOverrideH.load(std::memory_order_relaxed)
                                    : g_settings.horizontalPosition;
     float vPercent = dragOverride ? g_dragOverrideV.load(std::memory_order_relaxed)
@@ -10375,7 +10420,7 @@ bool ComputeVizLayout(VizLayout* out) {
 
     float blockX = waLeft + (workWidth  - totalWidth)  * (hPercent / 100.0f);
     float blockY = waTop  + (workHeight - totalHeight) * (vPercent / 100.0f);
-    if (!g_settings.dockApp.empty() && g_dockActive.load(std::memory_order_relaxed)) {
+    if (!g_overlayInPanel && !g_settings.dockApp.empty() && g_dockActive.load(std::memory_order_relaxed)) {
         // Docked: beside the app's window, kept inside the work area like any
         // other position.
         float dx, dy;
@@ -10492,6 +10537,12 @@ bool ComputeVizLayout(VizLayout* out) {
 
     float rawOriginX = blockX - insetL;
     float rawOriginY = blockY - insetT;
+    if (g_overlayInPanel) {
+        // The whole box (bars, padding and the room kept for text) centred in
+        // the panel, which is sized to it (VizPanelFit).
+        rawOriginX = waLeft + (workWidth - (totalWidth + insetL + insetR)) * 0.5f;
+        rawOriginY = waTop + (workHeight - (totalHeight + insetT + insetB)) * 0.5f;
+    }
 
     // The composition visual's offset MUST land on whole pixels. A fractional
     // offset makes DirectComposition resample the entire surface bilinearly,
@@ -10530,10 +10581,12 @@ bool CreateSwapChainResources() {
     HMONITOR monitor = GetMonitorById(g_settings.monitor - 1);
     if (!monitor) monitor = MonitorFromPoint({0, 0}, MONITOR_DEFAULTTONEAREST);
     g_cachedMonitor = monitor;
-    g_dpiScale = GetMonitorDpiScale(monitor);
+    g_dpiScale = VizHostDpiScale(monitor);
 
     VizLayout layout;
     if (!ComputeVizLayout(&layout)) return false;
+    // The panel takes the box's size once the box is known.
+    if (g_overlayInPanel && g_overlayWnd) PostMessage(g_overlayWnd, WM_APP_PANEL_FIT, 0, 0);
 
     DXGI_SWAP_CHAIN_DESC1 scd = {};
     scd.Width = layout.width;
@@ -10660,6 +10713,8 @@ void UpdateSwapChainForLayout() {
         g_swapChainWidth  = layout.width;
         g_swapChainHeight = layout.height;
     }
+
+    if (sizeChanged && g_overlayInPanel && g_overlayWnd) PostMessage(g_overlayWnd, WM_APP_PANEL_FIT, 0, 0);
 
     if (moved) {
         g_compositionVisual->SetOffsetX(layout.originX);
@@ -11260,6 +11315,7 @@ bool VizDesktopUnderPoint(POINT pt) {
     if (!root) root = h;
     WCHAR cls[32] = {};
     GetClassNameW(root, cls, ARRAYSIZE(cls));
+    if (g_overlayInPanel && root == g_overlayWnd) return true;
     if (g_settings.hostTaskbar &&
         (wcscmp(cls, L"Shell_TrayWnd") == 0 || wcscmp(cls, L"Shell_SecondaryTrayWnd") == 0))
         return true;
@@ -11380,7 +11436,7 @@ LRESULT CALLBACK DragMouseHookProc(int nCode, WPARAM wParam, LPARAM lParam) {
         VizSeekHook(wParam, (const MSLLHOOKSTRUCT*)lParam))
         return 1;
     if (nCode == HC_ACTION && !g_unloading.load(std::memory_order_relaxed) &&
-        g_settings.dragEnabled) {
+        g_settings.dragEnabled && !g_overlayInPanel) {
         MSLLHOOKSTRUCT* info = (MSLLHOOKSTRUCT*)lParam;
         UINT downMsg = DragButtonDownMsg();
         UINT upMsg = DragButtonUpMsg();
@@ -15428,8 +15484,9 @@ bool Render(const FrameInputs& in) {
 bool VizProgressRect(const VizLayout& layout, D2D1_RECT_F* out);
 
 void VizPublishDrawRect(const VizLayout& layout) {
-    int virtualScreenX = GetSystemMetrics(SM_XVIRTUALSCREEN);
-    int virtualScreenY = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    const POINT layoutOrigin = VizLayoutOrigin();
+    int virtualScreenX = layoutOrigin.x;
+    int virtualScreenY = layoutOrigin.y;
     {
         // Click to Seek: the bar, made at least 10 px tall to hit.
         D2D1_RECT_F pr;
@@ -17180,12 +17237,238 @@ void ResumeFromFullscreen() {
     }
 }
 
+// ---- Place In = Panel (2.2) -------------------------------------------------
+
+void VizPanelLoad() {
+    WCHAR buf[160] = {};
+    Wh_GetStringValue(L"panel", buf, ARRAYSIZE(buf));
+    int x = 0, y = 0, w = 0, h = 0, pinned = 0, hidden = 0;
+    float zoom = 1.0f;
+    if (swscanf_s(buf, L"%d %d %d %d %f %d %d", &x, &y, &w, &h, &zoom, &pinned, &hidden) >= 5 && w > 0 && h > 0) {
+        g_panelRect = RECT{x, y, x + w, y + h};
+        g_panelZoom = std::clamp(zoom, 0.25f, 6.0f);
+        g_panelPinned = pinned != 0;
+        g_panelHidden = hidden != 0;
+    }
+}
+
+void VizPanelSave() {
+    if (!g_overlayInPanel || !g_overlayWnd) return;
+    RECT r;
+    if (!GetWindowRect(g_overlayWnd, &r)) return;
+    g_panelRect = r;
+    WCHAR buf[160];
+    swprintf_s(buf, L"%d %d %d %d %.4f %d %d", (int)r.left, (int)r.top, (int)(r.right - r.left),
+               (int)(r.bottom - r.top), g_panelZoom, g_panelPinned ? 1 : 0, g_panelHidden ? 1 : 0);
+    Wh_SetStringValue(L"panel", buf);
+}
+
+// Acrylic or Mica behind the box (Windows 11 22H2 and later; elsewhere the
+// attribute is refused and the panel stays clear).
+void VizPanelBackdrop() {
+    if (!g_overlayInPanel || !g_overlayWnd) return;
+    int type = g_settings.panelBackdrop == 2 ? 2 : g_settings.panelBackdrop == 1 ? 3 : 1;  // DWMSBT_*
+    MARGINS margins = {type == 1 ? 0 : -1, type == 1 ? 0 : -1, type == 1 ? 0 : -1, type == 1 ? 0 : -1};
+    DwmExtendFrameIntoClientArea(g_overlayWnd, &margins);
+    BOOL dark = TRUE;
+    DwmSetWindowAttribute(g_overlayWnd, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &dark, sizeof(dark));
+    int corners = 2;  // DWMWCP_ROUND
+    DwmSetWindowAttribute(g_overlayWnd, 33 /* DWMWA_WINDOW_CORNER_PREFERENCE */, &corners, sizeof(corners));
+    DwmSetWindowAttribute(g_overlayWnd, 38 /* DWMWA_SYSTEMBACKDROP_TYPE */, &type, sizeof(type));
+}
+
+// "Ctrl+Alt+V", "Win+Shift+F9", "Ctrl+Space": modifiers and one key.
+bool VizParseHotkey(const std::wstring& text, UINT* mods, UINT* vk) {
+    *mods = 0;
+    *vk = 0;
+    size_t at = 0;
+    while (at < text.size()) {
+        size_t plus = text.find(L'+', at);
+        std::wstring part = text.substr(at, plus == std::wstring::npos ? std::wstring::npos : plus - at);
+        while (!part.empty() && iswspace(part.front())) part.erase(part.begin());
+        while (!part.empty() && iswspace(part.back())) part.pop_back();
+        for (auto& c : part) c = (WCHAR)towlower(c);
+        if (part == L"ctrl" || part == L"control") *mods |= MOD_CONTROL;
+        else if (part == L"alt") *mods |= MOD_ALT;
+        else if (part == L"shift") *mods |= MOD_SHIFT;
+        else if (part == L"win") *mods |= MOD_WIN;
+        else if (part.size() == 1 && iswalnum(part[0])) *vk = (UINT)towupper(part[0]);
+        else if (part.size() >= 2 && part.size() <= 3 && part[0] == L'f' && iswdigit(part[1])) {
+            int n = _wtoi(part.c_str() + 1);
+            if (n < 1 || n > 24) return false;
+            *vk = VK_F1 + n - 1;
+        } else if (part == L"space") *vk = VK_SPACE;
+        else if (part == L"pause") *vk = VK_PAUSE;
+        else if (part == L"insert") *vk = VK_INSERT;
+        else if (part == L"home") *vk = VK_HOME;
+        else if (part == L"end") *vk = VK_END;
+        else return false;
+        if (plus == std::wstring::npos) break;
+        at = plus + 1;
+    }
+    return *vk != 0;
+}
+
+constexpr int kVizPanelHotkeyId = 0x7454;
+
+// The Panel Hotkey, on the message window (re-done when settings change).
+void VizPanelHotkey() {
+    if (!g_messageWnd) return;
+    UnregisterHotKey(g_messageWnd, kVizPanelHotkeyId);
+    UINT mods, vk;
+    if (!g_settings.hostPanel || g_settings.panelHotkey.empty()) return;
+    if (!VizParseHotkey(g_settings.panelHotkey, &mods, &vk)) {
+        Wh_Log(L"[Panel] hotkey '%s' isn't one this understands", g_settings.panelHotkey.c_str());
+        return;
+    }
+    if (!RegisterHotKey(g_messageWnd, kVizPanelHotkeyId, mods | MOD_NOREPEAT, vk))
+        Wh_Log(L"[Panel] hotkey '%s' is taken by another program", g_settings.panelHotkey.c_str());
+}
+
+void VizPanelShow(bool show) {
+    if (!g_overlayInPanel || !g_overlayWnd) return;
+    g_panelHidden = !show;
+    if (show) {
+        ShowWindow(g_overlayWnd, SW_SHOWNOACTIVATE);
+        // (a fullscreen app or Pause Visualizer stays paused: the 1 s check)
+        if (!g_userPaused.load()) ResumeFromFullscreen();
+    } else {
+        ShowWindow(g_overlayWnd, SW_HIDE);
+        PauseForFullscreen();
+    }
+    if (g_mediaWnd) RepositionAndRepaintMediaControls();
+    VizPanelSave();
+}
+
+void VizPanelPin(bool pinned) {
+    if (!g_overlayInPanel || !g_overlayWnd) return;
+    g_panelPinned = pinned;
+    SetWindowPos(g_overlayWnd, pinned ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    VizPanelSave();
+}
+
+// The window takes the box's size, around the same centre.
+void VizPanelFit() {
+    if (!g_overlayInPanel || !g_overlayWnd || g_panelSizingW) return;
+    VizLayout layout;
+    if (!ComputeVizLayout(&layout)) return;
+    RECT r;
+    if (!GetWindowRect(g_overlayWnd, &r)) return;
+    if (r.right - r.left == (LONG)layout.width && r.bottom - r.top == (LONG)layout.height) return;
+    int cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
+    SetWindowPos(g_overlayWnd, nullptr, cx - (int)layout.width / 2, cy - (int)layout.height / 2, (int)layout.width,
+                 (int)layout.height, SWP_NOZORDER | SWP_NOACTIVATE);
+    VizPanelSave();
+}
+
+// A panel left off every screen (a monitor unplugged) comes back to the main one.
+void VizPanelKeepOnScreen() {
+    if (!g_overlayInPanel || !g_overlayWnd) return;
+    RECT r;
+    if (!GetWindowRect(g_overlayWnd, &r) || MonitorFromRect(&r, MONITOR_DEFAULTTONULL)) return;
+    MONITORINFO mi{.cbSize = sizeof(mi)};
+    if (!GetMonitorInfo(MonitorFromPoint({0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi)) return;
+    int w = r.right - r.left, h = r.bottom - r.top;
+    SetWindowPos(g_overlayWnd, nullptr, (mi.rcWork.left + mi.rcWork.right - w) / 2, (mi.rcWork.top + mi.rcWork.bottom - h) / 2,
+                 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    VizPanelSave();
+}
+
+void VizCreatePanelWindow(HINSTANCE hInstance) {
+    if (!g_panelMsg) g_panelMsg = RegisterWindowMessageW(L"TourneTable.Panel");
+    VizPanelLoad();
+    RECT r = g_panelRect;
+    if (r.right <= r.left || r.bottom <= r.top) {
+        // First time: a guess, centred on the chosen monitor; the box sets the real size.
+        HMONITOR m = GetMonitorById(g_settings.monitor - 1);
+        if (!m) m = MonitorFromPoint({0, 0}, MONITOR_DEFAULTTOPRIMARY);
+        MONITORINFO mi{.cbSize = sizeof(mi)};
+        GetMonitorInfo(m, &mi);
+        int w = 480, h = 220;
+        r.left = (mi.rcWork.left + mi.rcWork.right - w) / 2;
+        r.top = (mi.rcWork.top + mi.rcWork.bottom - h) / 2;
+        r.right = r.left + w;
+        r.bottom = r.top + h;
+    }
+    g_overlayInPanel = true;  // (before it exists: its first WM_NCCALCSIZE asks)
+    g_overlayInTaskbar = false;
+    g_overlayWnd = CreateWindowEx(WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOOLWINDOW | (g_panelPinned ? WS_EX_TOPMOST : 0),
+                                  OVERLAY_WINDOW_CLASS, L"Tourne'Table", WS_POPUP | WS_THICKFRAME, r.left, r.top,
+                                  r.right - r.left, r.bottom - r.top, nullptr, nullptr, hInstance, nullptr);
+    if (!g_overlayWnd) {
+        g_overlayInPanel = false;
+        return;
+    }
+    VizPanelBackdrop();
+    if (!g_panelHidden) ShowWindow(g_overlayWnd, SW_SHOWNOACTIVATE);
+    VizPanelKeepOnScreen();
+    VizPanelHotkey();
+}
+
+// Within a few pixels of an edge: that edge (to resize); anywhere else moves it.
+LRESULT VizPanelHitTest(HWND hWnd, LPARAM lParam) {
+    POINT pt{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+    RECT r;
+    GetWindowRect(hWnd, &r);
+    int band = MulDiv(6, (int)GetDpiForWindow(hWnd), 96);
+    bool left = pt.x < r.left + band, right = pt.x >= r.right - band;
+    bool top = pt.y < r.top + band, bottom = pt.y >= r.bottom - band;
+    if (top && left) return HTTOPLEFT;
+    if (top && right) return HTTOPRIGHT;
+    if (bottom && left) return HTBOTTOMLEFT;
+    if (bottom && right) return HTBOTTOMRIGHT;
+    if (left) return HTLEFT;
+    if (right) return HTRIGHT;
+    if (top) return HTTOP;
+    if (bottom) return HTBOTTOM;
+    return HTCAPTION;
+}
+
+// Resizing keeps the box's shape.
+void VizPanelKeepAspect(UINT edge, RECT* r) {
+    if (g_panelSizingW <= 0 || g_panelSizingH <= 0) return;
+    float aspect = (float)g_panelSizingW / (float)g_panelSizingH;
+    int minW = std::max(40, (int)lroundf(40.0f * aspect));
+    if (r->right - r->left < minW) {
+        if (edge == WMSZ_LEFT || edge == WMSZ_TOPLEFT || edge == WMSZ_BOTTOMLEFT) r->left = r->right - minW;
+        else r->right = r->left + minW;
+    }
+    int w = r->right - r->left, h = r->bottom - r->top;
+    if (edge == WMSZ_TOP || edge == WMSZ_BOTTOM) {
+        w = (int)lroundf(h * aspect);
+        r->right = r->left + w;
+    } else {
+        h = (int)lroundf(w / aspect);
+        if (edge == WMSZ_TOP || edge == WMSZ_TOPLEFT || edge == WMSZ_TOPRIGHT) r->top = r->bottom - h;
+        else r->bottom = r->top + h;
+    }
+}
+
+// A resize ends: the zoom follows the new width, and the box is drawn again at it.
+void VizPanelEndSizing() {
+    if (!g_overlayInPanel || !g_overlayWnd) return;
+    RECT r;
+    int startW = g_panelSizingW;
+    g_panelSizingW = g_panelSizingH = 0;
+    if (startW > 0 && GetWindowRect(g_overlayWnd, &r) && r.right - r.left != startW) {
+        g_panelZoom = std::clamp(g_panelZoom * (float)(r.right - r.left) / (float)startW, 0.25f, 6.0f);
+        Wh_Log(L"[Panel] zoom %.2f", g_panelZoom);
+        ReleaseSwapChainResources();
+        if (CreateSwapChainResources() && !g_fullscreenPaused.load()) RenderVisualizer();
+    }
+    VizPanelFit();
+    VizPanelSave();
+}
+
 void HandleDisplayChange() {
     if (g_mediaWnd) RepositionAndRepaintMediaControls();
 
     if (!g_overlayWnd) return;
 
-    if (g_overlayInTaskbar) {
+    if (g_overlayInPanel) {
+        VizPanelKeepOnScreen();
+    } else if (g_overlayInTaskbar) {
         // A top-level window over the whole virtual screen (see CreateOverlayWindow).
         SetWindowPos(g_overlayWnd, nullptr, GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN),
                      GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN),
@@ -17203,7 +17486,7 @@ void HandleDisplayChange() {
     HMONITOR monitor = GetMonitorById(g_settings.monitor - 1);
     if (!monitor) monitor = MonitorFromPoint({0, 0}, MONITOR_DEFAULTTONEAREST);
     g_cachedMonitor = monitor;
-    float newDpiScale = GetMonitorDpiScale(monitor);
+    float newDpiScale = VizHostDpiScale(monitor);
     if (VizRenderDeviceNeedsRebuild()) {
         // A GPU was added, removed or enabled, or the widget's monitor now
         // hangs off a different one: Auto follows it. The rebuild re-reads
@@ -17229,6 +17512,52 @@ void CreateOverlayWindow();
 void ApplySettingsChanged();
 
 LRESULT CALLBACK OverlayWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    if (g_overlayInPanel && g_panelMsg && uMsg == g_panelMsg) {
+        if (wParam == 0) VizPanelShow(g_panelHidden);
+        else if (wParam == 1) VizPanelShow(true);
+        else if (wParam == 2) VizPanelShow(false);
+        else if (wParam == 3) VizPanelPin(!g_panelPinned);
+        return g_panelHidden ? 0 : 1;
+    }
+    if (g_overlayInPanel) {
+        switch (uMsg) {
+            case WM_NCCALCSIZE:
+                if (wParam) return 0;  // all of it is client: no frame drawn
+                break;
+            case WM_NCHITTEST:
+                return VizPanelHitTest(hWnd, lParam);
+            case WM_NCLBUTTONDBLCLK:
+                return 0;  // (no maximize)
+            case WM_SYSCOMMAND:
+                if ((wParam & 0xFFF0) == SC_MAXIMIZE || (wParam & 0xFFF0) == SC_MINIMIZE) return 0;
+                break;
+            case WM_ENTERSIZEMOVE: {
+                RECT r;
+                GetWindowRect(hWnd, &r);
+                g_panelSizingW = r.right - r.left;
+                g_panelSizingH = r.bottom - r.top;
+                break;
+            }
+            case WM_SIZING:
+                VizPanelKeepAspect((UINT)wParam, (RECT*)lParam);
+                return TRUE;
+            case WM_EXITSIZEMOVE:
+                VizPanelEndSizing();
+                break;
+            case WM_CONTEXTMENU:
+                // (a right-click the mouse hook didn't take: off the box while resizing)
+                if (g_messageWnd && g_settings.contextMenu != VizContextMenu::Off &&
+                    (g_settings.contextMenu == VizContextMenu::RightClick || (GetKeyState(VK_CONTROL) & 0x8000)))
+                    PostMessage(g_messageWnd, WM_APP_CONTEXT_MENU, (WPARAM)GET_X_LPARAM(lParam), (LPARAM)GET_Y_LPARAM(lParam));
+                return 0;
+            case WM_CLOSE:
+                VizPanelShow(false);  // (Alt+F4 hides it; the menu, hotkey or bar button bring it back)
+                return 0;
+            case WM_APP_PANEL_FIT:
+                VizPanelFit();
+                return 0;
+        }
+    }
     switch (uMsg) {
         case WM_APP_RENDER_TICK:
             g_renderTickPending.store(false, std::memory_order_relaxed);
@@ -17239,6 +17568,10 @@ LRESULT CALLBACK OverlayWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 
         case WM_WINDOWPOSCHANGED: {
             const WINDOWPOS* wp = (const WINDOWPOS*)lParam;
+            if (g_overlayInPanel && !(wp->flags & SWP_NOMOVE) && !g_unloading) {
+                VizLayout layout;
+                if (ComputeVizLayout(&layout)) VizPublishDrawRect(layout);
+            }
             if (!(wp->flags & SWP_NOSIZE) && !g_unloading) {
                 // The swap chain is sized to the widget, not to this window, so
                 // a window resize only matters insofar as it changes where the
@@ -17491,6 +17824,8 @@ enum : UINT {
     kMenuPause = 190,
     kMenuReset = 191,
     kMenuCopy = 192,
+    kMenuPanelPin = 193,
+    kMenuPanelHide = 194,
     kMenuDefaultOut = 200,
     kMenuDefaultIn = 201,
     kMenuDeviceBase = 300,   // + endpoint index
@@ -17647,6 +17982,10 @@ void VizShowContextMenu(POINT pt) {
                     toggles[ti].label);
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING | (g_userPaused.load() ? MF_CHECKED : 0), kMenuPause, L"Pause Visualizer");
+    if (g_overlayInPanel) {
+        AppendMenuW(menu, MF_STRING | (g_panelPinned ? MF_CHECKED : 0), kMenuPanelPin, L"Keep Panel on Top");
+        AppendMenuW(menu, MF_STRING, kMenuPanelHide, L"Hide Panel");
+    }
     std::wstring reset = L"Reset Quick Settings";
     if (!g_menuOverrides.empty()) reset += L" (" + std::to_wstring(g_menuOverrides.size()) + L" active)";
     AppendMenuW(menu, MF_STRING | (g_menuOverrides.empty() ? MF_GRAYED : 0), kMenuCopy, L"Copy Quick Settings");
@@ -17683,6 +18022,12 @@ void VizShowContextMenu(POINT pt) {
     } else if (cmd == kMenuReset) {
         g_menuOverrides.clear();
         VizSaveMenuOverrides();
+    } else if (cmd == kMenuPanelPin) {
+        VizPanelPin(!g_panelPinned);
+        return;
+    } else if (cmd == kMenuPanelHide) {
+        VizPanelShow(false);
+        return;
     } else if (cmd == kMenuPause) {
         g_userPaused.store(!g_userPaused.load());
         if (g_userPaused.load()) PauseForFullscreen();
@@ -18243,6 +18588,7 @@ LRESULT CALLBACK MessageWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                         // on -- that only accounts for the times we hid it
                         // ourselves, not for another app taking topmost.
                         if (!g_mediaHiddenByCover && !g_menuOpen.load(std::memory_order_acquire) &&
+                            !(g_overlayInPanel && g_panelHidden) &&
                             (!IsWindowVisible(g_mediaWnd) ||
                              (g_settings.mediaOnTop &&
                               !(GetWindowLongPtr(g_mediaWnd, GWL_EXSTYLE) & WS_EX_TOPMOST)))) {
@@ -18262,7 +18608,10 @@ LRESULT CALLBACK MessageWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                 // Occlusion is evaluated on this same 1s timer rather than per
                 // frame -- EnumWindows is far too heavy to run at frame rate,
                 // and a second of latency on hide/show is imperceptible.
-                if (!shouldPause && g_settings.pauseWhenObscured && !g_settings.hostTaskbar && IsVisualizerOccluded())
+                if (g_overlayInPanel && g_panelHidden) shouldPause = true;  // nothing to draw into
+
+                if (!shouldPause && g_settings.pauseWhenObscured && !g_settings.hostTaskbar && !g_overlayInPanel &&
+                    IsVisualizerOccluded())
                     shouldPause = true;
 
                 if (shouldPause) {
@@ -18275,6 +18624,10 @@ LRESULT CALLBACK MessageWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 
         case WM_APP_SETTINGS_CHANGED:
             ApplySettingsChanged();
+            return 0;
+
+        case WM_HOTKEY:
+            if (wParam == kVizPanelHotkeyId && !g_unloading) VizPanelShow(g_panelHidden);
             return 0;
 
         case WM_APP_CONTEXT_MENU:
@@ -18339,7 +18692,9 @@ void CreateOverlayWindow() {
     if (!EnsureLazyInitialized()) return;
 
     HWND hWorkerW = nullptr, hTaskbar = nullptr;
-    if (g_settings.hostTaskbar) {
+    if (g_settings.hostPanel) {
+        // (a window of its own: nothing to find)
+    } else if (g_settings.hostTaskbar) {
         HMONITOR m = GetMonitorById(g_settings.monitor - 1);
         if (!m) m = MonitorFromPoint({0, 0}, MONITOR_DEFAULTTOPRIMARY);
         hTaskbar = VizTaskbarFor(m);
@@ -18360,7 +18715,10 @@ void CreateOverlayWindow() {
 
     HINSTANCE hInstance = GetCurrentModuleHandle();
 
-    if (hTaskbar) {
+    if (g_settings.hostPanel) {
+        VizCreatePanelWindow(hInstance);
+        if (!g_overlayWnd) return;
+    } else if (hTaskbar) {
         // Owned by the taskbar, so it always stays above it; layered and
         // transparent, so every click goes through to the taskbar under it.
         g_overlayWnd = CreateWindowEx(
@@ -18373,6 +18731,7 @@ void CreateOverlayWindow() {
         SetLayeredWindowAttributes(g_overlayWnd, 0, 255, LWA_ALPHA);
         ShowWindow(g_overlayWnd, SW_SHOWNOACTIVATE);
         g_overlayInTaskbar = true;
+        g_overlayInPanel = false;
     } else {
         RECT rc;
         GetWindowRect(hWorkerW, &rc);
@@ -18385,8 +18744,9 @@ void CreateOverlayWindow() {
             nullptr);
         if (!g_overlayWnd) return;
         g_overlayInTaskbar = false;
+        g_overlayInPanel = false;
     }
-    Wh_Log(L"[Host] overlay in %s", g_overlayInTaskbar ? L"taskbar" : L"desktop");
+    Wh_Log(L"[Host] overlay in %s", g_overlayInPanel ? L"panel" : g_overlayInTaskbar ? L"taskbar" : L"desktop");
 
     // A pending flag left set from a previous overlay window (e.g. one that just
     // got destroyed and is being recreated) would otherwise permanently block the
@@ -18647,7 +19007,14 @@ void LoadSettings() {
     {
         PCWSTR host = Wh_GetStringSetting(L"position.host");
         g_settings.hostTaskbar = wcscmp(host, L"taskbar") == 0;
+        g_settings.hostPanel = wcscmp(host, L"panel") == 0;
         Wh_FreeStringSetting(host);
+        PCWSTR backdrop = Wh_GetStringSetting(L"position.panelBackdrop");
+        g_settings.panelBackdrop = wcscmp(backdrop, L"none") == 0 ? 0 : wcscmp(backdrop, L"mica") == 0 ? 2 : 1;
+        Wh_FreeStringSetting(backdrop);
+        PCWSTR hotkey = Wh_GetStringSetting(L"position.panelHotkey");
+        g_settings.panelHotkey = hotkey ? hotkey : L"";
+        Wh_FreeStringSetting(hotkey);
     }
     g_settings.splitEnabled = Wh_GetIntSetting(L"position.split") != 0;
     g_settings.splitAt = std::clamp((float)Wh_GetIntSetting(L"position.splitAt"), 1.f, 99.f);
@@ -19400,10 +19767,12 @@ void ApplySettingsChanged() {
 
     // Place In changed: the window itself has to be made again (WM_DESTROY
     // schedules the new one).
-    if (g_overlayWnd && g_settings.hostTaskbar != g_overlayInTaskbar) {
+    if (g_overlayWnd && (g_settings.hostTaskbar != g_overlayInTaskbar || g_settings.hostPanel != g_overlayInPanel)) {
         Wh_Log(L"[Host] Place In changed, recreating the overlay");
         PostMessage(g_overlayWnd, WM_APP_CLEANUP, 0, 0);
     }
+    VizPanelBackdrop();
+    VizPanelHotkey();
 
     // Creation at startup can fail (or the window can have been destroyed
     // since), and until now nothing retried -- turning Media Controls on in
